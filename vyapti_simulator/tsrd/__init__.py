@@ -90,6 +90,11 @@ from .scan_policy_oracle import (
     ScanPolicy,
     DwellWindow,
     OracleResult,
+    evaluate_multiple_policies,
+    find_pareto_optimal_policies,
+    build_uniform_scan_policy,
+    build_stare_policy,
+    build_adaptive_dwell_policy,
 )
 from .tsrd_emitter import TSRDEmitterSampler, FREQ_MODE_TO_BEHAVIOR
 from .corpus_loader import (
@@ -136,6 +141,14 @@ from .tsrd_environment import (
 # H5 scenario writer
 from .h5_writer import write_scenario_to_h5, H5ScenarioConfig
 
+# Antenna gain patterns
+from .antenna_patterns import (
+    uniform_antenna_gain,
+    sectorised_antenna_gain,
+    realistic_antenna_gain,
+    uniform_sectorised_antenna_gain,
+)
+
 # Synthetic EW PDW generator (for Kaggle paths without TSRD)
 from .synthetic_pdw_generator import (
     SyntheticEmitterSpec,
@@ -172,6 +185,11 @@ __all__ = [
     "ScanPolicy",
     "DwellWindow",
     "OracleResult",
+    "evaluate_multiple_policies",
+    "find_pareto_optimal_policies",
+    "build_uniform_scan_policy",
+    "build_stare_policy",
+    "build_adaptive_dwell_policy",
     # Option-A sampler (preserved)
     "TSRDEmitterSampler",
     "FREQ_MODE_TO_BEHAVIOR",
@@ -204,6 +222,11 @@ __all__ = [
     # H5 scenario writer
     "write_scenario_to_h5",
     "H5ScenarioConfig",
+    # Antenna gain patterns
+    "uniform_antenna_gain",
+    "sectorised_antenna_gain",
+    "realistic_antenna_gain",
+    "uniform_sectorised_antenna_gain",
     # Synthetic EW PDW generator
     "SyntheticEmitterSpec",
     "SyntheticEWPDWGenerator",

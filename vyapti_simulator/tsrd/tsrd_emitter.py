@@ -68,6 +68,8 @@ from ..core.mapping import frequency_to_band
 from src.emitter_models import (
     DynamicEmitter,
     DelayedArrivalPolicy,
+    IntervalOnOffPolicy,
+    RegimeChangePolicy,
     FixedContinuousEmitter,
     FrequencyAgileEmitter,
     PriJitterEmitter,
@@ -124,6 +126,14 @@ class TSRDEmitterSampler:
         path_loss_shadowing_db: float = 8.0,
         path_loss_diffraction_db: float = 4.0,
         rng: Optional[np.random.Generator] = None,
+        # Dynamic phenomena configuration
+        enable_interval_on_off: bool = False,
+        interval_on_off_fraction: float = 0.2,
+        mean_on_sec: float = 5.0,
+        mean_off_sec: float = 10.0,
+        enable_regime_change: bool = False,
+        regime_change_fraction: float = 0.1,
+        regime_change_time_fraction: float = 0.5,
     ) -> None:
         # ----------------------------------------------------------------
         # File-property integrity check fires HERE. No opt-out.
@@ -140,6 +150,15 @@ class TSRDEmitterSampler:
         self._receiver_position_km: Optional[Tuple[float, float]] = receiver_position_km
         self._path_loss_shadowing_db = float(path_loss_shadowing_db)
         self._path_loss_diffraction_db = float(path_loss_diffraction_db)
+
+        # Dynamic phenomena configuration
+        self._enable_interval_on_off = bool(enable_interval_on_off)
+        self._interval_on_off_fraction = float(interval_on_off_fraction)
+        self._mean_on_sec = float(mean_on_sec)
+        self._mean_off_sec = float(mean_off_sec)
+        self._enable_regime_change = bool(enable_regime_change)
+        self._regime_change_fraction = float(regime_change_fraction)
+        self._regime_change_time_fraction = float(regime_change_time_fraction)
 
         # RNG: if caller passes one (for testing), use it; otherwise build
         # from the canonical SeedSequence.
@@ -388,6 +407,42 @@ class TSRDEmitterSampler:
         else:
             emitter = base_emitter
 
+        # --- Apply IntervalOnOff policy if configured -----
+        # A fraction of emitters get random ON/OFF intervals
+        if self._enable_interval_on_off:
+            if self._rng.random() < self._interval_on_off_fraction:
+                emitter = DynamicEmitter(
+                    emitter_id=int(tx_id),
+                    base_emitter=emitter,
+                    policy=IntervalOnOffPolicy(
+                        mean_on_sec=self._mean_on_sec,
+                        mean_off_sec=self._mean_off_sec,
+                        seed=int(self._seed) + int(tx_id),
+                    ),
+                    name=f"TSRD_tx{tx_id}_interval_on_off",
+                )
+
+        # --- Apply RegimeChange policy if configured -----
+        # A fraction of emitters change their configuration mid-mission
+        if self._enable_regime_change:
+            if self._rng.random() < self._regime_change_fraction:
+                mission_duration_s = float(self._config.time_slots) * float(self._config.slot_duration_s())
+                change_time_sec = mission_duration_s * self._regime_change_time_fraction
+                # Regime change: switch to a different frequency list
+                # Use the emitter's current frequency as the new center
+                new_freq_hz = center_freq_mhz * 1e6 * 1.05  # 5% frequency shift
+                emitter = DynamicEmitter(
+                    emitter_id=int(tx_id),
+                    base_emitter=emitter,
+                    policy=RegimeChangePolicy(regimes=[
+                        RegimeChangePolicy.Regime(
+                            change_time_sec=change_time_sec,
+                            freq_override_hz=new_freq_hz,
+                        ),
+                    ]),
+                    name=f"TSRD_tx{tx_id}_regime_change",
+                )
+
         # Attach the full provenance record so callers (bridge, evaluation)
         # can read it without knowing the internal type hierarchy.
         emitter.provenance_notes = rec["provenance_notes"]
@@ -568,6 +623,11 @@ class TSRDEmitterSampler:
             "tsrd_path_loss_diffraction_db": self._path_loss_diffraction_db,
             "tsrd_source_h5_sha256": self.source_h5_sha256,
             "tsrd_sampler_seed": self._seed,
+            # Dynamic phenomena configuration
+            "tsrd_dynamic_interval_on_off_enabled": self._enable_interval_on_off,
+            "tsrd_dynamic_interval_on_off_fraction": self._interval_on_off_fraction,
+            "tsrd_dynamic_regime_change_enabled": self._enable_regime_change,
+            "tsrd_dynamic_regime_change_fraction": self._regime_change_fraction,
             "tsrd_provenance_label": ProvenanceLabel(
                 ProvenanceTag.TSRD_DERIVED,
                 "TSRD config_0.h5 (arXiv:2602.03856, Scan Mode, "
