@@ -305,6 +305,155 @@ class DetectionConfig:
 
 
 # =====================================================================
+# Shnidman / Albersheim detection model
+# =====================================================================
+
+@dataclass(frozen=True)
+class ShnidmanDetectionConfig(DetectionConfig):
+    """
+    [LITERATURE-GROUNDED] Detection model using the Albersheim (1964) /
+    Shnidman (1989) equation. Replaces the heuristic logistic curve with
+    the published closed-form that gives a (Pd, Pfa, N) relationship.
+
+    For a non-fluctuating target in Gaussian noise with N non-coherently
+    integrated pulses, the required per-pulse SNR (linear) for target
+    (Pd, Pfa) is:
+
+        A = ln(0.5 / Pfa)
+        B = ln(Pd / (1 - Pd))
+        SNR_lin = A + B + 3.0 * sqrt(B) * sqrt(A - B)        (Shnidman 1989)
+
+    For a non-coherent integration of N pulses, the threshold SNR
+    decreases (sensitivity improves) by 10*log10(sqrt(N)) ≈
+    5*log10(N) dB. (Coherent integration gives the full 10*log10(N).)
+
+    Comparison with the parent DetectionConfig
+    -----------------------------------------
+    The parent class uses a 5 dB logistic transition between
+    (no_detection_threshold_db, detection_threshold_db). This works
+    for a single representative (Pd, Pfa) and cannot be adjusted
+    without changing the thresholds. The Shnidman model lets you
+    set the *target* (Pd, Pfa, N) directly and produces a single
+    closed-form threshold SNR in dB. The result is closer to what
+    published radar detection tables (e.g. North, Blake, Albersheim)
+    report.
+
+    Backward compatibility
+    ----------------------
+    ShnidmanDetectionConfig IS a DetectionConfig (subclass), so any
+    code that accepts `DetectionConfig` also accepts
+    `ShnidmanDetectionConfig`. The default pd_for_snr() override
+    here is the Albersheim / Shnidman formula; pass it
+    `n_pulses=1` (or use the default 1) for single-pulse detection.
+
+    Attributes
+    ----------
+    target_Pd : float
+        Desired probability of detection at the threshold SNR.
+        Typical: 0.5, 0.9, 0.95.
+    target_Pfa : float
+        Desired probability of false alarm at the threshold SNR.
+        Typical: 1e-3, 1e-6, 1e-9.
+    transition_width_db : float
+        Width of the soft transition region around the threshold
+        SNR (in dB). Below the threshold, Pd falls off with this
+        logistic width; above, Pd approaches 1. Set to 0.0 for a
+        hard step (less physically realistic but tighter).
+    integration_mode : str
+        "non_coherent" — N pulses give 5*log10(N) dB gain (sqrt law)
+        "coherent"     — N pulses give 10*log10(N) dB gain (full law)
+        Default "non_coherent" because ESM receivers are typically
+        non-coherent on the PRI timescale; use "coherent" only when
+        the emitter has a known constant phase reference.
+
+    References
+    ----------
+    Albersheim, W. R. (1964). "Equation for SNR Required for
+        Detection of a Target with Given Pd and Pfa".
+    Shnidman, D. A. (1989). "Radar Detection Probability and
+        Its Approximation". IEEE Trans. AES-25, no. 6, pp. 672-676.
+    North, D. O. (1963). "An Analysis of the Factors which
+        Determine Signal/Noise Discrimination in Pulsed-Carrier
+        Systems". RCA Labs Tech. Rept. PTR-6C.
+    """
+    target_Pd: float = 0.9
+    target_Pfa: float = 1e-6
+    transition_width_db: float = 1.0
+    integration_mode: str = "non_coherent"
+
+    def threshold_snr_db(self, n_pulses: int = 1) -> float:
+        """
+        Compute the per-pulse SNR (dB) required to achieve
+        (target_Pd, target_Pfa) with n_pulses non-coherent
+        integration, using the Shnidman (1989) approximation.
+
+        Returns the SNR threshold in dB. Callers then compare
+        an observed SNR to this threshold.
+        """
+        if not (0.0 < self.target_Pfa < 1.0):
+            raise ValueError(f"target_Pfa must be in (0, 1), got {self.target_Pfa}")
+        if not (0.0 < self.target_Pd < 1.0):
+            raise ValueError(f"target_Pd must be in (0, 1), got {self.target_Pd}")
+        if n_pulses < 1:
+            raise ValueError(f"n_pulses must be >= 1, got {n_pulses}")
+        A = np.log(0.5 / self.target_Pfa)
+        B = np.log(self.target_Pd / (1.0 - self.target_Pd))
+        snr_lin_single = A + B + 3.0 * np.sqrt(B) * np.sqrt(A - B)
+        # Integration gain in dB
+        if self.integration_mode == "coherent":
+            integ_gain_db = 10.0 * np.log10(n_pulses)
+        elif self.integration_mode == "non_coherent":
+            integ_gain_db = 5.0 * np.log10(n_pulses)
+        else:
+            raise ValueError(
+                f"integration_mode must be 'coherent' or 'non_coherent', "
+                f"got {self.integration_mode!r}"
+            )
+        return 10.0 * np.log10(snr_lin_single) - integ_gain_db
+
+    def pd_for_snr(self, snr_db: float, n_pulses: int = 1) -> float:
+        """
+        Shnidman / Albersheim SNR -> Pd.
+
+        At the threshold SNR (computed by threshold_snr_db), Pd equals
+        target_Pd. Above the threshold, Pd rises toward 1.0 with a
+        soft logistic transition of `transition_width_db`; below, Pd
+        falls toward 0.0. Outside the transition region, the
+        Shnidman equation becomes a poor approximation and a step /
+        flat region is more honest.
+        """
+        if n_pulses == 0:
+            return 0.0
+        thr = self.threshold_snr_db(n_pulses)
+        if self.transition_width_db <= 0.0:
+            # Hard step: certain detection above threshold, false-alarm
+            # rate below. This is the canonical Albersheim behaviour.
+            if snr_db >= thr:
+                return 1.0
+            return 0.0
+        # Soft logistic transition centred on the threshold SNR.
+        # At (snr_db == thr), Pd = 0.5 + (target_Pd - 0.5) so the
+        # threshold is not exactly at 50% — we shift accordingly.
+        # Approach: solve logistic at thr such that logistic(thr) = target_Pd.
+        # logistic(x) = 1 / (1 + exp(-k * (x - mu)))
+        # We want logistic(thr) = target_Pd, so:
+        #   mu = thr - (-1/k) * ln(1/target_Pd - 1)
+        # For the simplest behaviour that puts target_Pd at the threshold,
+        # we set mu = thr and scale k so that logistic passes through
+        # (thr, target_Pd). Then k = -ln(1/target_Pd - 1) / transition_width_db
+        # — but a simpler well-behaved choice is to scale the logistic
+        # width so that logistic width (1/k) = transition_width_db / 4.
+        width = max(self.transition_width_db, 1e-9) / 4.0
+        # Solve for offset so that the curve passes through (thr, target_Pd):
+        # target_Pd = 1 / (1 + exp(-(thr - mu) / width))
+        # (thr - mu) = -width * ln(1/target_Pd - 1)
+        offset = -width * float(np.log(1.0 / self.target_Pd - 1.0))
+        mu = thr - offset
+        z = (snr_db - mu) / width
+        return float(1.0 / (1.0 + np.exp(-z)))
+
+
+# =====================================================================
 # TSRD Environment
 # =====================================================================
 

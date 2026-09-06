@@ -257,24 +257,19 @@ class ExperimentConfig:
     [EXPERIMENTAL-VARIABLE] All of these can be swept; defaults follow the
     frozen protocol's recommendations.
 
-    NOTE ON SEED SPLIT SIZE: The frozen protocol §6 line 180 recommends
-    "10 training seeds × 100 evaluation scenario seeds per benchmark cell."
-    The current defaults (80/20/50) are scaled down for prototype feasibility
-    on a 4-6 week timeline. Generalisation claims in publications MUST be
-    labelled as "prototype-scope, n=80 train" — do not present them as
-    full protocol validation until the seed count is increased to the
-    protocol-recommended level. The statistical structure (non-overlapping,
-    no duplicates) is fully compliant; only the number of seeds is reduced.
+    NOTE ON SEED SPLIT SIZE: Per frozen protocol §6 line 180: "10 training
+    seeds × 100 evaluation scenario seeds per benchmark cell." The three sets
+    are non-overlapping, no duplicates, with the test set held out for the
+    final generalisation claim. See __post_init__ for the overlap validation.
     """
     # Per frozen protocol §6 line 180: "10 training seeds × 100 evaluation
     # scenario seeds per benchmark cell". The three sets are non-overlapping.
     # train_seeds  — used by run_paired_comparison() for algorithm development.
     # eval_seeds   — used for hyperparameter selection and gate-evaluation runs.
     # test_seeds   — held-out set for the final generalisation claim.
-    # NOTE: current 80/20/50 is prototype-scope; see class docstring.
-    train_seeds: List[int] = field(default_factory=lambda: list(range(0, 80)))       # 80
-    eval_seeds:  List[int] = field(default_factory=lambda: list(range(80, 100)))     # 20
-    test_seeds:  List[int] = field(default_factory=lambda: list(range(200, 250)))    # 50
+    train_seeds: List[int] = field(default_factory=lambda: list(range(0, 1000)))      # 1000
+    eval_seeds:  List[int] = field(default_factory=lambda: list(range(1000, 1200)))   # 200
+    test_seeds:  List[int] = field(default_factory=lambda: list(range(2000, 2200)))  # 200
     band_count: int = 10
     time_slots: int = 1000
     emitter_density_points: List[int] = field(

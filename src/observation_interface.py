@@ -202,6 +202,15 @@ class BandSlotPulse:
     is_real: bool = True
     provenance: Dict[str, Any] = field(default_factory=dict)
 
+    # --- optional complex envelope (synthetic only) ------------------
+    iq_complex: Optional[complex] = None
+    """Complex baseband envelope (I + jQ) for the pulse, normalized
+    to unit-variance complex noise. `None` for real TSRD pulses
+    (H5 has no I/Q) and for src/ pulses generated without
+    `SimulatorConfig.generate_iq=True`. Used by future coherent
+    integration / matched-filter / Doppler processors. None = not
+    available, do not access."""
+
     # ----------------------------------------------------------------
     # Constructors
     # ----------------------------------------------------------------
@@ -268,6 +277,7 @@ class BandSlotPulse:
             source_h5_sha256=None,
             is_real=is_real,
             provenance=prov,
+            iq_complex=getattr(pulse, "iq_complex", None),
         )
 
     @staticmethod
@@ -351,6 +361,7 @@ class BandSlotPulse:
             data_source=DataSource.REAL_TSRD,
             source_h5_sha256=source_h5_sha256,
             provenance=prov,
+            iq_complex=None,  # TSRD H5 has no I/Q data
         )
 
     # ----------------------------------------------------------------
@@ -405,6 +416,9 @@ class BandSlotPulse:
             "source_h5_sha256": self.source_h5_sha256,
             "is_real": self.is_real,
             "provenance": dict(self.provenance),
+            # I/Q complex envelope (None when not available)
+            "iq_real": self.iq_complex.real if self.iq_complex is not None else None,
+            "iq_imag": self.iq_complex.imag if self.iq_complex is not None else None,
         }
 
 

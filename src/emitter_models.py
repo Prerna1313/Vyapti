@@ -118,6 +118,10 @@ class Pulse:
     amplitude_dbm: float   # Received power (dBm)
     emitter_id: int        # Which emitter generated this pulse
     is_real: bool = True   # False for false alarm pulses (injected by receiver)
+    iq_complex: Optional[complex] = None
+    """Complex baseband envelope (I + jQ). Set by generate_iq() when
+    SimulatorConfig.generate_iq=True; None otherwise. Normalized so that
+    |iq|^2 ≈ SNR_linear * noise_variance. Do not access when None."""
 
     def __repr__(self) -> str:
         return (
