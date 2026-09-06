@@ -35,7 +35,7 @@ Vyapti is a **research-grade EW scheduler comparison platform** that:
 pip install -e .
 ```
 
-Requires: Python 3.13+, numpy, scipy, matplotlib.
+Requires: Python 3.10+, numpy (>=1.21), scipy (>=1.7), matplotlib (>=3.5), h5py (>=3.0).
 
 ---
 
