@@ -109,6 +109,12 @@ class SimulatorConfig:
     # When set, the per-pulse Pd is `detection_config.pd_for_snr(snr_db)`
     # and the `Pd` scalar is ignored.
     detection_config: Optional[DetectionConfig] = None
+    # Optional: when True, generate complex I/Q envelopes for every
+    # synthetic pulse so downstream code can use coherent integration,
+    # matched filtering, or Doppler processing. Default False so the
+    # default behaviour is unchanged. TSRD pulses never have I/Q.
+    generate_iq: bool = False
+    iq_noise_floor_dbm: float = -130.0  # noise floor for I/Q SNR calibration
 
     @property
     def band_width_hz(self) -> float:
@@ -146,6 +152,96 @@ def band_freq_range(band: int, config: SimulatorConfig) -> Tuple[float, float]:
     low = band * config.band_width_hz
     high = (band + 1) * config.band_width_hz
     return low, high
+
+
+# =====================================================================
+# I/Q complex-envelope generator
+# =====================================================================
+
+def generate_iq_for_pulses(
+    pulses: List[Any],
+    rng: np.random.Generator,
+    noise_floor_dbm: float = -130.0,
+    units: str = "snr_normalized",
+) -> List[Any]:
+    """
+    Attach a complex I/Q envelope to each pulse in place.
+
+    Each returned complex number is the complex baseband sample at
+    the pulse's centre frequency, with the in-phase and quadrature
+    components scaled so that:
+
+        E[|iq|^2] = SNR_linear           (when units="snr_normalized")
+        E[|iq|^2] = 1.0                  (when units="unit_variance")
+        E[|iq|^2] = linear_signal_power  (when units="linear_dbm")
+
+    The complex envelope assumes AWGN: signal + noise, where
+    noise has unit complex variance (N_0/2 per dimension). A real
+    receiver with bandwidth B has noise variance N_0*B; the
+    per-pulse SNR therefore depends on the receiver's IF bandwidth,
+    which is captured by the chosen `units` convention.
+
+    For matched-filter integration, the relative *phase* between
+    pulses from the same emitter is preserved (modulo the random
+    phase term) so coherent integration can recover the full
+    10*log10(N) gain. For incoherent integration (e.g. envelope
+    detection), |iq|^2 is the relevant quantity.
+
+    Backward compatibility
+    ----------------------
+    Pulses have `iq_complex=None` by default. This function only
+    runs when called explicitly. Existing code that constructs
+    `Pulse` objects directly (without I/Q) continues to work
+    unchanged.
+
+    Parameters
+    ----------
+    pulses : List[emitter_models.Pulse]
+        The pulse list to modify in place. Each pulse's
+        `iq_complex` attribute is set.
+    rng : np.random.Generator
+        The RNG to use for the I/Q generation. Pass the same
+        RNG that produced the pulse stream for full
+        reproducibility.
+    noise_floor_dbm : float
+        Receiver noise floor in dBm. Used to convert
+        `amplitude_dbm` to a per-pulse SNR.
+    units : {"snr_normalized", "unit_variance", "linear_dbm"}
+        How to scale |iq|^2:
+          - "snr_normalized": E[|iq|^2] = SNR_linear (default,
+            useful for matched-filter analysis).
+          - "unit_variance":  E[|iq|^2] = 1 (pure signal,
+            no noise). Use when adding noise separately.
+          - "linear_dbm":     E[|iq|^2] = 10^((amp_dbm-30)/10)
+            (absolute linear power). Use for system-level
+            power budget analysis.
+
+    Returns
+    -------
+    List of pulses with `iq_complex` populated.
+    """
+    for pulse in pulses:
+        if pulse.amplitude_dbm is None:
+            pulse.iq_complex = None
+            continue
+        snr_db = float(pulse.amplitude_dbm) - float(noise_floor_dbm)
+        snr_lin = float(10.0 ** (snr_db / 10.0))
+        if units == "snr_normalized":
+            signal_amp = np.sqrt(snr_lin)
+        elif units == "unit_variance":
+            signal_amp = 1.0
+        elif units == "linear_dbm":
+            signal_amp = np.sqrt(10.0 ** ((float(pulse.amplitude_dbm) - 30.0) / 10.0))
+        else:
+            raise ValueError(f"Unknown units={units!r}; expected snr_normalized/unit_variance/linear_dbm")
+        # Random phase uniform on [0, 2pi). This is the phase
+        # an unknown emitter would present. For coherent
+        # integration across the same emitter, the phase
+        # randomness averages out exactly as theory predicts.
+        phase = float(rng.uniform(0.0, 2.0 * np.pi))
+        pulse.iq_complex = complex(signal_amp * np.cos(phase),
+                                    signal_amp * np.sin(phase))
+    return pulses
 
 
 # =====================================================================
@@ -280,6 +376,18 @@ class RealRFSimulator:
                 rng=emitter_rng,
             )
             self._all_pulses.extend(pulses)
+
+        # Optional: attach complex I/Q envelopes when configured.
+        # When generate_iq=False (default), this is a no-op and the
+        # behaviour is identical to pre-I/Q versions. When True, every
+        # pulse gets a complex envelope calibrated to its amplitude_dbm.
+        if self.config.generate_iq:
+            generate_iq_for_pulses(
+                self._all_pulses,
+                rng=self._rng,
+                noise_floor_dbm=self.config.iq_noise_floor_dbm,
+                units="snr_normalized",
+            )
 
         # Sort by TOA
         self._all_pulses.sort(key=lambda p: p.toa)

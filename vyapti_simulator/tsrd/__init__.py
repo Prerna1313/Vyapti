@@ -128,6 +128,7 @@ from .deinterleaver import (
 # TSRD environment (B + C wired)
 from .tsrd_environment import (
     DetectionConfig,
+    ShnidmanDetectionConfig,
     TSRDEnvironment,
     build_tsrd_environment,
 )
@@ -194,6 +195,7 @@ __all__ = [
     "quick_deinterleave",
     # TSRD environment (B + C wired)
     "DetectionConfig",
+    "ShnidmanDetectionConfig",
     "TSRDEnvironment",
     "build_tsrd_environment",
     # Synthetic EW PDW generator
