@@ -115,6 +115,10 @@ class SimulatorConfig:
     # default behaviour is unchanged. TSRD pulses never have I/Q.
     generate_iq: bool = False
     iq_noise_floor_dbm: float = -130.0  # noise floor for I/Q SNR calibration
+    # Antenna gain pattern — per-band receiver gain in dB. Positive = high-gain
+    # sector, negative = low-gain sector. Applied as SNR penalty:
+    # effective_snr = measured_snr - gain_db[band]. Default None = uniform 0 dB.
+    antenna_gain_db: Optional[np.ndarray] = None  # shape (num_bands,)
 
     @property
     def band_width_hz(self) -> float:

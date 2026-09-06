@@ -272,6 +272,15 @@ class DetectionConfig:
     # bias and the comparison becomes asymmetric).
     agc_dynamic_range_db: float = 30.0   # noise floor = max - this many dB
     agc_no_signal_floor_db: float = -130.0
+    # Antenna gain pattern — per-band receiver gain relative to isotropic (0 dB).
+    # A sectorised EW antenna has gain that varies with frequency: some bands
+    # fall in high-gain sectors (0 dB = reference), others fall in
+    # low-gain sidelobes (-3 to -10 dB). This field models that variation.
+    # When empty (default), uniform 0 dB is assumed (backward compatible).
+    # When set, must have length == band_count. Applied as a dB penalty
+    # in the SNR estimate: effective_snr = measured_snr - antenna_gain_db[band].
+    # Per Skolnik Radar Handbook antenna sectorisation.
+    antenna_gain_db: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     # Coherent integration parameters
     # A real ESM receiver coherently integrates pulses from the same
     # burst: N pulses → 10*log10(N) dB SNR gain. The detection model
@@ -778,10 +787,13 @@ class TSRDEnvironment:
             # SNR estimate: amplitude relative to AGC noise floor,
             # *with* the coherent integration gain applied so the
             # reported SNR matches what the Pd curve actually sees.
+            # Antenna gain penalty: pulses in low-gain sectors are weaker.
+            ant_gain_db = self._get_band_antenna_gain(selected_band)
             snr_db_estimate = (
                 max_amplitude_db
                 - self._agc_noise_floor_db
                 - self._detection.noise_figure_db
+                - ant_gain_db
                 + coherent_integration_gain_db_obs
             )
 
@@ -799,6 +811,11 @@ class TSRDEnvironment:
                 "retune_time_ms": self._config.retune_time_ms,
                 "band_width_mhz": self._config.band_width_mhz(),
                 "noise_figure_db": self._detection.noise_figure_db,
+                "antenna_gain_db": (
+                    self._detection.antenna_gain_db.tolist()
+                    if self._detection.antenna_gain_db.size
+                    else [0.0] * self._config.band_count
+                ),
             },
             # Gate 0 negative markers — audited explicitly
             "truth_excluded": True,
@@ -913,6 +930,25 @@ class TSRDEnvironment:
     # Internal methods
     # =================================================================
 
+    def _get_band_antenna_gain(self, band: int) -> float:
+        """
+        Return the antenna gain in dB for a given band.
+
+        If ``antenna_gain_db`` is empty (default), returns 0.0 dB
+        (uniform isotropic reference gain). Otherwise returns the
+        pre-stored gain for the requested band.
+
+        Applied as an SNR penalty: ``effective_snr = measured_snr - gain_db``.
+        A -6 dB antenna gain in band 3 means every pulse in band 3
+        appears 6 dB weaker than it would with an isotropic antenna.
+        """
+        gains = self._detection.antenna_gain_db
+        if gains.size == 0:
+            return 0.0
+        if not (0 <= band < len(gains)):
+            return 0.0
+        return float(gains[band])
+
     def _build_grid(self, pdw: PDWStream) -> None:
         """Option B: discretise the PDW stream onto the band/slot grid."""
         provenance = {
@@ -992,6 +1028,7 @@ class TSRDEnvironment:
             float(cell.max_amplitude_db)
             - float(self._agc_noise_floor_db)
             - float(self._detection.agc_snr_margin_db)
+            - self._get_band_antenna_gain(band)
         )
         # Coherent integration gain: N pulses from the same emitter
         # add 10*log10(N) dB to the SNR. Applied *before* the

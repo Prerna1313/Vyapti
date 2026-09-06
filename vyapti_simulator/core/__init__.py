@@ -34,6 +34,22 @@ from .episode import (
     scenario_descriptor,
     PERMITTED_SCENARIO_KEYS,
 )
+from .scenario_registry import (
+    ScenarioConfig,
+    ScenarioRegistry,
+    ScenarioVersion,
+    SeedSplit,
+    SCENARIOS,
+    SCENARIO_REGISTRY_VERSION,
+    get_registry,
+    get_scenario,
+    list_scenarios,
+)
+from .observation_context import (
+    ObservationContext,
+    ObservationSummary,
+    SequentialObservationBuffer,
+)
 
 __all__ = [
     # provenance
@@ -72,4 +88,18 @@ __all__ = [
     "run_paired_episodes",
     "scenario_descriptor",
     "PERMITTED_SCENARIO_KEYS",
+    # scenario registry
+    "ScenarioConfig",
+    "ScenarioRegistry",
+    "ScenarioVersion",
+    "SeedSplit",
+    "SCENARIOS",
+    "SCENARIO_REGISTRY_VERSION",
+    "get_registry",
+    "get_scenario",
+    "list_scenarios",
+    # observation context
+    "ObservationContext",
+    "ObservationSummary",
+    "SequentialObservationBuffer",
 ]
