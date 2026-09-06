@@ -236,6 +236,18 @@ class DetectionConfig:
         Defaults to ``nominal_noise_floor_db``.
     """
     nominal_noise_floor_db: float = -130.0
+    # [LITERATURE-GROUNDED] LNA noise figure. A real ESM receiver's front-end
+    # degrades the SNR by NF dB relative to an ideal receiver. Typical
+    # values:
+    #   3 dB  — excellent (cryogenic LNA)
+    #   6 dB  — typical discrete LNA
+    #   10 dB — budget receiver
+    #   20 dB — severe (front-end losses before LNA)
+    # The effective noise floor = nominal_noise_floor_db + noise_figure_db,
+    # so a 6 dB NF raises the floor by 6 dB and reduces measured SNR by 6 dB.
+    # Default 0 dB means no NF degradation (backward compatible).
+    # Per IEEE Std 521-2006 and Skolnik Radar Handbook LNA section.
+    noise_figure_db: float = 0.0
     # Detection curve parameters. The defaults (0 dB, 5 dB) are an engineering
     # choice for a flat 5 dB transition region. To sweep this as an
     # experimental variable (see audit issue #7), override at construction:
@@ -769,6 +781,7 @@ class TSRDEnvironment:
             snr_db_estimate = (
                 max_amplitude_db
                 - self._agc_noise_floor_db
+                - self._detection.noise_figure_db
                 + coherent_integration_gain_db_obs
             )
 
@@ -785,6 +798,7 @@ class TSRDEnvironment:
                 "dwell_time_ms": self._config.dwell_time_ms,
                 "retune_time_ms": self._config.retune_time_ms,
                 "band_width_mhz": self._config.band_width_mhz(),
+                "noise_figure_db": self._detection.noise_figure_db,
             },
             # Gate 0 negative markers — audited explicitly
             "truth_excluded": True,
@@ -905,6 +919,7 @@ class TSRDEnvironment:
             "tsrd_environment_version": "1.0.0",
             "discretiser": "tsrd.pdw_discretiser.discretise_pdw_to_grid",
             "nominal_noise_floor_db": self._detection.nominal_noise_floor_db,
+            "noise_figure_db": self._detection.noise_figure_db,
             "provenance_label": "[TSRD-DERIVED]",
         }
         self._discretised_grid = discretise_pdw_to_grid(
