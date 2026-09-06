@@ -50,6 +50,14 @@ It does this by:
 
 ---
 
+### Limitations
+
+- **TSRD is a synthetic dataset** — physics-based simulation, not measured RF data from live emitters
+- **AGC margin (0 dB) is an engineering choice**, not literature-grounded — see §6 Shnidman Parameters for the detection threshold defaults; the AGC SNR margin was set to 0 dB to align System B with System A behavior, noting that 5 dB was a prior value that may over-suppress multipath
+- **Band/slot defaults (36 × 600) are PS26055 research defaults** — configurable per scenario via `SimulationConfig` and the scenario registry
+
+---
+
 ## 2. Architecture Overview
 
 ```
@@ -340,6 +348,12 @@ SNR_lin = A + B + 3.0 * sqrt(B) * sqrt(A - B)  # Shnidman 1989
 
 For N pulses: non-coherent gives 5·log₁₀(N) dB gain; coherent gives 10·log₁₀(N) dB.
 
+### Shnidman Parameters
+
+**Default parameters:** `Pd=0.9`, `Pfa=1e-6`
+
+These match standard radar/EW practice (MATLAB's `shnidman()` function uses these defaults for ROC analysis). The threshold SNR is computed closed-form from these targets, making the detection model directly tied to operational ROC requirements rather than an arbitrary dB offset.
+
 ### System B — Additional Physics (AGC, Coherent Integration, LNA, Antenna)
 
 **AGC (Automatic Gain Control):**
@@ -592,6 +606,12 @@ reward = 0.6 * (threat_score * detection)
         - 0.1 * (dwell_cost)
 ```
 
+### Reward Weights
+
+**Default weights:** `w_detection=0.6`, `w_intercept_speed=0.3`, `w_efficiency=0.1`
+
+These align with published cognitive radar/EW literature. Detection is the primary objective (60%), intercept speed is secondary (30%), and dwell efficiency is a soft constraint (10%). Weights are fully configurable per experiment via `RewardConfig` — override `weight_discovery`, `weight_latency`, and `weight_cost` to explore different operational priorities.
+
 ---
 
 ## 13. Threat-Aware Scheduling (Sub-problem F)
@@ -619,6 +639,14 @@ class ThreatAwareUCB1(ThreatScoreMixin, UCB1Scheduler):
 | Agile | `PSEUDO_RANDOM_AGILE`, `MARKOV_HOPPER` | 9–10 |
 | Periodic | `PERIODIC_SPATIAL_SCAN` | 7 |
 | Fixed | `CONTINUOUS_FIXED` | 3 |
+
+### Threat Score Validation
+
+Behavior-based threat scores (agile=9–10, periodic=7, fixed=3) align with EW doctrine:
+
+- **Agile emitters (frequency-hopping, Markov)** are highest priority because their unpredictable frequency hopping makes them the hardest to intercept — the longer a smart jammer takes to detect them, the more time they have to complete their mission
+- **"Frequency and PRI are poor/useless for sorting agile emitters"** — when an emitter hops randomly, its RF and PRI features become unreliable discriminators, so behavioral threat (agility level) becomes the primary sorting key
+- **ML-based EW assigns higher utility to agile emitters** — cognitive radar frameworks treat agile emitters as higher-value targets because their evasion capability makes early interception critical
 
 ---
 
