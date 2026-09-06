@@ -1,0 +1,44 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*.so
+
+# Test / experiment runner scripts (not the simulator)
+scripts/
+tests/
+
+# All experiment outputs
+results/
+exp_results/
+vyapti_figs/
+data_provenance/
+
+# Research documentation (not simulator docs)
+research_docs/
+COMPREHENSIVE_RESULTS_REPORT.md
+PROVENANCE.md
+RESEARCH_PROGRESS_REPORT.md
+
+# Development status tracker (internal team artifact)
+SIMULATOR_STATUS.md
+
+# Loose experiment artifacts at the repo root
+*.json
+!pyproject.toml
+*.csv
+*.png
+*.pdf
+*.txt
+replace_script.py
+
+# Local Kaggle mirror (keep one copy only — the repo root version)
+vyapti-simulator-kaggle/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+dist/
+build/
