@@ -133,6 +133,9 @@ from .tsrd_environment import (
     build_tsrd_environment,
 )
 
+# H5 scenario writer
+from .h5_writer import write_scenario_to_h5, H5ScenarioConfig
+
 # Synthetic EW PDW generator (for Kaggle paths without TSRD)
 from .synthetic_pdw_generator import (
     SyntheticEmitterSpec,
@@ -198,6 +201,9 @@ __all__ = [
     "ShnidmanDetectionConfig",
     "TSRDEnvironment",
     "build_tsrd_environment",
+    # H5 scenario writer
+    "write_scenario_to_h5",
+    "H5ScenarioConfig",
     # Synthetic EW PDW generator
     "SyntheticEmitterSpec",
     "SyntheticEWPDWGenerator",

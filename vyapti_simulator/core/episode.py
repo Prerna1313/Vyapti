@@ -301,7 +301,190 @@ def run_paired_episodes(
     return results
 
 
+# =====================================================================
+# Replay — single-seed debugging and determinism checks
+# =====================================================================
+
+
+@dataclass
+class ReplayMismatch:
+    """One slot where the replay diverged from the saved episode."""
+    slot: int
+    action: int
+    saved_hit: bool
+    replay_hit: bool
+    saved_obs_keys: set
+    replay_obs_keys: set
+    changed_keys: dict  # key -> (saved_value, replay_value)
+
+
+@dataclass
+class ReplayResult:
+    """
+    Result of replaying a saved EpisodeResult against a fresh env.
+
+    Determinism check: same (seed, emitter_family_config) + same actions →
+    identical observations. Any divergence means either:
+      (a) the env is non-deterministic (bug in env), or
+      (b) the scheduler is non-deterministic (bug in scheduler), or
+      (c) the env changed between runs (different parameters, different code)
+    """
+    original_result: EpisodeResult
+    seed: int
+    actions_replayed: int
+    mismatches: List[ReplayMismatch]
+    determinism_verified: bool
+
+    @property
+    def is_deterministic(self) -> bool:
+        """True iff the replay produced bit-identical observations."""
+        return len(self.mismatches) == 0
+
+    def summary(self) -> str:
+        if self.is_deterministic:
+            return (
+                f"ReplayResult(seed={self.seed}): "
+                f"DETERMINISTIC — {self.actions_replayed} actions verified."
+            )
+        return (
+            f"ReplayResult(seed={self.seed}): "
+            f"NON-DETERMINISTIC — {len(self.mismatches)} mismatch(es), "
+            f"first at slot {self.mismatches[0].slot}."
+        )
+
+
+def replay_episode(
+    env: PS26055Environment,
+    saved: EpisodeResult,
+    *,
+    emitter_family_config: Optional[Sequence[EmitterConfig]] = None,
+) -> ReplayResult:
+    """
+    Replay a saved EpisodeResult's action sequence against a fresh env
+    and verify the observations are identical.
+
+    This is the single-seed debugging tool: when a scheduler fails conformance
+    or produces unexpected results, call this with the same seed to reproduce
+    exactly what happened. Pass the returned ``ReplayResult`` to
+    ``format_replay_result()`` for a human-readable diff.
+
+    Parameters
+    ----------
+    env : PS26055Environment
+        A freshly constructed environment. ``env.reset()`` will be called
+        with the same seed as the saved episode.
+    saved : EpisodeResult
+        The result from a prior ``run_episode()`` call. Its ``actions``
+        compact array drives the replay.
+    emitter_family_config : Sequence[EmitterConfig], optional
+        Same config used in the original episode. Required for deterministic
+        truth-grid reconstruction.
+
+    Returns
+    -------
+    ReplayResult
+        ``is_deterministic`` is True iff every replayed observation matched
+        the saved one. ``mismatches`` lists all divergences.
+
+    Example
+    -------
+    ::
+
+        # Run once and save the result
+        result = run_episode(env, scheduler, seed=42)
+
+        # Later: replay to check determinism or debug a failure
+        fresh_env = PS26055Environment(config=my_config)
+        replay = replay_episode(fresh_env, result)
+        print(replay.summary())
+        if not replay.is_deterministic:
+            for m in replay.mismatches:
+                print(f"  Slot {m.slot}: hit {m.saved_hit} → {m.replay_hit}")
+    """
+    seed = saved.seed
+    env.reset(seed=seed, emitter_family_config=(
+        list(emitter_family_config) if emitter_family_config is not None else None))
+
+    mismatches: List[ReplayMismatch] = []
+    horizon = saved.actions.size
+
+    for t in range(horizon):
+        if env.done:
+            break
+        action = int(saved.actions[t])
+
+        obs, leaked = env.step(action)
+        if leaked:
+            raise RuntimeError(
+                f"Replay env.step({action}) reported hidden-state leakage at slot {t}. "
+                "This is an env defect, not a scheduler defect."
+            )
+
+        saved_obs = saved.trajectory[t].observation
+        # Compare only the fields that are in both observations
+        common_keys = set(saved_obs.keys()) & set(obs.keys())
+        changed_keys = {
+            k: (saved_obs[k], obs[k])
+            for k in common_keys
+            if not _deep_equal(saved_obs[k], obs[k])
+        }
+
+        if changed_keys:
+            mismatches.append(ReplayMismatch(
+                slot=t,
+                action=action,
+                saved_hit=bool(saved_obs.get("hit", False)),
+                replay_hit=bool(obs.get("hit", False)),
+                saved_obs_keys=set(saved_obs.keys()),
+                replay_obs_keys=set(obs.keys()),
+                changed_keys=changed_keys,
+            ))
+            # Continue replaying even after a mismatch — capture all mismatches
+
+    return ReplayResult(
+        original_result=saved,
+        seed=seed,
+        actions_replayed=min(horizon, env.config.time_slots),
+        mismatches=mismatches,
+        determinism_verified=len(mismatches) == 0,
+    )
+
+
+def _deep_equal(a: Any, b: Any) -> bool:
+    """Rough equality for comparison in replay."""
+    if isinstance(a, np.ndarray):
+        return np.array_equal(a, b, equal_nan=True)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_deep_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_deep_equal(a[k], b[k]) for k in a)
+    try:
+        return bool(a == b)
+    except Exception:
+        return a is b
+
+
+def format_replay_result(replay: ReplayResult, max_slots_shown: int = 10) -> str:
+    """
+    Human-readable summary of a ``ReplayResult``.
+
+    Shows the first ``max_slots_shown`` mismatches with the
+    key-by-key diff for each. Useful for pasting into a bug report.
+    """
+    lines = [replay.summary()]
+    if replay.is_deterministic:
+        return lines[0]
+    lines.append(f"  First {min(len(replay.mismatches), max_slots_shown)} mismatch(es):")
+    for m in replay.mismatches[:max_slots_shown]:
+        lines.append(f"  Slot {m.slot} (action={m.action}):")
+        for key, (saved_val, replay_val) in m.changed_keys.items():
+            lines.append(f"    {key}: {saved_val!r} → {replay_val!r}")
+    return "\n".join(lines)
+
+
 __all__ = [
     "EpisodeResult", "run_episode", "run_paired_episodes",
     "scenario_descriptor", "PERMITTED_SCENARIO_KEYS",
+    "ReplayResult", "ReplayMismatch",
+    "replay_episode", "format_replay_result",
 ]
