@@ -114,8 +114,15 @@ class SyntheticEmitterSpec:
         degrees. Default 0.3° matches a typical monopulse
         DF receiver at high SNR.
     snr_db : float
-        Per-pulse signal-to-noise ratio in dB. Used to set
-        the relative amplitude column.
+        Free-space signal-to-noise ratio in dB (what you'd get
+        with no propagation losses and a perfect receiver).
+        The generator applies per-emitter shadowing and diffraction
+        losses (N(0, path_loss_shadowing_db) and
+        N(0, path_loss_diffraction_db) respectively) plus
+        measurement jitter (N(0, snr_jitter_db)) to obtain the
+        effective received SNR — matching TSRDEmitterSampler's
+        approach so System A and System B have comparable
+        detection statistics.
     emitter_type : str
         One of the six `emitter_models.create_emitter` types
         plus the three dynamic-policy types (delayed_arrival,
@@ -214,6 +221,25 @@ class SyntheticEWPDWGenerator:
     The mission duration defaults to 30 s to match the TSRD
     fixture's mission length. Frequency and PW units match
     the TSRD conventions (MHz and µs, not Hz and seconds).
+
+    **System A/B unification (propagation loss model):**  The
+    generator now applies the same per-emitter propagation
+    losses as `TSRDEmitterSampler` so that the synthetic (System A)
+    and real TSRD (System B) paths produce statistically comparable
+    SNR distributions:
+
+      * Shadowing loss ~ N(0, path_loss_shadowing_db) dB
+      * Diffraction loss ~ N(0, path_loss_diffraction_db) dB
+      * SNR jitter ~ N(0, snr_jitter_db) dB
+
+    All three are sampled once per emitter (constant over that
+    emitter's pulse train). The `SyntheticEmitterSpec.snr_db`
+    field represents the *free-space* SNR; the effective received
+    SNR is `snr_db + shadowing + diffraction + jitter`.
+
+    The defaults (8.0 dB, 4.0 dB, 5.0 dB) match the
+    `TSRDEmitterSampler` defaults. Override them if your
+    scenario requires a different propagation environment.
     """
 
     def __init__(
@@ -222,7 +248,37 @@ class SyntheticEWPDWGenerator:
         mission_duration_s: float = 30.0,
         seed: int = 42,
         noise_floor_db: float = _NOISE_FLOOR_DB_DEFAULT,
+        path_loss_shadowing_db: float = 8.0,
+        path_loss_diffraction_db: float = 4.0,
+        snr_jitter_db: float = 5.0,
     ) -> None:
+        """
+        Build a TSRD-shaped PDW generator.
+
+        Parameters
+        ----------
+        specs : List[SyntheticEmitterSpec]
+            Emitter configurations. Each spec's `snr_db` is
+            the free-space SNR; propagation losses are added.
+        mission_duration_s : float
+            Mission length in seconds.
+        seed : int
+            Root RNG seed for determinism.
+        noise_floor_db : float
+            Receiver noise floor in dBm (default -130 dBm).
+        path_loss_shadowing_db : float
+            Standard deviation of per-emitter terrain
+            shadowing loss in dB (default 8.0, matching
+            TSRDEmitterSampler). Sampled once per emitter.
+        path_loss_diffraction_db : float
+            Standard deviation of per-emitter diffraction
+            loss in dB (default 4.0, matching
+            TSRDEmitterSampler). Sampled once per emitter.
+        snr_jitter_db : float
+            Standard deviation of per-emitter SNR measurement
+            jitter in dB (default 5.0, matching
+            TSRDEmitterSampler). Sampled once per emitter.
+        """
         if not specs:
             raise ValueError("specs must contain at least one emitter.")
         if mission_duration_s <= 0:
@@ -267,6 +323,9 @@ class SyntheticEWPDWGenerator:
         self._mission_duration_s = float(mission_duration_s)
         self._seed = int(seed)
         self._noise_floor_db = float(noise_floor_db)
+        self._path_loss_shadowing_db = float(path_loss_shadowing_db)
+        self._path_loss_diffraction_db = float(path_loss_diffraction_db)
+        self._snr_jitter_db = float(snr_jitter_db)
 
     @property
     def specs(self) -> List[SyntheticEmitterSpec]:
@@ -322,8 +381,39 @@ class SyntheticEWPDWGenerator:
             )
             rng = np.random.default_rng(seed_seq)
 
-            # Build the emitter per type.
-            emitter = self._build_emitter(spec)
+            # Per-emitter propagation losses and SNR jitter
+            # (matched to TSRDEmitterSampler's approach:
+            #  shadowing ~ N(0, path_loss_shadowing_db),
+            #  diffraction ~ N(0, path_loss_diffraction_db),
+            #  snr_jitter ~ N(0, snr_jitter_db)).
+            # Sample BEFORE building emitter so power_dbm reflects losses.
+            shadowing_db = float(
+                rng.normal(0.0, self._path_loss_shadowing_db)
+            )
+            diffraction_db = float(
+                rng.normal(0.0, self._path_loss_diffraction_db)
+            )
+            jitter_db = float(
+                rng.normal(0.0, self._snr_jitter_db)
+            )
+
+            # Effective received SNR (free-space SNR + losses)
+            # and corresponding absolute power for emitter_models.
+            MIN_PWR_DBM = -100.0
+            MAX_PWR_DBM = -30.0
+            effective_snr_db = (
+                float(spec.snr_db)
+                + shadowing_db
+                + diffraction_db
+                + jitter_db
+            )
+            power_dbm = float(np.clip(
+                self._noise_floor_db + effective_snr_db,
+                MIN_PWR_DBM, MAX_PWR_DBM
+            ))
+
+            # Build the emitter per type with pre-computed power_dbm.
+            emitter = self._build_emitter(spec, power_dbm=power_dbm)
 
             # Generate the pulse train over the mission.
             try:
@@ -363,14 +453,12 @@ class SyntheticEWPDWGenerator:
                 # Wrap to [-180, 180] for consistency with TSRD
                 aoa = ((aoa + 180.0) % 360.0) - 180.0
                 all_aoa.append(aoa)
-                # Amplitude: spec.snr_db above the noise floor.
-                # Add a small per-pulse variation to simulate fading.
-                amp_db = (
-                    self._noise_floor_db
-                    + float(spec.snr_db)
-                    + float(rng.normal(0.0, 1.0))
-                )
-                all_amp.append(amp_db)
+                # Amplitude: noise_floor + effective_snr (with proper spread from
+                # shadowing/diffraction/jitter), matching TSRDEmitterSampler's
+                # SNR distribution. The power_dbm supplied to the emitter model
+                # is separately clamped to [-100, -30] dBm for valid received
+                # power range; the output amp_db carries the statistical spread.
+                all_amp.append(self._noise_floor_db + effective_snr_db)
                 all_eid.append(int(spec.emitter_id))
 
         if not all_toa:
@@ -408,9 +496,21 @@ class SyntheticEWPDWGenerator:
     # ----------------------------------------------------------------
     # Internals
     # ----------------------------------------------------------------
-    def _build_emitter(self, spec: SyntheticEmitterSpec) -> Any:
+    def _build_emitter(self, spec: SyntheticEmitterSpec,
+                       power_dbm: Optional[float] = None) -> Any:
         """
         Build the underlying `Emitter` object for a spec.
+
+        Parameters
+        ----------
+        spec : SyntheticEmitterSpec
+            Emitter configuration.
+        power_dbm : float, optional
+            Pre-computed received power in dBm. If provided, this
+            is used directly (already clamped to the emitter
+            model's valid range). If not provided, it is computed
+            from `noise_floor_db + spec.snr_db` (backwards
+            compatible behaviour).
         """
         from src.emitter_models import (
             FixedContinuousEmitter,
@@ -426,11 +526,17 @@ class SyntheticEWPDWGenerator:
         )
 
         et = spec.emitter_type.lower()
-        # SNR (dB above noise floor) → absolute received power in dBm
-        # for the underlying emitter_models. noise_floor_db is the
-        # thermal floor; snr_db is the synthetic emitter's strength
-        # above that floor.
-        power_dbm = float(self._noise_floor_db) + float(spec.snr_db)
+        if power_dbm is None:
+            # SNR (dB above noise floor) → absolute received power in dBm
+            # for the underlying emitter_models. noise_floor_db is the
+            # thermal floor; snr_db is the synthetic emitter's strength
+            # above that floor.
+            power_dbm = float(self._noise_floor_db) + float(spec.snr_db)
+            # Clamp to the emitter model's valid received-power range,
+            # matching TSRDEmitterSampler's approach.
+            MIN_PWR_DBM = -100.0
+            MAX_PWR_DBM = -30.0
+            power_dbm = float(np.clip(power_dbm, MIN_PWR_DBM, MAX_PWR_DBM))
 
         if et in ("fixed_continuous", "fixed"):
             return FixedContinuousEmitter(
