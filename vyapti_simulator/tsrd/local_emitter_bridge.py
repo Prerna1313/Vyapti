@@ -64,7 +64,7 @@ unification deliverable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Iterator, List, Optional, Sequence, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -420,6 +420,8 @@ def local_emitters_to_pdw_stream(
     sim_end_sec: float,
     rng: np.random.Generator,
     noise_floor_dbm: float = DEFAULT_NOISE_FLOOR_DBM,
+    swerling_models: Optional[Dict[int, str]] = None,
+    swerling_burst_size: int = 10,
 ) -> PDWStream:
     """
     Just the first half of the bridge: src/ emitter output → PDWStream.
@@ -428,15 +430,60 @@ def local_emitters_to_pdw_stream(
     takes a ``PDWStream``) without going through the discretiser.
     Does not call ``frequency_to_band`` or ``seconds_to_slot`` —
     it is a pure pulse-list → TSRD-arrays transform.
+
+    Parameters
+    ----------
+    emitters : Sequence[src.emitter_models.Emitter]
+        The synthetic emitter objects whose pulses are converted
+        to TSRD arrays.
+    sim_start_sec, sim_end_sec : float
+        Mission window.
+    rng : np.random.Generator
+        RNG for pulse generation and (optional) Swerling draws.
+    noise_floor_dbm : float
+        Receiver noise floor in dBm.
+    swerling_models : dict[int, str], optional
+        Per-emitter Swerling model. Keys are ``emitter.emitter_id``,
+        values are model names: ``"swerling_0"`` (default, no
+        fluctuation), ``"swerling_1"``, ``"swerling_2"``,
+        ``"swerling_3"``, ``"swerling_4"``. See
+        :mod:`vyapti_simulator.rf.swerling`. Default None (no
+        fluctuation; equivalent to all Swerling 0).
+    swerling_burst_size : int
+        Burst size for slow-fluctuation models (Swerling I/III).
+        Default 10. Ignored for fast models (II/IV).
     """
-    all_pulses: List = []
+    from vyapti_simulator.rf.swerling import apply_swerling_fluctuation
+    swerling_models = swerling_models or {}
+
+    # Group pulses by emitter so Swerling fluctuation can be applied
+    # per-emitter (slow models need to keep bursts intact).
+    per_emitter_pulses: Dict[int, List] = {}
     for em in emitters:
-        all_pulses.extend(
-            em.generate_pulses(
-                sim_start_sec=sim_start_sec,
-                sim_end_sec=sim_end_sec,
-                rng=rng,
-            )
+        em_pulses = em.generate_pulses(
+            sim_start_sec=sim_start_sec,
+            sim_end_sec=sim_end_sec,
+            rng=rng,
         )
+        eid = int(getattr(em, "emitter_id", -1))
+        per_emitter_pulses.setdefault(eid, []).extend(em_pulses)
+
+    # Apply Swerling per emitter, then concatenate.
+    all_pulses: List = []
+    for eid, em_pulses in per_emitter_pulses.items():
+        model = swerling_models.get(eid, "swerling_0")
+        if model != "swerling_0" and em_pulses:
+            arr = _pulse_to_pdw_arrays(em_pulses, noise_floor_dbm=noise_floor_dbm)
+            amp_db_in = arr["amp_db"].astype(np.float64)
+            amp_db_out = apply_swerling_fluctuation(
+                amp_db_in, model=model, rng=rng,
+                burst_size=swerling_burst_size,
+            )
+            # Re-stamp the dBm-relative amplitude back into the Pulse
+            # objects so downstream sees the fluctuated value.
+            for p, new_amp_db in zip(em_pulses, amp_db_out):
+                p.amplitude_dbm = float(new_amp_db) + noise_floor_dbm
+        all_pulses.extend(em_pulses)
+
     arrays = _pulse_to_pdw_arrays(all_pulses, noise_floor_dbm=noise_floor_dbm)
     return _pdw_stream_from_arrays(arrays)

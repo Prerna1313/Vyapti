@@ -97,7 +97,7 @@ def discretize_pdw_to_bands(
     pdw: PDWStream,
     cfg: SimulationConfig,
     *,
-    nominal_noise_floor_db: float = -80.0,
+    nominal_noise_floor_db: float = -130.0,
     source_h5_sha256: Optional[str] = None,
 ) -> Iterator[UnifiedBandSlotPulse]:
     """
@@ -182,7 +182,7 @@ def discretize_pdw_to_bands(
 def aggregate_cell_pulses(
     pulses: List[UnifiedBandSlotPulse],
     *,
-    nominal_noise_floor_db: float = -80.0,
+    nominal_noise_floor_db: float = -130.0,
 ) -> BandSlotCell:
     """
     Aggregate a list of unified ``BandSlotPulse`` from the same
@@ -529,7 +529,7 @@ def discretise_pdw_to_grid(
     pdw: PDWStream,
     cfg: SimulationConfig,
     *,
-    nominal_noise_floor_db: float = -80.0,
+    nominal_noise_floor_db: float = -130.0,
     provenance: Optional[Dict] = None,
 ) -> DiscretisedGrid:
     """
