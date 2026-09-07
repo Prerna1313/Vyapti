@@ -80,6 +80,13 @@ import numpy as np
 
 from .tsrd_adapter import PDWStream
 
+# Default 3-D positions used by the RF physics bridge.
+# Module-level constants to keep the frozen SyntheticEmitterSpec
+# dataclass free of mutable default arguments.
+_DEFAULT_RECEIVER_POSITION_M: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+_DEFAULT_EMITTER_POSITION_M: Tuple[float, float, float] = (1000.0, 0.0, 0.0)
+_DEFAULT_EMITTER_VELOCITY_M_S: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+
 
 # =====================================================================
 # Channel model
@@ -168,6 +175,62 @@ class SyntheticEmitterSpec:
         an independent RNG stream. The mission-level seed
         is added to this; the full seed is
         ``mission_seed * 1000 + seed_offset``.
+    swerling_model : str
+        Swerling target fluctuation model. One of:
+        ``"swerling_0"`` (Marcum, no fluctuation),
+        ``"swerling_1"`` (slow exponential, decorrelates
+        between bursts), ``"swerling_2"`` (fast exponential,
+        decorrelates per pulse), ``"swerling_3"`` (slow
+        4-DoF chi-squared), ``"swerling_4"`` (fast 4-DoF
+        chi-squared). Default ``"swerling_0"`` (backward
+        compatible). See :mod:`vyapti_simulator.rf.swerling`
+        for the physics model.
+    swerling_burst_size : int
+        For slow-fluctuation models (Swerling I/III): the
+        number of consecutive pulses that share the same RCS
+        draw. Default 10. Ignored for fast models (II/IV).
+        Relevant for scan-mode where a beam dwells on a target
+        for multiple pulses.
+
+    RF physics bridge fields
+    -----------------------
+    The following fields are consumed by :mod:`vyapti_simulator.rf.tsrd_bridge`
+    when the spec is routed through ``RFPulsePipeline`` (the RF physics path).
+    They have no effect on ``SyntheticEWPDWGenerator`` (the PDW-only path).
+
+    waveform_type : str
+        Waveform family for the RF physics engine. One of:
+        ``"lfm"`` (linear FM chirp, default), ``"bpsk"``,
+        ``"qpsk"``, ``"qam16"``. Maps to the corresponding
+        generator in :mod:`vyapti_simulator.rf.waveforms`.
+    chirp_bandwidth_hz : float
+        LFM chirp sweep bandwidth in Hz. Default 1e6 (1 MHz).
+        Only used when ``waveform_type="lfm"``.
+    los_component_db : float | None
+        Rician K-factor in dB for the multipath channel.
+        ``None`` → Rayleigh fading (no LOS).
+        ``0`` → no fading (pure Swerling 0).
+        Positive values → increasingly LOS-dominant (Rician).
+    receiver_position_m : Tuple[float, float, float]
+        Receiver 3-D position in metres (x, y, z), ENU frame.
+        Default (0, 0, 0). Used for free-space path loss and
+        kinematic range/Doppler computation.
+    emitter_position_m : Tuple[float, float, float]
+        Emitter 3-D position in metres (x, y, z). Default (1000, 0, 0)
+        (1 km on x-axis).
+    emitter_velocity_m_s : Tuple[float, float, float]
+        Emitter velocity vector in m/s (vx, vy, vz). Default (0,0,0)
+        (stationary). Non-zero values produce a Doppler shift.
+    doppler_hz : float
+        Static Doppler frequency override in Hz. Added to the
+        kinematic Doppler from ``emitter_velocity_m_s``. Default 0.
+    tx_power_dbm : float
+        Transmitted power in dBm. Default 40 dBm (10 W).
+        Used for the Friis link budget in the RF physics path.
+    tx_gain_dbi : float
+        Transmit antenna gain in dBi. Default 0.
+    rx_gain_dbi : float
+        Receive antenna gain in dBi. Default 0.
     """
     emitter_id: int
     aoa_deg: float
@@ -195,8 +258,24 @@ class SyntheticEmitterSpec:
     delayed_arrival_sec: float = 0.0
     regimes: Tuple[Tuple[float, float], ...] = ()
 
+    # Swerling target fluctuation
+    swerling_model: str = "swerling_0"
+    swerling_burst_size: int = 10
+
     # Determinism
     seed_offset: int = 0
+
+    # RF physics bridge parameters
+    waveform_type: str = "lfm"
+    chirp_bandwidth_hz: float = 1e6
+    los_component_db: Optional[float] = None
+    receiver_position_m: Tuple[float, float, float] = _DEFAULT_RECEIVER_POSITION_M
+    emitter_position_m: Tuple[float, float, float] = _DEFAULT_EMITTER_POSITION_M
+    emitter_velocity_m_s: Tuple[float, float, float] = _DEFAULT_EMITTER_VELOCITY_M_S
+    doppler_hz: float = 0.0
+    tx_power_dbm: float = 40.0
+    tx_gain_dbi: float = 0.0
+    rx_gain_dbi: float = 0.0
 
 
 # =====================================================================
@@ -431,35 +510,55 @@ class SyntheticEWPDWGenerator:
             if not pulses:
                 continue
 
-            # Per-pulse jitter: PW noise and AoA noise.
+            # --- Collect per-emitter pulse data into temp lists ---------------
+            # We apply Swerling fluctuation per-emitter to avoid per-pulse
+            # RNG overhead (Swerling can batch-sample from exponential/chi2).
+            emp_toa: List[float] = []
+            emp_freq: List[float] = []
+            emp_pw: List[float] = []
+            emp_aoa: List[float] = []
+            emp_amp: List[float] = []
+            emp_eid: List[int] = []
+
             pw_jitter_std = spec.pw_jitter_sec
             aoa_jitter_std = spec.aoa_jitter_deg
-
             for p in pulses:
-                # ToA in µs
-                all_toa.append(float(p.toa) * 1e6)
-                # Frequency in MHz
-                all_freq.append(float(p.frequency_hz) * 1e-6)
-                # Pulse width in µs, with jitter
+                emp_toa.append(float(p.toa) * 1e6)
+                emp_freq.append(float(p.frequency_hz) * 1e-6)
                 pw_us = (float(p.pulse_width_sec) * 1e6) + float(
                     rng.normal(0.0, pw_jitter_std * 1e6)
                 )
                 pw_us = max(0.05, pw_us)  # clip to a sane lower bound
-                all_pw.append(pw_us)
-                # AoA in degrees, with jitter
-                aoa = float(spec.aoa_deg) + float(
-                    rng.normal(0.0, aoa_jitter_std)
-                )
-                # Wrap to [-180, 180] for consistency with TSRD
+                emp_pw.append(pw_us)
+                aoa = float(spec.aoa_deg) + float(rng.normal(0.0, aoa_jitter_std))
                 aoa = ((aoa + 180.0) % 360.0) - 180.0
-                all_aoa.append(aoa)
-                # Amplitude: noise_floor + effective_snr (with proper spread from
-                # shadowing/diffraction/jitter), matching TSRDEmitterSampler's
-                # SNR distribution. The power_dbm supplied to the emitter model
-                # is separately clamped to [-100, -30] dBm for valid received
-                # power range; the output amp_db carries the statistical spread.
-                all_amp.append(self._noise_floor_db + effective_snr_db)
-                all_eid.append(int(spec.emitter_id))
+                emp_aoa.append(aoa)
+                emp_amp.append(self._noise_floor_db + effective_snr_db)
+                emp_eid.append(int(spec.emitter_id))
+
+            # --- Apply Swerling target fluctuation per emitter ---------------
+            # Swerling 0 (Marcum, no fluctuation) is the default for
+            # backward compatibility. Cases I-IV model target RCS
+            # scintillation: exponential (I/II) or 4-DoF chi-squared (III/IV),
+            # with slow (per-burst) or fast (per-pulse) decorrelation.
+            from vyapti_simulator.rf.swerling import apply_swerling_fluctuation
+            if spec.swerling_model.lower() != "swerling_0":
+                emp_amp_arr = np.asarray(emp_amp, dtype=np.float64)
+                emp_amp_arr = apply_swerling_fluctuation(
+                    emp_amp_arr,
+                    model=spec.swerling_model,
+                    rng=rng,
+                    burst_size=spec.swerling_burst_size,
+                )
+                emp_amp = emp_amp_arr.tolist()
+
+            # Extend to global lists
+            all_toa.extend(emp_toa)
+            all_freq.extend(emp_freq)
+            all_pw.extend(emp_pw)
+            all_aoa.extend(emp_aoa)
+            all_amp.extend(emp_amp)
+            all_eid.extend(emp_eid)
 
         if not all_toa:
             # No pulses at all: still return an empty stream with
