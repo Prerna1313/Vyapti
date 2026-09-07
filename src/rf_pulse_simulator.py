@@ -167,6 +167,15 @@ def generate_iq_for_pulses(
     rng: np.random.Generator,
     noise_floor_dbm: float = -130.0,
     units: str = "snr_normalized",
+    *,
+    # Hardware impairment parameters (default all zero = ideal receiver)
+    phase_noise_dbc_per_hz: float = 0.0,
+    iq_gain_imbalance_db: float = 0.0,
+    iq_phase_imbalance_deg: float = 0.0,
+    dc_offset_i: float = 0.0,
+    dc_offset_q: float = 0.0,
+    quantization_bits: Optional[int] = None,
+    sample_rate_hz: float = 1.0,
 ) -> List[Any]:
     """
     Attach a complex I/Q envelope to each pulse in place.
@@ -191,8 +200,19 @@ def generate_iq_for_pulses(
     10*log10(N) gain. For incoherent integration (e.g. envelope
     detection), |iq|^2 is the relevant quantity.
 
+    Hardware impairments
+    -------------------
+    When any impairment parameter is non-zero, the clean I/Q is
+    passed through the impairment chain in this order:
+      1. Phase noise (Wiener random walk on carrier phase)
+      2. IQ gain and phase imbalance
+      3. DC offset on I and Q
+      4. ADC quantisation (finite bits)
+    See :mod:`vyapti_simulator.rf.receiver_impairments` for
+    the physics model of each.
+
     Backward compatibility
-    ----------------------
+    --------------------
     Pulses have `iq_complex=None` by default. This function only
     runs when called explicitly. Existing code that constructs
     `Pulse` objects directly (without I/Q) continues to work
@@ -204,8 +224,8 @@ def generate_iq_for_pulses(
         The pulse list to modify in place. Each pulse's
         `iq_complex` attribute is set.
     rng : np.random.Generator
-        The RNG to use for the I/Q generation. Pass the same
-        RNG that produced the pulse stream for full
+        The RNG to use for the I/Q generation and phase noise.
+        Pass the same RNG that produced the pulse stream for full
         reproducibility.
     noise_floor_dbm : float
         Receiver noise floor in dBm. Used to convert
@@ -219,11 +239,42 @@ def generate_iq_for_pulses(
           - "linear_dbm":     E[|iq|^2] = 10^((amp_dbm-30)/10)
             (absolute linear power). Use for system-level
             power budget analysis.
+    phase_noise_dbc_per_hz : float
+        Phase noise floor in dBc/Hz (oscillator instability).
+        Default 0.0 (no phase noise). Typical values:
+        TCXO: -100 dBc/Hz, OCXO: -130 dBc/Hz, VCO: -70 dBc/Hz.
+    iq_gain_imbalance_db : float
+        Amplitude mismatch between I and Q in dB. Default 0.0.
+        Typical: 0.1–0.5 dB.
+    iq_phase_imbalance_deg : float
+        Phase orthogonality error in degrees. Default 0.0.
+        Typical: 0.5°–3°.
+    dc_offset_i, dc_offset_q : float
+        DC offset on the I and Q ADCs. Default 0.0.
+    quantization_bits : int, optional
+        Number of ADC bits. If None, no quantisation is applied
+        (infinite precision). Typical: 8–16 bits.
+    sample_rate_hz : float
+        Sample rate in Hz. Used by the phase noise model.
+        Default 1.0.
 
     Returns
     -------
     List of pulses with `iq_complex` populated.
     """
+    # Lazy import to avoid a hard dependency when I/Q is not used.
+    from vyapti_simulator.rf.receiver_impairments import (
+        apply_receiver_impairments,
+    )
+    has_impairments = (
+        phase_noise_dbc_per_hz != 0.0
+        or iq_gain_imbalance_db != 0.0
+        or iq_phase_imbalance_deg != 0.0
+        or dc_offset_i != 0.0
+        or dc_offset_q != 0.0
+        or quantization_bits is not None
+    )
+
     for pulse in pulses:
         if pulse.amplitude_dbm is None:
             pulse.iq_complex = None
@@ -243,8 +294,24 @@ def generate_iq_for_pulses(
         # integration across the same emitter, the phase
         # randomness averages out exactly as theory predicts.
         phase = float(rng.uniform(0.0, 2.0 * np.pi))
-        pulse.iq_complex = complex(signal_amp * np.cos(phase),
-                                    signal_amp * np.sin(phase))
+        iq = complex(signal_amp * np.cos(phase),
+                     signal_amp * np.sin(phase))
+
+        # Apply hardware impairments if configured.
+        if has_impairments:
+            iq = apply_receiver_impairments(
+                np.array([iq]),
+                phase_noise_dbc_per_hz=phase_noise_dbc_per_hz,
+                iq_gain_imbalance_db=iq_gain_imbalance_db,
+                iq_phase_imbalance_deg=iq_phase_imbalance_deg,
+                dc_offset_i=dc_offset_i,
+                dc_offset_q=dc_offset_q,
+                quantization_bits=quantization_bits,
+                sample_rate_hz=sample_rate_hz,
+                rng=rng,
+            )[0]
+
+        pulse.iq_complex = iq
     return pulses
 
 

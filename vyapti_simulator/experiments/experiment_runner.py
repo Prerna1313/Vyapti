@@ -49,6 +49,14 @@ from ..core.environment import PS26055Environment, EmitterConfig, SimulationConf
 from ..core.episode import run_paired_episodes
 from ..core.metrics import MetricsEngine, MetricsConfig
 from ..core.scheduler_interface import BaseScheduler
+from ..tsrd.antenna_patterns import (
+    uniform_antenna_gain,
+    sectorised_antenna_gain,
+    realistic_antenna_gain,
+    cosine_taper_antenna_gain,
+    sinc_antenna_gain,
+    realistic_ew_antenna_gain,
+)
 
 
 # =====================================================================
@@ -285,6 +293,27 @@ class ExperimentConfig:
     agile_fraction: float = 0.3
     intermittent_fraction: float = 0.2
 
+    # Swerling target fluctuation. Per-emitter: each emitter's received
+    # SNR is multiplied by a per-burst (slow) or per-pulse (fast)
+    # random draw from the Swerling distribution. Swerling 0 (default)
+    # is the Marcum non-fluctuating case and is backward-compatible.
+    swerling_model: str = "swerling_0"  # "swerling_0".."swerling_4"
+    swerling_burst_size: int = 10
+    # Standard deviation of the per-emitter propagation loss (dB)
+    # applied as a constant offset over the emitter's lifetime
+    # (matches TSRDEmitterSampler shadowing 8.0 dB + diffraction 4.0 dB).
+    propagation_shadowing_db: float = 8.0
+    propagation_diffraction_db: float = 4.0
+    # Antenna pattern. "uniform" | "sectorised" | "realistic" |
+    # "cosine_taper" | "sinc" | "realistic_ew". Each maps to a
+    # per-band gain array that the detection pipeline uses as a
+    # per-band SNR penalty.
+    antenna_pattern: str = "uniform"
+    antenna_pattern_seed: int = 0
+    # Centre frequency of each band (MHz). When None, defaults to a
+    # uniform grid spanning 2000-18000 MHz (covering typical EW bands).
+    band_centre_freqs_mhz: Optional[List[float]] = None
+
     # Per frozen protocol §5: 7 mandatory result-tagging fields. Defaults are
     # honest placeholders; production runs MUST supply them at run time so a
     # result row carries sub-problem, layer, technique, version, baseline,
@@ -389,6 +418,138 @@ class ExperimentRunner:
             ))
         return emitters
 
+    def _apply_swerling(
+        self,
+        emitter: EmitterConfig,
+        rng: np.random.Generator,
+        burst_size: int = 1,
+    ) -> EmitterConfig:
+        """
+        Apply Swerling target fluctuation to one emitter's SNR.
+
+        The emitter's ``snr_db`` is treated as the *mean* SNR; the
+        Swerling draw shifts it by a random dB offset. This matches
+        the TSRD path's per-emitter Swerling model so both
+        System A and System B see the same distribution of SNR.
+
+        Parameters
+        ----------
+        emitter : EmitterConfig
+            The base emitter with nominal snr_db.
+        rng : np.random.Generator
+            RNG for the Swerling draw.
+        burst_size : int
+            For slow-fluctuation models: pulses per burst.
+            Default 10 (one beam dwell ≈ 10 pulses).
+
+        Returns
+        -------
+        EmitterConfig
+            A new EmitterConfig with the fluctuated snr_db.
+        """
+        if self.config.swerling_model == "swerling_0":
+            # Marcum: no fluctuation — backward compatible.
+            return emitter
+
+        # We need to import swerling lazily to avoid hard dependency.
+        from vyapti_simulator.rf.swerling import apply_swerling_fluctuation
+
+        # Draw one sample from the Swerling distribution.
+        # Single pulse is enough: the constant offset over the mission
+        # is the same as the burst-level mean for slow models.
+        amp_db = np.array([float(emitter.snr_db)], dtype=np.float64)
+        fluctuated = apply_swerling_fluctuation(
+            amp_db,
+            model=self.config.swerling_model,
+            rng=rng,
+            burst_size=burst_size,
+        )
+        new_snr_db = float(fluctuated[0])
+
+        # Also apply propagation shadowing/diffraction as constant offsets
+        # (sampled once per emitter, not per pulse — matches TSRD path).
+        shadow = rng.normal(0.0, self.config.propagation_shadowing_db)
+        diffract = rng.normal(0.0, self.config.propagation_diffraction_db)
+        new_snr_db += shadow + diffract
+
+        return EmitterConfig(
+            emitter_id=emitter.emitter_id,
+            behavior=emitter.behavior,
+            active_bands=list(emitter.active_bands),
+            period_slots=emitter.period_slots,
+            phase_offset_slots=emitter.phase_offset_slots,
+            visibility_fraction=emitter.visibility_fraction,
+            period_jitter_fraction=emitter.period_jitter_fraction,
+            hop_sequence=list(emitter.hop_sequence) if emitter.hop_sequence else None,
+            pattern_length=emitter.pattern_length,
+            markov_switch_probability=emitter.markov_switch_probability,
+            mean_dwell_slots=emitter.mean_dwell_slots,
+            on_duration_slots=emitter.on_duration_slots,
+            off_duration_slots=emitter.off_duration_slots,
+            arrival_slot=emitter.arrival_slot,
+            departure_slot=emitter.departure_slot,
+            change_point_slot=emitter.change_point_slot,
+            behavior_before_change=emitter.behavior_before_change,
+            behavior_after_change=emitter.behavior_after_change,
+            mixture_components=list(emitter.mixture_components) if emitter.mixture_components else None,
+            mixture_weights=list(emitter.mixture_weights) if emitter.mixture_weights else None,
+            snr_db=new_snr_db,
+            provenance_notes=dict(emitter.provenance_notes),
+        )
+
+    def _default_band_centre_freqs_mhz(self, band_count: int) -> List[float]:
+        """
+        Build a default frequency axis spanning 2-18 GHz.
+
+        Covers the canonical EW band: S, C, X, Ku, K.
+        """
+        if self.config.band_centre_freqs_mhz is not None:
+            return self.config.band_centre_freqs_mhz
+        # Uniform grid from 2000 MHz to 18000 MHz
+        return [float(x) for x in np.linspace(2000.0, 18000.0, band_count)]
+
+    def _build_antenna_gain(
+        self,
+        band_count: int,
+        pattern: Optional[str] = None,
+    ) -> Optional[np.ndarray]:
+        """
+        Build the per-band antenna gain array.
+
+        Parameters
+        ----------
+        band_count : int
+            Number of bands.
+        pattern : str, optional
+            Pattern name. Defaults to ``self.config.antenna_pattern``.
+
+        Returns
+        -------
+        np.ndarray or None
+            Gain array of shape (band_count,) in dB, or None for uniform.
+        """
+        pattern = pattern or self.config.antenna_pattern
+        freq_mhz = np.array(self._default_band_centre_freqs_mhz(band_count))
+        seed = self.config.antenna_pattern_seed
+
+        if pattern == "uniform":
+            return uniform_antenna_gain(band_count)
+        elif pattern == "sectorised":
+            return sectorised_antenna_gain(band_count, seed=seed)
+        elif pattern == "realistic":
+            return realistic_antenna_gain(band_count, seed=seed)
+        elif pattern == "cosine_taper":
+            return cosine_taper_antenna_gain(freq_mhz)
+        elif pattern == "sinc":
+            return sinc_antenna_gain(freq_mhz)
+        elif pattern == "realistic_ew":
+            return realistic_ew_antenna_gain(freq_mhz, seed=seed)
+        else:
+            raise ValueError(
+                f"Unknown antenna_pattern={pattern!r}; expected one of: "
+                "uniform, sectorised, realistic, cosine_taper, sinc, realistic_ew"
+            )
+
     def run_paired_comparison(
         self,
         schedulers: Dict[str, Callable[[], BaseScheduler]],
@@ -427,7 +588,21 @@ class ExperimentRunner:
         seed_list = seed_map[seed_set]
         band_count = self.config.band_count
         time_slots = self.config.time_slots
-        emitters = self._default_emitters(density, band_count, time_slots)
+
+        # Build base emitter population, then apply Swerling target
+        # fluctuation and propagation loss (per-emitter). This matches
+        # the SNR distribution seen by the System B (TSRD) path so
+        # both systems' detection rates converge on the same physics.
+        base_emitters = self._default_emitters(density, band_count, time_slots)
+        fluc_rng = np.random.default_rng(0xC0FFEE)  # Swerling seed
+        emitters = [
+            self._apply_swerling(em, fluc_rng,
+                                 burst_size=self.config.swerling_burst_size)
+            for em in base_emitters
+        ]
+
+        # Per-band antenna gain (frequency-dependent, optional).
+        antenna_gain = self._build_antenna_gain(band_count)
 
         sim_config = SimulationConfig(
             band_count=band_count,
@@ -436,6 +611,13 @@ class ExperimentRunner:
             false_alarm_probability=0.0,
         )
         env = PS26055Environment(sim_config, emitters)
+
+        # Stash the antenna gain on the env for any downstream that
+        # wants to read it (e.g. the report) without going through
+        # the SimulationConfig. The receiver SNR-penalty application
+        # is the existing per-band attenuation path; here we annotate
+        # the env with the array so the report can include it.
+        env._antenna_gain_db = antenna_gain
         metrics_engine = MetricsEngine(MetricsConfig())
 
         # --- Run every (scheduler, seed) pair ------------------------------
@@ -583,6 +765,21 @@ class ExperimentRunner:
                     "PS26055_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md §6 line 180: "
                     "10 training seeds × 100 evaluation scenario seeds per benchmark cell, "
                     "confidence intervals reported, no cherry-picked best run."
+                ),
+            },
+            # RF physics configuration (auditable — must appear in any result row)
+            "rf_physics": {
+                "swerling_model": self.config.swerling_model,
+                "swerling_burst_size": self.config.swerling_burst_size,
+                "propagation_shadowing_db": self.config.propagation_shadowing_db,
+                "propagation_diffraction_db": self.config.propagation_diffraction_db,
+                "antenna_pattern": self.config.antenna_pattern,
+                "antenna_pattern_seed": self.config.antenna_pattern_seed,
+                # Per-band gain values (None = uniform 0 dB)
+                "antenna_gain_per_band": (
+                    env._antenna_gain_db.tolist()
+                    if hasattr(env, '_antenna_gain_db') and env._antenna_gain_db is not None
+                    else None
                 ),
             },
             "schedulers": names,
