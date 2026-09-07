@@ -394,6 +394,22 @@ diffraction = N(0, 4) dB  # rooftop multipath
 SNR_dB = EIRP_dBW - FSPL_dB + shadowing + diffraction + rx_G/T_dB
 ```
 
+### System A/B Unification — Synthetic SNR Matches TSRD SNR (v1.2.0)
+
+`SyntheticEWPDWGenerator` now applies the **same per-emitter propagation loss model** as `TSRDEmitterSampler` so the synthetic (System A) and real TSRD (System B) paths produce statistically comparable SNR distributions:
+
+```python
+# In SyntheticEWPDWGenerator.generate(), per emitter:
+shadowing_db   = N(0, path_loss_shadowing_db=8.0)    # terrain
+diffraction_db = N(0, path_loss_diffraction_db=4.0)  # multipath
+jitter_db      = N(0, snr_jitter_db=5.0)             # measurement
+effective_snr_db = spec.snr_db + shadowing_db + diffraction_db + jitter_db
+```
+
+The `SyntheticEmitterSpec.snr_db` field now represents the **free-space SNR** (what you'd get in ideal conditions with no losses). The effective received SNR is `snr_db + shadowing + diffraction + jitter`, with the same per-emitter sampling as in `TSRDEmitterSampler`. This eliminates the 13× detection-probability gap that earlier versions showed between System A and System B when running the same scheduler on identical ground truth.
+
+The three loss parameters (`path_loss_shadowing_db`, `path_loss_diffraction_db`, `snr_jitter_db`) are constructor arguments of `SyntheticEWPDWGenerator` and default to the same values as `TSRDEmitterSampler` (8.0, 4.0, 5.0 dB). Override them when you need a different propagation environment (e.g., open ocean vs. urban).
+
 ---
 
 ## 7. TSRD Pipeline — Option B + C
