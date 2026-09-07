@@ -489,9 +489,14 @@ class RealRFSimulator:
             #  - SNR-based: per-pulse Pd = DetectionConfig.pd_for_snr(snr_db)
             use_snr_detection = self.config.detection_config is not None
             if use_snr_detection:
+                # SNR = amplitude - noise_floor (matching TSRDEnvironment._detect)
                 snr_db = float(pulse.amplitude_dbm) - float(
                     self.config.noise_floor_dbm
                 )
+                # Apply per-band antenna gain as SNR penalty (matching System B).
+                # If antenna_gain_db is None, use 0 dB (uniform gain).
+                if self.config.antenna_gain_db is not None:
+                    snr_db -= float(self.config.antenna_gain_db[band])
                 pd = snr_to_pd(snr_db, self.config.detection_config)
                 detected = self._rng.random() < pd
             else:
