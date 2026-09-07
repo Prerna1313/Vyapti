@@ -12,7 +12,7 @@
 
 1. [What Vyapti Is](#1-what-vyapti-is)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Two Data Paths — System A and System B](#3-two-data-paths--system-a-and-system-b)
+3. [Three Systems — A, B, and C](#3-three-systems--a-b-and-c)
 4. [Scheduler Interface — What Schedulers See](#4-scheduler-interface--what-schedulers-see)
 5. [Ground Truth — Hidden from Schedulers](#5-ground-truth--hidden-from-schedulers)
 6. [Detection Model — SNR to Hit](#6-detection-model--snr-to-hit)
@@ -24,13 +24,14 @@
 12. [Multi-Objective Reward Engine](#12-multi-objective-reward-engine)
 13. [Threat-Aware Scheduling (Sub-problem F)](#13-threat-aware-scheduling-sub-problem-f)
 14. [Scan Policy Oracle — Stare Mode Counterfactual](#14-scan-policy-oracle--stare-mode-counterfactual)
-15. [Metrics — Seven Figures of Merit](#15-metrics--seven-figures-of-merit)
-16. [Statistical Protocol](#16-statistical-protocol)
-17. [Protocol Gates — What's Been Verified](#17-protocol-gates--whats-been-verified)
-18. [How to Run — Local](#18-how-to-run--local)
-19. [How to Run — Kaggle](#19-how-to-run--kaggle)
-20. [Where to Place Schedulers](#20-where-to-place-schedulers)
-21. [Quick Reference](#21-quick-reference)
+15. [System C — RF Physics Stress-Test Layer](#15-system-c--rf-physics-stress-test-layer)
+16. [Metrics — Seven Figures of Merit](#16-metrics--seven-figures-of-merit)
+17. [Statistical Protocol](#17-statistical-protocol)
+18. [Protocol Gates — What's Been Verified](#18-protocol-gates--whats-been-verified)
+19. [How to Run — Local](#19-how-to-run--local)
+20. [How to Run — Kaggle](#20-how-to-run--kaggle)
+21. [Where to Place Schedulers](#21-where-to-place-schedulers)
+22. [Quick Reference](#22-quick-reference)
 
 ---
 
@@ -101,6 +102,21 @@ It does this by:
 │  • FSPL + shadowing/diffract│     │  • AoA-first deinterleaver (Option C)      │
 │  • Dynamic policies (DA,IOO,RC)    │  • Synthetic EW generator for Kaggle fallback│
 └─────────────────────────────┘     └─────────────────────────────────────────────┘
+                ┌───────────────────────────────────────────────────────────┐
+                │   SYSTEM C — RF Physics (optional stress-test layer)      │
+                │   vyapti_simulator/rf/                                   │
+                │                                                           │
+                │  • Waveform synthesis (LFM chirp, PSK, QAM)               │
+                │  • Matched filter + CFAR detection                        │
+                │  • Rayleigh/Rician fading, AWGN, FSPL                    │
+                │  • Closed-loop dwell scheduling (not band/slot)            │
+                │  • Stress-tests schedulers against realistic RF physics   │
+                │                                                           │
+                │  Optional: use it to test how schedulers perform when     │
+                │  detection is not a logistic(SNR) — it is a matched       │
+                │  filter against an actual chirp waveform through a         │
+                │  physical channel with fading.                             │
+                └───────────────────────────────────────────────────────────┘
 ```
 
 ### Package Structure
@@ -132,6 +148,18 @@ vyapti_simulator/
 │   ├── antenna_patterns.py        # Sectorised EW antenna gain models
 │   └── local_emitter_bridge.py    # System A/B unification
 │
+├── rf/                            # RF physics pipeline (System C — optional)
+│   ├── waveforms.py              # LFM chirp, PSK, QAM; AWGN; matched filter
+│   ├── propagation.py            # KinematicEmitter, FSPL, Rayleigh/Rician fading
+│   ├── amplifiers.py             # Rapp and Saleh amplifier non-linearity
+│   ├── simulator_engine.py        # RealTimeRFSimulator with simulate_dwell()
+│   ├── receiver_impairments.py    # Phase noise, IQ imbalance, DC offset, quantisation
+│   ├── swerling.py               # Swerling 0/I/II/III/IV target fluctuation
+│   ├── tsrd_bridge.py            # SyntheticEmitterSpec → SimEmitter bridge
+│   ├── pulse_detector.py          # CFAR detection, matched filter, detect_dwell()
+│   ├── rf_to_pdw_pipeline.py     # Open-loop end-to-end: specs → RF → I/Q → PDWs
+│   └── closed_loop.py            # MissionRunner, BaseScheduler, comparison harness
+│
 ├── algorithms/                     # Reference scheduler implementations
 │   ├── bandit/                   # UCB, Thompson Sampling, Coverage Constrained, etc.
 │   └── threat.py                  # ThreatScorer, ThreatScoreMixin
@@ -154,44 +182,42 @@ vyapti_simulator/
 
 ---
 
-## 3. Two Data Paths — System A and System B
+## 3. Three Systems — A, B, and C
 
-Vyapti supports two independent data paths that produce the same observation interface. Schedulers and metrics run unchanged across both.
+Vyapti supports three systems. **Systems A and B are the protocol-gated primary paths** for band/slot scheduler experiments — every scheduler must pass conformance on A or B before its results are admissible. **System C is an optional, additive stress-test layer** on top of A and B that swaps the abstract hit/miss detector for a realistic RF physics pipeline.
 
-### System A — Synthetic (src/)
+| System | What it does | When to use |
+|---|---|---|
+| **A — Synthetic** (`src/`) | 13 emitter behavior classes → band/slot grid → logistic(SNR) → hit/miss | Fast statistical experiments, thousands of seeds |
+| **B — TSRD Real Data** (`vyapti_simulator/tsrd/`) | H5 PDWStream → discretise / deinterleave → band/slot grid → AGC+CI+LNA → hit/miss | Evaluation against realistic recorded RF |
+| **C — RF Physics** (`vyapti_simulator/rf/`) | Emitter specs → kinematic propagation → waveform synthesis → matched filter + CFAR → PDW stream → threat-scored scheduling | **Adversarial test**: how do my schedulers hold up when detection is not a logistic(SNR)? |
 
-**File:** `src/rf_pulse_simulator.py`
+The protocol-gated scheduler interface is the **band/slot interface** (`step(band) → {hit, miss}`) shared by A and B. System C uses a different interface — the **closed-loop dwell interface** (`decide(state) → (freq, aoa, dwell_ms)`) — because it needs the scheduler to pick an actual frequency band, AoA window, and dwell duration. Both interfaces are valid; A/B is the canonical PS26055 interface, C is the stress-test interface. A scheduler that wins on A or B but loses on C has learned to exploit the abstract detection model rather than the underlying RF physics.
 
-Uses the `src/emitter_models` package to generate pulses from 13 `EmitterBehaviorType` classes. The truth grid is built deterministically from emitter configs. Each emitter's pulses are generated with realistic RF physics (pri, pulse width, frequency).
+### When to use each system
 
-**Key modules:**
-- `src/emitter_models.py` — 13 emitter behavior classes with dynamic policies
-- `src/pulse.py` — Pulse descriptor word (ToA, frequency, PW, AoA, amplitude)
+- **Use System A** for: bandit algorithm development, conformance certification, large-scale statistical comparison.
+- **Use System B** for: validation against realistic recorded data, real-world receiver physics (AGC, coherent integration, LNA).
+- **Use System C** for: stress-testing a scheduler that already passes A and B, evaluating detection-aware policies, and running closed-loop experiments where the receiver is a matched filter rather than a logistic curve.
 
-**Path:** EmitterConfig → HiddenTruthGrid → PS26055Environment → step() → observation
+### Stare mode and System C
 
-### System B — TSRD Real Data (vyapti_simulator/tsrd/)
+Stare mode (System B's counterfactual oracle, §14) is **a special case** of closed-loop dwell scheduling: it picks a single fixed band and dwells for the entire mission. In System C terms, this is a closed-loop scheduler with `band_count=1`, no AoA window, and `dwell_ms=mission_duration_ms`. The `MissionRunner` and `BaseScheduler` framework in `vyapti_simulator/rf/closed_loop.py` can be used to reproduce stare-mode results, and to compare them against more sophisticated dwell strategies on the same RF physics pipeline.
 
-Uses real PDW streams from the Turing Synthetic Radar Dataset (arXiv:2602.03856). Two sub-paths:
+### A/B/C Unification Bridge
 
-**Option B:** PDW discretisation — read H5 → PDWStream → DiscretisedGrid → TSRDEnvironment
-**Option C:** Deinterleaver — adds AoA-first 3-stage track extraction to Option B
+`vyapti_simulator/tsrd/local_emitter_bridge.py` bridges System A emitter models to the TSRD grid format, enabling direct comparison of synthetic emitters against TSRD data using identical processing. The `vyapti_simulator/rf/tsrd_bridge.py` module bridges System A specs (`SyntheticEmitterSpec`) to System C's RF engine inputs (`SimEmitterSpec`) for end-to-end stress testing.
 
-**Key modules:**
-- `tsrd_adapter.py` — reads H5 files into PDWStream
-- `pdw_discretiser.py` — discretises PDW to BandSlotCell grid
-- `deinterleaver.py` — AoA → PW → PRI 3-stage deinterleaver
-- `tsrd_environment.py` — TSRDEnvironment for scheduling experiments
-- `synthetic_pdw_generator.py` — synthetic fallback when TSRD is unavailable
+### Path summary
 
-**Path (Option B):** H5 → TSRDAdapter → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment → step() → observation
-**Path (Option C):** H5 → TSRDAdapter → PDWStream → FeatureBasedDeinterleaver → tracks → TSRDEnvironment
-
-**Path (Synthetic fallback):** SyntheticEWPDWGenerator → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment
-
-### System A/B Unification Bridge
-
-`vyapti_simulator/tsrd/local_emitter_bridge.py` bridges System A emitter models to the TSRD grid format, enabling direct comparison of synthetic emitters against TSRD data using identical processing.
+| System | Path |
+|---|---|
+| A | EmitterConfig → HiddenTruthGrid → PS26055Environment → step() → observation |
+| B (Option B) | H5 → TSRDAdapter → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment → step() → observation |
+| B (Option C) | H5 → TSRDAdapter → PDWStream → FeatureBasedDeinterleaver → tracks → TSRDEnvironment |
+| B (synthetic fallback) | SyntheticEWPDWGenerator → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment |
+| C (open-loop) | SyntheticEmitterSpec → TSRDSpecToRFBridge → RealTimeRFSimulator → I/Q → PulseDetector → PDWStream |
+| C (closed-loop) | MissionRunner → BaseScheduler.decide() → simulate_dwell() → detect_dwell() → TrackedEmitter → update state |
 
 ---
 
@@ -409,6 +435,56 @@ effective_snr_db = spec.snr_db + shadowing_db + diffraction_db + jitter_db
 The `SyntheticEmitterSpec.snr_db` field now represents the **free-space SNR** (what you'd get in ideal conditions with no losses). The effective received SNR is `snr_db + shadowing + diffraction + jitter`, with the same per-emitter sampling as in `TSRDEmitterSampler`. This eliminates the 13× detection-probability gap that earlier versions showed between System A and System B when running the same scheduler on identical ground truth.
 
 The three loss parameters (`path_loss_shadowing_db`, `path_loss_diffraction_db`, `snr_jitter_db`) are constructor arguments of `SyntheticEWPDWGenerator` and default to the same values as `TSRDEmitterSampler` (8.0, 4.0, 5.0 dB). Override them when you need a different propagation environment (e.g., open ocean vs. urban).
+
+### Swerling Target Fluctuation Models (v1.3.0)
+
+The **Swerling models** describe the statistical distribution of received amplitude from a fluctuating radar target and are the canonical extension of the Marcum (non-fluctuating) case used in classical radar detection theory.
+
+**Physics** (`vyapti_simulator/rf/swerling`):
+
+| Model | Distribution | Decorrelation | Mean Loss | Std Dev |
+|-------|-------------|---------------|-----------|---------|
+| Swerling 0 (Marcum) | Constant | None | 0 dB | 0 dB |
+| Swerling I | Exponential | Per burst | ~-2.5 dB | ~5.6 dB |
+| Swerling II | Exponential | Per pulse | ~-2.5 dB | ~5.6 dB |
+| Swerling III | 4-DoF chi-squared | Per burst | ~-1.1 dB | ~3.4 dB |
+| Swerling IV | 4-DoF chi-squared | Per pulse | ~-1.1 dB | ~3.4 dB |
+
+Swerling I/II (exponential) model targets where the scatterers are all in the same range cell. Swerling III/IV (chi-squared 4-DoF) model targets with one dominant plus many small scatterers.
+
+The `apply_swerling_fluctuation(amp_db, model, rng, burst_size=1)` function applies the fluctuation to a 1D array of pulse amplitudes in dB. For slow-fluctuation models (I/III), `burst_size` groups consecutive pulses into one RCS draw (shared within a beam dwell). Fast models (II/IV) draw independently per pulse.
+
+**Wired into**: `SyntheticEWPDWGenerator.generate()` (per-emitter), `TSRDEmitterSampler` (per-emitter burst), `local_emitters_to_pdw_stream` (synthetic bridge), and the experiment runner's `_apply_swerling()` method which applies Swerling to `EmitterConfig.snr_db` before the environment runs.
+
+### Receiver Impairment Models (v1.3.0)
+
+Real ESM receivers introduce hardware imperfections on the I/Q complex baseband that affect matched-filter and coherent integration performance.
+
+**Physics** (`vyapti_simulator/rf/receiver_impairments`):
+
+| Impairment | Model | Typical Range |
+|-----------|-------|--------------|
+| Phase noise | Wiener random walk on carrier phase | -100 dBc/Hz (TCXO), -130 dBc/Hz (OCXO) |
+| IQ gain imbalance | Q scaled by (1+g) | 0.1–0.5 dB |
+| IQ phase imbalance | Q rotated by φ | 0.5°–3° |
+| DC offset | Constant added to I and Q | 1–100 LSBs |
+| Quantisation | Uniform round to 2^bits levels | 8–16 bits |
+
+The impairment chain is applied in signal-flow order: **phase noise → IQ imbalance → DC offset → quantisation**. Phase noise uses a Wiener process with per-sample variance `σ² = 2π · 10^(PN_dBc/Hz / 10)`. The combined `apply_receiver_impairments()` function applies all impairments.
+
+**Wired into**: `src/rf_pulse_simulator.generate_iq_for_pulses()` via the new keyword parameters `phase_noise_dbc_per_hz`, `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, `dc_offset_i`, `dc_offset_q`, `quantization_bits`, `sample_rate_hz`. All default to 0/None (ideal receiver, backward-compatible).
+
+### Frequency-Dependent Antenna Gain (v1.3.0)
+
+The antenna gain patterns in `vyapti_simulator/tsrd/antenna_patterns` now include **frequency-dependent** models that take an actual frequency axis (MHz) rather than just a band index.
+
+| Function | Description |
+|----------|-------------|
+| `cosine_taper_antenna_gain(freq_mhz)` | Cosine-shaped passband peaking at centre freq |
+| `sinc_antenna_gain(freq_mhz)` | Sinc-squared roll-off with deep nulls at band edges |
+| `realistic_ew_antenna_gain(freq_mhz)` | Cosine taper + standing-wave ripple + random deep nulls |
+
+All return a `np.ndarray` of shape `(band_count,)` with dB gain per band. The `ExperimentConfig.antenna_pattern` parameter in the experiment runner selects the pattern: `"uniform"` (isotropic, 0 dB), `"sectorised"`, `"realistic"`, `"cosine_taper"`, `"sinc"`, or `"realistic_ew"`. The `rf_physics` block in every experiment report records which pattern was used.
 
 ---
 
@@ -695,7 +771,131 @@ The oracle accepts any `ScanPolicy` (sequence of `DwellWindow` objects) and retu
 
 ---
 
-## 15. Metrics — Seven Figures of Merit
+## 15. System C — RF Physics Stress-Test Layer
+
+### What it is
+
+System C (`vyapti_simulator/rf/`) is an **optional, additive stress-test layer** on top of the protocol-gated Systems A and B. It replaces the abstract hit/miss detector with a realistic RF physics pipeline:
+
+- **Waveform synthesis**: LFM chirp, PSK, QAM waveforms generated per emitter
+- **Physical channel**: free-space path loss, Rayleigh/Rician fading, AWGN
+- **Realistic receiver**: matched filter + CFAR detection (not logistic(SNR))
+- **Closed-loop dwell**: scheduler picks `(freq_start, freq_end, aoa_center, aoa_window, dwell_ms)` per decision
+
+A scheduler that wins on System A or B but loses on System C has learned to exploit the abstract detection model. System C is the adversarial test that catches this.
+
+### Two modes
+
+**Open-loop** (`RFPulsePipeline`): generates a full I/Q buffer for an entire emitter population and returns a PDW stream. Use this to test the detector and deinterleaver against realistic waveforms. No scheduler involved.
+
+**Closed-loop** (`MissionRunner` + `BaseScheduler`): the scheduler decides each dwell's `(freq, aoa, dwell_ms)`. Only that slice is simulated. The `simulate_dwell()` engine applies band-windowing and AoA-windowing to synthesise only pulses in the selected slice. The `detect_dwell()` detector runs a matched filter + CFAR on that slice and returns pulses in the selected windows.
+
+### Modules
+
+| Module | What it does |
+|---|---|
+| `waveforms.py` | LFM chirp, PSK, QAM generators; AWGN; matched filter; baseband ↔ RF |
+| `propagation.py` | KinematicEmitter; free-space path loss; Rayleigh, Rician, multipath fading |
+| `amplifiers.py` | Rapp and Saleh amplifier non-linearity |
+| `simulator_engine.py` | Real-time RF engine with `simulate_dwell(freq_start, freq_end, aoa_center, aoa_window, dwell_ms)` |
+| `receiver_impairments.py` | Phase noise, I/Q imbalance, DC offset, ADC quantisation |
+| `swerling.py` | Swerling 0/I/II/III/IV target fluctuation models |
+| `tsrd_bridge.py` | `SyntheticEmitterSpec` → `SimEmitterSpec` bridge for RF engine |
+| `pulse_detector.py` | CFAR detection + `detect_dwell(freq_start, freq_end, freq_center, aoa_center, aoa_window)` |
+| `rf_to_pdw_pipeline.py` | Open-loop end-to-end: specs → RF engine → I/Q → PDW stream |
+| `closed_loop.py` | `MissionRunner`, `BaseScheduler`, 3 baseline schedulers, comparison harness |
+
+### Closed-loop scheduler interface
+
+```python
+from vyapti_simulator.rf import (
+    ThreatScoreScheduler, ThreatWeights, MissionRunner,
+    RealTimeRFSimulator, TSRDSpecToRFBridge, RFPipelineConfig,
+    SyntheticEWPDWGenerator, default_six_emitter_scenario,
+)
+
+# Build RF engine from emitter specs
+specs = default_six_emitter_scenario(seed=42)
+bridge = TSRDSpecToRFBridge()
+emitters = [bridge.spec_to_sim_emitter(s) for s in specs]
+engine = RealTimeRFSimulator(sample_rate_hz=100e6, noise_floor_dbm=-130)
+for e in emitters:
+    engine.add_emitter(e)
+
+# Closed-loop scheduler
+weights = ThreatWeights(
+    freq_weight=2.0, pw_weight=1.0, pri_weight=1.0,
+    amp_weight=0.5, aoa_weight=1.5,
+)
+scheduler = ThreatScoreScheduler(band_count=36, weights=weights)
+
+# Run mission
+runner = MissionRunner(
+    engine=engine,
+    scheduler=scheduler,
+    mission_duration_ms=3000.0,
+    band_count=36,
+    aoa_min_deg=-180.0,
+    aoa_max_deg=180.0,
+)
+result = runner.run()
+print(f"Threat score: {result.scheduler_score.threat_score:.3f}")
+```
+
+### Three baseline schedulers
+
+| Scheduler | Description |
+|---|---|
+| `RoundRobinScheduler` | Cycles through bands sequentially. Simple baseline. |
+| `PriorityQueueScheduler` | Tracks all emitters, always dwells on highest priority. |
+| `ThreatScoreScheduler` | Uses 5-feature threat score (frequency, PW, PRI, amplitude, AoA). |
+
+### Comparison harness
+
+```python
+from vyapti_simulator.rf import run_comparison, summarise_results
+
+results = run_comparison(
+    emitter_specs=specs,
+    schedulers={
+        "RoundRobin":    lambda: RoundRobinScheduler(band_count=36),
+        "PriorityQueue": lambda: PriorityQueueScheduler(band_count=36),
+        "ThreatScore":   lambda: ThreatScoreScheduler(band_count=36, weights=ThreatWeights()),
+    },
+    seeds=list(range(20)),
+    mission_duration_ms=3000.0,
+)
+summary = summarise_results(results)
+print(summary)
+```
+
+### Open-loop pipeline (no scheduler)
+
+```python
+from vyapti_simulator.rf import RFPulsePipeline, RFPipelineConfig, TSRDSpecToRFBridge
+
+specs = default_six_emitter_scenario(seed=42)
+config = RFPipelineConfig(
+    sample_rate_hz=100e6,
+    mission_duration_ms=100.0,
+    detection_threshold_snr_db=10.0,
+)
+bridge = TSRDSpecToRFBridge()
+pipeline = RFPulsePipeline(config=config, bridge=bridge, emitter_specs=specs)
+pdw_stream = pipeline.run()
+print(f"Detected {pdw_stream.pulse_count} pulses")
+```
+
+### Stress-test use cases
+
+- **Detection model overfitting**: a scheduler tuned for `logistic(SNR)` fails when the detector is a matched filter against an actual chirp waveform
+- **False-alarm sensitivity**: System A/B use a logistic threshold; System C's CFAR adapts to local noise, making false alarms less predictable
+- **Fading robustness**: Rayleigh/Rician channel introduces amplitude fluctuations that a static SNR model cannot capture
+- **AoA-aware scheduling**: System A/B expose `mean_aoa_deg` per band; System C lets the scheduler pick an explicit AoA window and measure whether it pays off
+
+---
+
+## 16. Metrics — Seven Figures of Merit
 
 All computed by `MetricsEngine` after the decision step:
 
@@ -794,6 +994,28 @@ python -m vyapti_simulator.qualification.conformance \
 
 This runs 11 checks (C0–C10). Results from uncertified schedulers are not admissible under the frozen protocol.
 
+### Run a System C Stress Test
+
+```python
+from vyapti_simulator.rf import (
+    RoundRobinScheduler, PriorityQueueScheduler, ThreatScoreScheduler,
+    ThreatWeights, run_comparison,
+)
+from vyapti_simulator.tsrd.synthetic_pdw_generator import default_six_emitter_scenario
+
+specs = default_six_emitter_scenario(seed=42)
+results = run_comparison(
+    emitter_specs=specs,
+    schedulers={
+        "RoundRobin":    lambda: RoundRobinScheduler(band_count=36),
+        "PriorityQueue": lambda: PriorityQueueScheduler(band_count=36),
+        "ThreatScore":   lambda: ThreatScoreScheduler(band_count=36, weights=ThreatWeights()),
+    },
+    seeds=list(range(10)),
+    mission_duration_ms=3000.0,
+)
+```
+
 ---
 
 ## 19. How to Run — Kaggle
@@ -873,6 +1095,28 @@ grid = discretise_pdw_to_grid(pdw, n_bands=36)
 env = TSRDEnvironment(n_bands=36, grid=grid, detection=DetectionConfig())
 ```
 
+### System C (RF Physics) — Optional Stress Test
+
+```python
+from vyapti_simulator.rf import (
+    ThreatScoreScheduler, ThreatWeights, run_comparison,
+)
+from vyapti_simulator.tsrd.synthetic_pdw_generator import default_six_emitter_scenario
+
+# No dataset needed — System C uses emitter specs
+specs = default_six_emitter_scenario(seed=42)
+results = run_comparison(
+    emitter_specs=specs,
+    schedulers={
+        "ThreatScore": lambda: ThreatScoreScheduler(
+            band_count=36, weights=ThreatWeights(),
+        ),
+    },
+    seeds=list(range(5)),
+    mission_duration_ms=2000.0,
+)
+```
+
 ---
 
 ## 20. Where to Place Schedulers
@@ -886,6 +1130,7 @@ env = TSRDEnvironment(n_bands=36, grid=grid, detection=DetectionConfig())
 | In a subdirectory | `/kaggle/working/schedulers/my_thompson.py` |
 | In a private GitHub repo | `!pip install git+https://github.com/your/private-repo.git` |
 | In any pip-installable package | `!pip install my-research-schedulers` |
+| System C closed-loop scheduler | `vyapti_simulator/rf/closed_loop.py` — extend `BaseScheduler` |
 
 ---
 
@@ -906,12 +1151,60 @@ env = TSRDEnvironment(n_bands=36, grid=grid, detection=DetectionConfig())
 | What's the difference between Option B and C? | B = grid only, C = grid + deinterleaver tracks |
 | What is the Shnidman model? | Literature-grounded detection curve from Albersheim/Shnidman 1964/1989 |
 | What does the scan policy oracle do? | Counterfactual: how much would a scan policy capture vs Stare mode? |
+| What is System C? | Optional RF physics stress-test layer; closed-loop dwell scheduling with matched filter + CFAR |
+| How does System C differ from A and B? | A and B use band/slot interface with logistic(SNR); C uses closed-loop dwell with matched filter + CFAR |
+| When should I use System C? | After passing A and B, to test if the scheduler exploits the abstract detection model rather than RF physics |
 
 ---
 
 ## Changelog
 
-### v1.2.0 (2026-09-07 — Current)
+### v1.4.0 (2026-09-07 — Current)
+
+- Added **System C — RF Physics stress-test layer** (`vyapti_simulator/rf/`)
+  - **Optional, additive layer** on top of Systems A and B for stress-testing schedulers against realistic RF physics
+  - **Waveform synthesis**: LFM chirp, PSK, QAM generators (`waveforms.py`)
+  - **Physical channel**: free-space path loss, Rayleigh/Rician/multipath fading (`propagation.py`)
+  - **Receiver impairments**: phase noise, IQ imbalance, DC offset, ADC quantisation (`receiver_impairments.py`)
+  - **Amplifier non-linearity**: Rapp and Saleh models (`amplifiers.py`)
+  - **Swerling target fluctuation**: 0/I/II/III/IV cases (`swerling.py`)
+  - **Real-time RF engine** with `simulate_dwell(freq_start, freq_end, aoa_center, aoa_window, dwell_ms)` (`simulator_engine.py`)
+  - **Matched filter + CFAR detector** with `detect_dwell(freq_start, freq_end, freq_center, aoa_center, aoa_window)` (`pulse_detector.py`)
+  - **TSRD → RF bridge** (`tsrd_bridge.py`): `SyntheticEmitterSpec` → `SimEmitterSpec`
+  - **Open-loop pipeline** (`rf_to_pdw_pipeline.py`): end-to-end specs → I/Q → PDW stream
+  - **Closed-loop framework** (`closed_loop.py`): `MissionRunner`, `BaseScheduler`, three baseline schedulers (RoundRobin, PriorityQueue, ThreatScore), `run_comparison` harness
+  - **Updated `SyntheticEmitterSpec`** (`synthetic_pdw_generator.py`): 9 new fields for RF physics (`waveform_type`, `chirp_bandwidth_hz`, `los_component_db`, `receiver_position_m`, `emitter_position_m`, `emitter_velocity_m_s`, `doppler_hz`, `tx_power_dbm`, `tx_gain_dbi`, `rx_gain_dbi`)
+  - **30 new tests** (`tests/test_rf_closed_loop.py`) covering band/AoA windowing, scheduler behavior, MissionRunner, and end-to-end comparison
+- **Architecture reframed**: §3 now describes the three systems and when to use each; §15 is a full System C user guide
+
+### v1.3.0 (2026-09-07)
+
+- Added **Swerling Target Fluctuation Models** (`vyapti_simulator/rf/swerling.py`)
+  - All five cases: Marcum (Swerling 0), I/II (exponential), III/IV (4-DoF chi-squared)
+  - `apply_swerling_fluctuation(amp_db, model, rng, burst_size=1)` API
+  - Wired into: `SyntheticEWPDWGenerator`, `TSRDEmitterSampler`, `local_emitters_to_pdw_stream`, and experiment runner's `_apply_swerling()`
+- Added **Receiver Impairment Models** (`vyapti_simulator/rf/receiver_impairments.py`)
+  - Phase noise (Wiener random walk), IQ gain/phase imbalance, DC offset, ADC quantisation
+  - `apply_phase_noise`, `apply_iq_imbalance`, `apply_dc_offset`, `apply_quantization`, `apply_receiver_impairments`
+  - Wired into `src/rf_pulse_simulator.generate_iq_for_pulses()` with keyword parameters
+- Added **Frequency-Dependent Antenna Gain** (`vyapti_simulator/tsrd/antenna_patterns.py`)
+  - `cosine_taper_antenna_gain(freq_mhz)`, `sinc_antenna_gain(freq_mhz)`, `realistic_ew_antenna_gain(freq_mhz)`
+  - Takes actual frequency axis in MHz; pattern shapes are physical functions of frequency
+  - Experiment runner supports pattern selection via `ExperimentConfig.antenna_pattern`
+- Updated **Experiment Runner** (`vyapti_simulator/experiments/experiment_runner.py`)
+  - `_apply_swerling()` helper: applies Swerling + propagation loss (shadowing + diffraction) to `EmitterConfig.snr_db`
+  - `_build_antenna_gain()` helper: builds per-band gain array from selected pattern
+  - `_default_band_centre_freqs_mhz()`: 2–18 GHz EW band axis
+  - Swerling model, burst size, propagation losses, and antenna pattern all recorded in `rf_physics` block of experiment report
+  - Backward compatible: defaults (Swerling 0, uniform 0 dB) produce identical results to prior versions
+- Fixed **System A/B SNR Unification**
+  - `vyapti_simulator/tsrd/pdw_discretiser.py`: changed `nominal_noise_floor_db` defaults from `-80.0` to `-130.0` to match `DetectionConfig`
+  - This aligns SNR computation between the synthetic and TSRD paths
+- Added **tests/test_swerling.py**: 22 tests covering all five Swerling models
+- Added **tests/test_receiver_impairments.py**: 23 tests covering all five impairment types and the combined chain
+- Added **tests/test_antenna_patterns_freq_dep.py**: 20 tests covering cosine taper, sinc, and realistic EW patterns
+
+### v1.2.0 (2026-09-07)
 
 - Added **Synthetic PDW Generator** (`vyapti_simulator/tsrd/synthetic_pdw_generator.py`)
   - Produces TSRD-shaped PDWStream from emitter specs
