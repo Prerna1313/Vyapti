@@ -206,9 +206,16 @@ def run_episode(
         if env.done:
             break
 
+        import time
+        import psutil
+
+        process = psutil.Process()
+        t_start = time.perf_counter()
+        mem_start = process.memory_info().rss
+
         action = scheduler.select_action(history, t)
-        # Range-check here as well as in env.step: the runner can name the
-        # offending scheduler, which env.step cannot.
+        t_select = time.perf_counter()
+        
         try:
             action = int(action)
         except (TypeError, ValueError) as exc:
@@ -232,6 +239,7 @@ def run_episode(
 
         history.append(obs)
         scheduler.update(action, obs)
+        t_update = time.perf_counter()
 
         prediction: Optional[BandPrediction] = None
         if collect_predictions:
@@ -241,9 +249,19 @@ def run_episode(
                     f"{name}.predict returned {type(prediction).__name__}; it must "
                     f"return a BandPrediction or None."
                 )
+        t_predict = time.perf_counter()
+        
+        mem_end = process.memory_info().rss
+
+        # Add compute profiling to observation so metrics can read it
+        obs["select_action_ms"] = (t_select - t_start) * 1000.0
+        obs["predict_ms"] = (t_predict - t_update) * 1000.0
+        obs["wall_clock_ms"] = (t_predict - t_start) * 1000.0
+        obs["memory_delta_bytes"] = mem_end - mem_start
 
         trajectory.append(TrajectoryStep(
-            time_slot=t, action=action, observation=obs, prediction=prediction))
+            time_slot=t, action=action, observation=obs, prediction=prediction,
+            decision_latency_s=(t_select - t_start)))
         actions[t] = action
         hits[t] = bool(obs["hit"])
 

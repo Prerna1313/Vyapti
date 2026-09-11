@@ -256,22 +256,26 @@ class TSRDCorpusLoader:
     Parameters
     ----------
     corpus_dir : str | Path
-        Directory containing `*.h5` files. Required; the
-        loader does not have an in-memory fallback.
+        Directory containing the root of the TSRD dataset (e.g. where
+        `scan/`, `stare/`, `archive/` directories reside).
 
     data_mode : TSRDDataMode
         Which admission mode the adapters produced by this
-        loader will operate in. Defaults to `REAL_TSRD` (the
-        only mode that produces results claimable as "tested
-        on real TSRD"). Use `FIXTURE` only for the small
-        hash-pinned fixtures under `tests/fixtures/tsrd/`.
+        loader will operate in. Defaults to `REAL_TSRD`.
+
+    split : str, default='train'
+        Which TSRD dataset split to load. Valid options: 'train', 'val', 'test'.
+        Used to prevent data leakage by isolating file discovery to the
+        requested split (e.g., `scan/train_scan/`).
+
+    receiver_mode : str, default='scan'
+        Which receiver mode subset to load. Valid options: 'scan', 'stare', 'archive'.
+        Used with `split` to resolve the precise target subdirectory.
 
     simulation_config : SimulationConfig | None
         Passed through to each `TSRDAdapter`. Required for
         `to_level1_observed_occupancy()` and for
-        `to_emitter_configs()` (both of which need the grid to
-        map `freqs_mhz` to bands and `scan_rate_rpm` to slot
-        period). Not required for `to_pdw_stream()`.
+        `to_emitter_configs()`.
 
     caller_overrides : dict | None
         Optional caller-supplied values for fields the H5
@@ -305,6 +309,8 @@ class TSRDCorpusLoader:
         corpus_dir: Union[str, Path],
         data_mode: TSRDDataMode = TSRDDataMode.REAL_TSRD,
         *,
+        split: str = "train",
+        receiver_mode: str = "scan",
         simulation_config: Optional[Any] = None,
         caller_overrides: Optional[Dict[str, Any]] = None,
         fail_fast: bool = False,
@@ -319,10 +325,7 @@ class TSRDCorpusLoader:
 
         if not path.is_dir():
             raise CorpusUnavailableError(
-                f"TSRD corpus directory not found: {path}. "
-                f"data_mode={data_mode.value!r} requires this "
-                f"directory. Refusing to silently substitute "
-                f"fixtures or synthetic data."
+                f"TSRD corpus root directory not found: {path}."
             )
 
         self._corpus_dir = path
@@ -331,6 +334,42 @@ class TSRDCorpusLoader:
         self._caller_overrides = dict(caller_overrides) if caller_overrides else None
         self._fail_fast = bool(fail_fast)
         self._require_manifest = bool(require_manifest)
+        self._split = split
+        self._target_receiver_mode = receiver_mode
+        self._legacy_mode = False
+
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"Invalid split '{split}'. Must be 'train', 'val', or 'test'.")
+        if receiver_mode not in ("scan", "stare", "archive"):
+            raise ValueError(f"Invalid receiver_mode '{receiver_mode}'. Must be 'scan', 'stare', or 'archive'.")
+
+        if receiver_mode == "archive":
+            sp_dir = "validation" if split == "val" else split
+            target_dir = path / "archive" / sp_dir
+        elif receiver_mode == "scan":
+            target_dir = path / "scan" / f"{split}_scan"
+        elif receiver_mode == "stare":
+            target_dir = path / "stare" / f"{split}_stare"
+
+        if target_dir.is_dir():
+            self._data_dir = target_dir
+        else:
+            # Check if this is a legacy fixture/flat directory
+            if list(path.glob("*.h5")) or list(path.rglob("*.h5")):
+                import warnings
+                warnings.warn(
+                    f"TSRD split directory not found at {target_dir}. "
+                    f"Falling back to legacy recursive search in {path}. "
+                    f"WARNING: This may cause data leakage if pointing to a full TSRD root.",
+                    DeprecationWarning
+                )
+                self._data_dir = path
+                self._legacy_mode = True
+            else:
+                raise CorpusUnavailableError(
+                    f"TSRD split directory not found: {target_dir}. "
+                    f"Ensure you are pointing to the proper TSRD root directory."
+                )
 
     # ----------------------------------------------------------------
     # Public API
@@ -341,23 +380,24 @@ class TSRDCorpusLoader:
 
     def discover_h5_files(self) -> List[Path]:
         """
-        Recursively discover all `*.h5` files under
-        `corpus_dir`. Uses `rglob` (not `glob`) so this works
-        for BOTH shapes of TSRD corpus supply:
+        Discover `*.h5` files.
 
-        * the flat per-split directory form
-          `…/scan/test_scan/*.h5`, and
-        * the Hugging Face snapshot root form
-          `…/snapshots/<revision>/scan/test_scan/*.h5`.
+        Uses `glob("*.h5")` on the specific split directory to prevent
+        data leakage across train/val/test splits. Falls back to `rglob`
+        only for legacy flat directories or tests.
 
         The returned list is sorted so iteration order is
         deterministic. Raises `CorpusUnavailableError` if
         no H5 files are found.
         """
-        files = sorted(self._corpus_dir.rglob("*.h5"))
+        if getattr(self, '_legacy_mode', False):
+            files = sorted(self._data_dir.rglob("*.h5"))
+        else:
+            files = sorted(self._data_dir.glob("*.h5"))
+
         if not files:
             raise CorpusUnavailableError(
-                f"TSRD corpus directory {self._corpus_dir} contains "
+                f"TSRD corpus directory {self._data_dir} contains "
                 f"no .h5 files. data_mode={self._data_mode.value!r} "
                 f"requires at least one H5. Refusing to silently "
                 f"substitute fixtures or synthetic data."
