@@ -66,6 +66,56 @@ from dataclasses import dataclass, field
 
 from .environment import HiddenTruthGrid, EmitterConfig
 from .scheduler_interface import BandPrediction
+from collections import Counter
+
+
+def compute_exploration_metrics(
+    trajectory: Sequence[TrajectoryStep],
+    nbands: int
+) -> Dict[str, float]:
+    """
+    Compute exploration vs exploitation metrics.
+    
+    Returns:
+        - exploration_fraction: fraction of time on rarely-visited bands
+        - entropy_of_actions: normalized Shannon entropy of band selection
+        - coverage_rate: fraction of unique bands visited
+    """
+    actions = [step.action for step in trajectory]
+    
+    if not actions:
+        return {
+            'exploration_fraction': 0.0,
+            'entropy_of_actions': 0.0,
+            'coverage_rate': 0.0,
+        }
+    
+    action_counts = Counter(actions)
+    
+    # Exploration fraction: time on bands visited < 5 times
+    exploration_threshold = 5
+    exploration_slots = sum(
+        1 for a in actions 
+        if action_counts[a] < exploration_threshold
+    )
+    exploration_fraction = exploration_slots / len(actions)
+    
+    # Shannon entropy of action distribution
+    probs = np.array(list(action_counts.values())) / len(actions)
+    entropy = -np.sum(probs * np.log2(probs + 1e-10))
+    max_entropy = np.log2(nbands)
+    normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0.0
+    
+    # Coverage rate
+    coverage_rate = len(action_counts) / nbands
+    
+    return {
+        'exploration_fraction': float(exploration_fraction),
+        'entropy_of_actions': float(normalized_entropy),
+        'coverage_rate': float(coverage_rate),
+    }
+
+
 
 
 # =====================================================================
@@ -88,6 +138,7 @@ class TrajectoryStep:
     action: int
     observation: Dict[str, Any]
     prediction: Optional[BandPrediction] = None
+    decision_latency_s: float = 0.0
 
 
 # =====================================================================
@@ -112,6 +163,13 @@ class MetricsConfig:
     reward_weight_interception_rate: float = 1.0
     reward_weight_false_alarm_cost: float = -0.5   # Penalty term
     reward_weight_switch_cost: float = -0.1
+
+    # [ENGINEERING-ASSUMPTION] — Pfa constraint for sensitivity: sensitivity is only well-defined at a
+    # stated Pfa operating point. This value is the episode's configured
+    # false_alarm_probability; reported explicitly so the sensitivity number
+    # is never quoted without its conditioning assumption.
+    sensitivity_pfa_operating_point: Optional[float] = None
+    sensitivity_pfa_operating_point: Optional[float] = None
 
     # [ENGINEERING-ASSUMPTION] — Deadline for first-intercept measurement
     mission_deadline_slots: int = 500  # Adjustable per scenario
@@ -168,6 +226,12 @@ class MetricsConfig:
                 f"(unique bands visited in trailing {self.coverage_window_slots}-slot window) "
                 f"/ band_count."
             ),
+            "sensitivity_definition": (
+                "[ENGINEERING-ASSUMPTION] Sensitivity = min SNR achieving Pd_target "
+                f"({self.sensitivity_target_detection_rate}) at the stated Pfa operating "
+                f"point ({self.sensitivity_pfa_operating_point}). Both numbers must "
+                "appear in any reported sensitivity claim."
+            ),
         }
 
 
@@ -183,6 +247,31 @@ class MetricsEngine:
         self.results_history: List[Dict] = []
         # Internal audit: no truth leakage to scheduler
         self.scheduler_access_log: List[str] = []
+        self.trajectory: List[TrajectoryStep] = []
+        self.latencies: List[float] = []
+
+    def record_step(self, step: TrajectoryStep):
+        self.trajectory.append(step)
+        
+        # Collect latency
+        if hasattr(step, 'decision_latency_s') and step.decision_latency_s is not None:
+            self.latencies.append(step.decision_latency_s)
+
+    def compute_latency_metrics(self) -> Dict[str, Optional[float]]:
+        """Compute decision latency statistics."""
+        if not self.latencies:
+            return {
+                'mean_latency_s': None,
+                'max_latency_s': None,
+                'p95_latency_s': None,
+            }
+        
+        return {
+            'mean_latency_s': float(np.mean(self.latencies)),
+            'max_latency_s': float(np.max(self.latencies)),
+            'p95_latency_s': float(np.percentile(self.latencies, 95)),
+        }
+
 
     # -----------------------------------------------------------------
     # Top-level entry point
@@ -207,6 +296,11 @@ class MetricsEngine:
                 "record_result received an empty trajectory. Metrics cannot be "
                 "computed without executed decisions; refusing to emit zeros."
             )
+            
+        self.trajectory = []
+        self.latencies = []
+        for step in trajectory:
+            self.record_step(step)
 
         T = len(trajectory)
         band_count = truth_grid.band_count
@@ -243,6 +337,8 @@ class MetricsEngine:
         monitoring = self._monitoring_metrics(
             credited, present, transmitting_slots_per_emitter, existent,
             actions, band_count, T, receiver_accounting,
+            slot_duration_s=scenario_config.get("slot_duration_s", 0.05) if scenario_config else 0.05,
+            trajectory=trajectory,
         )
         sensitivity = self._sensitivity_metrics(credited, present, truth_grid, existent)
         prediction = self._prediction_metrics(trajectory, truth_grid)
@@ -254,7 +350,24 @@ class MetricsEngine:
         # Defaults are engineering-placeholder values; the runner must supply real ones.
         sc = dict(scenario_config) if scenario_config else {}
 
+        latency_metrics = self.compute_latency_metrics()
+        exploration_metrics = compute_exploration_metrics(self.trajectory, band_count)
+
         result = {
+            # ADD LATENCY METRICS
+            'mean_decision_latency_s': latency_metrics['mean_latency_s'],
+            'max_decision_latency_s': latency_metrics['max_latency_s'],
+            'p95_decision_latency_s': latency_metrics['p95_latency_s'],
+            'meets_realtime_requirement': (
+                latency_metrics['max_latency_s'] is not None 
+                and latency_metrics['max_latency_s'] < 10.0
+            ),
+            
+            # ADD EXPLORATION METRICS
+            'exploration_fraction': exploration_metrics['exploration_fraction'],
+            'entropy_of_actions': exploration_metrics['entropy_of_actions'],
+            'coverage_rate': exploration_metrics['coverage_rate'],
+
             # ---- identity / tagging (frozen protocol §5) -------------------
             "sub_problem_id": str(sc.get("sub_problem_id", "A")),
             "layer_id": int(sc.get("layer_id", 1)),
@@ -314,6 +427,7 @@ class MetricsEngine:
             "true_hits": true_hits,
             "false_hits": false_hits,
             "misses_on_occupied": occupied_dwells - true_hits,
+            "miss_rate": (1.0 - pd) if pd is not None else None,
             "unavailable_reason": (
                 None if (occupied_dwells and empty_dwells) else
                 ("Pd undefined: scheduler never dwelled on an occupied band."
@@ -396,7 +510,9 @@ class MetricsEngine:
     def _monitoring_metrics(self, credited: np.ndarray, present: np.ndarray,
                             transmitting_slots: np.ndarray, existent: np.ndarray,
                             actions: np.ndarray, band_count: int, T: int,
-                            receiver_accounting: Optional[Dict[str, float]]) -> Dict[str, Any]:
+                            receiver_accounting: Optional[Dict[str, float]],
+                            slot_duration_s: float,
+                            trajectory: Optional[List[TrajectoryStep]] = None) -> Dict[str, Any]:
         n_emitters = credited.shape[0]
 
         post_captures = 0
@@ -423,6 +539,95 @@ class MetricsEngine:
         ra = receiver_accounting or {}
         switches = int((np.diff(actions) != 0).sum()) if T > 1 else 0
 
+        # Compute per-emitter intercept rate for PS metric 4
+        emitters_ever_caught = int(credited.any(axis=1)[existent].sum()) if n_emitters else 0
+        n_existent = int(existent.sum())
+
+        # --- Scan utilization ---
+        # Sum of actual dwell time / (T * slot_duration_s)
+        # Dwell elapsed time is in the observation dict as 'dwell_elapsed_s'
+        sum_dwell_s = 0.0
+        if trajectory is not None:
+            for s in trajectory:
+                dwell_s = s.observation.get("dwell_elapsed_s", 0.0)
+                sum_dwell_s += float(dwell_s)
+        scan_utilization = (
+            sum_dwell_s / (T * slot_duration_s) if T > 0 and slot_duration_s > 0 else None
+        )
+
+        # --- Decision latency ---
+        # From trajectory: select_action_ms, predict_ms
+        select_times = []
+        predict_times = []
+        wall_clock_times = []
+        memory_deltas = []
+        if trajectory is not None:
+            for s in trajectory:
+                if "select_action_ms" in s.observation:
+                    select_times.append(float(s.observation["select_action_ms"]))
+                if "predict_ms" in s.observation:
+                    predict_times.append(float(s.observation["predict_ms"]))
+                if "wall_clock_ms" in s.observation:
+                    wall_clock_times.append(float(s.observation["wall_clock_ms"]))
+                if "memory_delta_bytes" in s.observation:
+                    memory_deltas.append(float(s.observation["memory_delta_bytes"]))
+        
+        decision_latency = {
+            "select_action_ms_mean": float(np.mean(select_times)) if select_times else None,
+            "select_action_ms_max": float(np.max(select_times)) if select_times else None,
+            "meets_realtime_requirement": (float(np.max(select_times)) < 10000.0) if select_times else None,
+            "predict_ms_mean": float(np.mean(predict_times)) if predict_times else None,
+            "predict_ms_max": float(np.max(predict_times)) if predict_times else None,
+            "total_ms_mean": (
+                float(np.mean(select_times)) + float(np.mean(predict_times))
+                if select_times and predict_times else None
+            ),
+            "wall_clock_ms_mean": float(np.mean(wall_clock_times)) if wall_clock_times else None,
+            "wall_clock_ms_max": float(np.max(wall_clock_times)) if wall_clock_times else None,
+            "memory_delta_bytes_mean": float(np.mean(memory_deltas)) if memory_deltas else None,
+            "memory_delta_bytes_max": float(np.max(memory_deltas)) if memory_deltas else None,
+        }
+
+        # --- Exploration vs Exploitation metrics ---
+        # Action-based exploration
+        action_counts = np.bincount(actions, minlength=band_count) if T > 0 else np.zeros(band_count, dtype=int)
+        total_slots = T
+        top_band = int(action_counts.argmax()) if total_slots > 0 else 0
+        top_band_fraction = action_counts[top_band] / total_slots if total_slots > 0 else None
+        exploration_threshold = 5
+        explored_slots = sum(1 for a in actions if action_counts[a] < exploration_threshold) if T > 0 else 0
+        exploration_rate = explored_slots / total_slots if total_slots > 0 else None
+
+        # Prediction-based exploration (entropy of band_activity_probability)
+        probs = action_counts.astype(float) / total_slots if total_slots > 0 else np.zeros(band_count)
+        action_entropy = -float(np.sum(probs * np.log2(probs + 1e-10)))
+        max_entropy = np.log2(band_count) if band_count > 1 else 1.0
+        normalized_action_entropy = action_entropy / max_entropy
+        prediction_entropies = []
+        if trajectory is not None:
+            for s in trajectory:
+                if s.prediction is not None and s.prediction.band_activity_probability is not None:
+                    probs = np.asarray(s.prediction.band_activity_probability, dtype=float)
+                    # Clip to avoid log(0)
+                    probs_clipped = np.clip(probs, 1e-12, 1.0)
+                    entropy = -float(np.sum(probs_clipped * np.log(probs_clipped)))
+                    prediction_entropies.append(entropy)
+        mean_prediction_entropy = float(np.mean(prediction_entropies)) if prediction_entropies else None
+
+        exploration_metrics = {
+            "exploration_rate": exploration_rate,
+            "top_band_fraction": top_band_fraction,
+            "band_action_counts": action_counts.tolist(),
+            "mean_revisit_interval_slots": (
+                float(np.mean(revisit_intervals)) if revisit_intervals else None),
+            "prediction_entropy_mean": mean_prediction_entropy,
+            "entropy_of_actions": normalized_action_entropy,
+            "exploration_threshold_slots": exploration_threshold,
+        }
+
+        # Compute fraction of slots with >=1 hit
+        hit_fraction = float((credited.sum(axis=0) >= 1).mean()) if n_emitters and T > 0 else 0.0
+
         return {
             # Detector-limited: given we dwelled on it after discovery, did we see it.
             "post_discovery_capture_efficiency": (
@@ -436,18 +641,29 @@ class MetricsEngine:
                 float(np.mean(revisit_intervals)) if revisit_intervals else None),
             "p95_revisit_interval_slots": (
                 float(np.percentile(revisit_intervals, 95)) if revisit_intervals else None),
-            "average_coverage_fraction": coverage["mean_rolling_coverage"],
+            "average_coverage_fraction": coverage["whole_mission_unique_band_fraction"],
             "coverage_detail": coverage,
             "band_switch_count": switches,
             "band_switch_rate_per_slot": switches / T,
             "retune_overhead_total_s": ra.get("retune_overhead_total_s"),
             "dead_time_total_s": ra.get("retune_overhead_total_s"),
             "dead_time_fraction": ra.get("dead_time_fraction"),
-            # PS metric 4
+            # PS metric 4 — per-emitter (correct definition):
+            # fraction of distinct emitters detected at least once
+            "average_intercept_rate": (
+                emitters_ever_caught / n_existent if n_existent else None),
+            # Legacy per-slot metric (kept for backward compatibility; NOT PS metric 4):
             "average_intercept_rate_per_slot": (
                 float(credited.any(axis=0).mean()) if n_emitters else None),
             "average_emitter_captures_per_slot": (
                 float(credited.sum() / T) if n_emitters else None),
+            # New missing metric: Fraction of slots with >=1 hit
+            "fraction_of_slots_with_hits": hit_fraction,
+            # Extended resource metrics
+            "scan_utilization": scan_utilization,
+            "decision_latency_ms": decision_latency,
+            # Extended exploration metrics
+            "exploration_metrics": exploration_metrics,
         }
 
     def _coverage_metrics(self, actions: np.ndarray, band_count: int, T: int) -> Dict[str, Any]:
@@ -545,6 +761,8 @@ class MetricsEngine:
             "target_detection_rate": target,
             "per_emitter_detection": rows,
             "emitters_with_sufficient_samples": len(trusted),
+            "pfa_operating_point": self.config.sensitivity_pfa_operating_point,
+            "definition": self.config.provenance_notes.get("sensitivity_definition", ""),
             "unavailable_reason": (
                 None if achieving else
                 f"No emitter with >= {self.config.sensitivity_min_samples} dwells reached "
@@ -578,6 +796,7 @@ class MetricsEngine:
         y_true: List[int] = []
         y_prob: List[float] = []
         eta_errors: List[float] = []
+        eta_no_actual_count = 0  # predictions made but no actual intercept time exists
 
         for p in preds:
             t = int(p.about_time_slot)
@@ -599,6 +818,7 @@ class MetricsEngine:
                         continue  # no forecast for this band; excluded, not zero
                     actual = self._next_activity_slot(truth_grid, b, int(p.issued_at_slot))
                     if actual is None:
+                        eta_no_actual_count += 1
                         continue  # band never active again; error undefined
                     eta_errors.append(abs(float(eta) - float(actual)))
 
@@ -627,6 +847,11 @@ class MetricsEngine:
             "median_intercept_time_error_slots": (
                 float(np.median(eta_errors)) if eta_errors else None),
             "intercept_time_error_samples": len(eta_errors),
+            "predictions_without_actual_intercept": eta_no_actual_count,
+            "excluded_fraction": (
+                eta_no_actual_count / (len(eta_errors) + eta_no_actual_count)
+                if (eta_errors or eta_no_actual_count) else None
+            ),
             # [SCIENTIFIC] Brier is a proper scoring rule; thresholded accuracy
             # is not, and a policy can score well on accuracy while being badly
             # calibrated. The calibration plot (mandatory figure 11) uses these.
@@ -688,7 +913,7 @@ class MetricsEngine:
         else:
             speed_term = None
 
-        rate_term = monitoring.get("average_intercept_rate_per_slot")
+        rate_term = monitoring.get("average_intercept_rate")
         pfa = detection.get("probability_of_false_alarm")
         switch_rate = monitoring.get("band_switch_rate_per_slot")
 
@@ -714,6 +939,12 @@ class MetricsEngine:
             "weights": weights,
             "components": components,
             "total_utility": total,
+            "weight_justifications": {
+                "intercept_time_term": "Normalized discovery speed; 1.0 = instant, 0.0 = never found.",
+                "interception_rate_term": "Fraction of distinct emitters ever detected; directly measures mission success.",
+                "false_alarm_penalty": "Pfa penalises wasted processing; weight reflects lower criticality than missed detections.",
+                "switch_cost_penalty": "Retune overhead; small weight because switching is cheap relative to missing emitters.",
+            },
             "unavailable_reason": (
                 None if not missing else
                 f"Composite withheld: component(s) {missing} unavailable this episode. "
@@ -763,7 +994,8 @@ class MetricsEngine:
             ("discovery_metrics", "first_intercept_probability_by_deadline"),
             ("discovery_metrics", "mean_first_intercept_time_slots"),
             ("monitoring_metrics", "post_discovery_interception_ratio"),
-            ("monitoring_metrics", "average_intercept_rate_per_slot"),
+            ("monitoring_metrics", "average_intercept_rate"),  # NEW: PS metric 4 (per-emitter)
+            ("monitoring_metrics", "average_intercept_rate_per_slot"),  # Legacy (per-slot)
             ("monitoring_metrics", "average_coverage_fraction"),
             ("monitoring_metrics", "mean_revisit_interval_slots"),
             ("prediction_metrics", "percentage_correct_predictions"),

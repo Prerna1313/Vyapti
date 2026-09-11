@@ -80,6 +80,11 @@ PERMITTED_OBSERVATION_KEYS = frozenset({
     # gain. Neither reveals emitter identity or hidden truth.
     "coherent_integration_gain_db",  # 10*log10(N) dB applied to snr_db
     "n_pulses_dominant_emitter",     # pulses from the dominant emitter in cell
+    # AUDIT 2026-09-09 — Hardware profiling for F9 compute charts:
+    "select_action_ms",              # time spent in select_action
+    "predict_ms",                    # time spent in predict
+    "wall_clock_ms",                 # total slot time
+    "memory_delta_bytes",            # memory change during slot
 })
 
 #: Names known to denote hidden truth. Retained for a precise error message
