@@ -1,0 +1,15 @@
+# Vyapti / PS26055 backend dependencies.
+#
+# The vyapti_simulator package itself (numpy/scipy/h5py/matplotlib) is
+# installed separately from your existing repo, e.g.:
+#     pip install -e .
+# run from the Vyapti repo root (where pyproject.toml lives).
+#
+# These are the ADDITIONAL packages the FastAPI adapter and TSRD
+# download need on top of that:
+
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+huggingface_hub>=0.20
+websockets>=12.0
