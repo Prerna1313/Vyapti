@@ -1110,3 +1110,121 @@ class TSRDAdapter:
             "value": value,
             "rationale": rationale,
         }
+
+
+def load_stare_mode_as_occupancy_grid(file_path: str, n_bands: int = 36, n_slots: int = 600) -> np.ndarray:
+    """
+    Load a TSRD Stare Mode H5 file and convert its pulse data into a boolean
+    occupancy grid of shape [n_bands, n_slots].
+    Assumes 50ms dwell time and 500MHz bandwidth per band starting at 2GHz.
+    """
+    import h5py
+    import numpy as np
+    
+    grid = np.zeros((n_bands, n_slots), dtype=bool)
+    dwell_us = 50.0 * 1000.0  # 50ms in microseconds
+    
+    try:
+        with h5py.File(file_path, 'r') as f:
+            if 'data' in f:
+                data = f['data'][:]
+                for row in data:
+                    toa_us = row[0]
+                    freq_mhz = row[1]
+                    slot = int(toa_us / dwell_us)
+                    band = int((freq_mhz - 2000.0) / 500.0)
+                    if 0 <= slot < n_slots and 0 <= band < n_bands:
+                        grid[band, slot] = True
+    except Exception as e:
+        pass
+        
+    return grid
+
+def extract_emitter_metadata(file_path: str) -> dict:
+    """
+    Extract comprehensive emitter population metadata from a TSRD H5 file.
+    """
+    import h5py
+    import numpy as np
+    from collections import Counter
+    
+    metadata = {
+        'total_emitters': 0,
+        'emitters': [],
+        'emitter_type_distribution': {},
+        'frequency_summary': {},
+        'pri_summary': {},
+        'pw_summary': {}
+    }
+    
+    try:
+        with h5py.File(file_path, 'r') as f:
+            if 'metadata/transmitters' in f:
+                tx_group = f['metadata/transmitters']
+                metadata['total_emitters'] = len(tx_group.keys())
+                
+                all_freqs = []
+                all_pris = []
+                all_pws = []
+                types = []
+                
+                for tx_name in tx_group.keys():
+                    tx = tx_group[tx_name]
+                    
+                    e_type = "Unknown"
+                    if 'metadata' in tx and 'emitter_type' in tx['metadata'].attrs:
+                        e_type = str(tx['metadata'].attrs['emitter_type'])
+                    types.append(e_type)
+                    
+                    freqs = []
+                    if 'frequency_config/freqs_mhz' in tx:
+                        freqs = tx['frequency_config/freqs_mhz'][:].tolist()
+                        all_freqs.extend(freqs)
+                        
+                    pris = []
+                    if 'pri_config/pris_us' in tx:
+                        pris = tx['pri_config/pris_us'][:].tolist()
+                        all_pris.extend(pris)
+                        
+                    pws = []
+                    if 'pulse_width_config/pws_us' in tx:
+                        pws = tx['pulse_width_config/pws_us'][:].tolist()
+                        all_pws.extend(pws)
+                        
+                    pos = []
+                    if 'position_config/start_position_km' in tx:
+                        pos = tx['position_config/start_position_km'][:].tolist()
+                        
+                    metadata['emitters'].append({
+                        'emitter_id': tx_name,
+                        'type': e_type,
+                        'frequencies_mhz': freqs,
+                        'pris_us': pris,
+                        'pws_us': pws,
+                        'position_km': pos
+                    })
+                
+                metadata['emitter_type_distribution'] = dict(Counter(types))
+                
+                if all_freqs:
+                    metadata['frequency_summary'] = {
+                        'min_mhz': float(np.min(all_freqs)),
+                        'max_mhz': float(np.max(all_freqs)),
+                        'mean_mhz': float(np.mean(all_freqs))
+                    }
+                if all_pris:
+                    metadata['pri_summary'] = {
+                        'min_us': float(np.min(all_pris)),
+                        'max_us': float(np.max(all_pris)),
+                        'mean_us': float(np.mean(all_pris))
+                    }
+                if all_pws:
+                    metadata['pw_summary'] = {
+                        'min_us': float(np.min(all_pws)),
+                        'max_us': float(np.max(all_pws)),
+                        'mean_us': float(np.mean(all_pws))
+                    }
+    except Exception as e:
+        pass
+        
+    return metadata
