@@ -147,11 +147,11 @@ class TrajectoryStep:
 
 @dataclass
 class MetricsConfig:
-    compute_comprehensive_metrics: bool = False
-    compute_emitter_population_metrics: bool = False
-    compute_per_band_metrics: bool = False
-    compute_temporal_metrics: bool = False
-    use_tsr_stare_mode: bool = False
+    compute_comprehensive_metrics: bool = True
+    compute_emitter_population_metrics: bool = True
+    compute_per_band_metrics: bool = True
+    compute_temporal_metrics: bool = True
+    use_tsr_stare_mode: bool = True
     tsrd_stare_file: Optional[str] = None
 
     # [PS-DEFINED] — Named in problem statement; must be reported
