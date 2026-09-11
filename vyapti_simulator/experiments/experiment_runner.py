@@ -556,6 +556,8 @@ class ExperimentRunner:
         density: int,
         label: str = "",
         seed_set: str = "train",
+        use_tsr: bool = False,
+        tsrd_scenario: str = None,
     ) -> Dict[str, Any]:
         """
         Run one density point: all schedulers against the paired seed set.
@@ -610,7 +612,15 @@ class ExperimentRunner:
             detection_probability=1.0,
             false_alarm_probability=0.0,
         )
-        env = PS26055Environment(sim_config, emitters)
+        if use_tsr and tsrd_scenario:
+            from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+            tsrd_base = '/root/.cache/huggingface/hub/datasets--alan-turing-institute--turing-synthetic-radar-dataset/snapshots/68a07b0e0189c5b4ec748c4b66dedfe26f8f1c51'
+            stare_file = f'{tsrd_base}/stare/{tsrd_scenario}.h5'
+            scan_file = f'{tsrd_base}/scan/{tsrd_scenario.replace("stare", "scan")}.h5'
+            env = TSRDStareEnvironment.from_stare_mode(stare_file, scan_file, sim_config)
+            emitters = [] # Not used in TSRD
+        else:
+            env = PS26055Environment(sim_config, emitters)
 
         # Stash the antenna gain on the env for any downstream that
         # wants to read it (e.g. the report) without going through
@@ -618,7 +628,26 @@ class ExperimentRunner:
         # is the existing per-band attenuation path; here we annotate
         # the env with the array so the report can include it.
         env._antenna_gain_db = antenna_gain
-        metrics_engine = MetricsEngine(MetricsConfig())
+        from vyapti_simulator.core.metrics import MetricsConfig
+        metrics_config = MetricsConfig()
+        
+        if use_tsr and tsrd_scenario:
+            from vyapti_simulator.tsrd.tsrd_metrics import TSRDMetricsEngine
+            metrics_config.compute_comprehensive_metrics = True
+            metrics_config.compute_emitter_population_metrics = True
+            metrics_config.compute_per_band_metrics = True
+            metrics_config.compute_temporal_metrics = True
+            metrics_config.use_tsr_stare_mode = True
+            metrics_config.tsrd_stare_file = stare_file
+            
+            metrics_engine = TSRDMetricsEngine(
+                config=metrics_config,
+                stare_mode_file=stare_file,
+                scan_mode_file=scan_file
+            )
+        else:
+            metrics_engine = MetricsEngine(metrics_config)
+
 
         # --- Run every (scheduler, seed) pair ------------------------------
         all_results: Dict[str, List[Dict[str, Any]]] = {name: [] for name in schedulers}

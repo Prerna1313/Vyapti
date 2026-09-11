@@ -1211,3 +1211,82 @@ __all__ = [
     "TSRDEnvironment",
     "build_tsrd_environment",
 ]
+
+
+class TSRDStareEnvironment:
+    """
+    Lightweight environment for TRUE Pd/Pfa computation using TSRD Stare Mode.
+    Follows PS26055 interface.
+    """
+    def __init__(self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config):
+        self.n_bands = n_bands
+        self.n_slots = n_slots
+        self._occupancy_grid = occupancy_grid
+        self._scan_grid = scan_grid
+        self._config = sim_config
+        self._current_slot = 0
+        self._observation_history = []
+        self._deinterleaver_result = None
+
+    @classmethod
+    def from_stare_mode(cls, stare_file: str, scan_file: str, sim_config):
+        import h5py
+        import numpy as np
+        
+        n_bands = sim_config.band_count
+        n_slots = sim_config.time_slots
+        
+        def build_grid(filepath):
+            grid = np.zeros((n_bands, n_slots), dtype=bool)
+            dwell_us = sim_config.dwell_time_ms * 1000.0
+            try:
+                with h5py.File(filepath, 'r') as f:
+                    if 'data' in f:
+                        data = f['data'][:]
+                        for row in data:
+                            toa_us, freq_mhz = row[0], row[1]
+                            slot = int(toa_us / dwell_us)
+                            band = int((freq_mhz - 2000.0) / 500.0)
+                            if 0 <= slot < n_slots and 0 <= band < n_bands:
+                                grid[band, slot] = True
+            except Exception as e:
+                pass
+            return grid
+            
+        occupancy_grid = build_grid(stare_file)
+        scan_grid = build_grid(scan_file)
+        return cls(n_bands, n_slots, occupancy_grid, scan_grid, sim_config)
+
+    @property
+    def hidden_truth(self):
+        from vyapti_simulator.core.environment import HiddenTruthGrid
+        import numpy as np
+        mask_3d = self._occupancy_grid[np.newaxis, :, :]
+        from vyapti_simulator.core.environment import EmitterConfig, EmitterBehaviorType
+        dummy_ec = EmitterConfig(emitter_id=0, behavior=EmitterBehaviorType.CONTINUOUS_FIXED, active_bands=[])
+        return HiddenTruthGrid(grid=mask_3d, emitter_configs=[dummy_ec], band_count=self.n_bands, time_slots=self.n_slots)
+
+    @property
+    def config(self):
+        return self._config
+        
+    def reset(self, seed=None, emitter_family_config=None):
+        self._current_slot = 0
+        self._observation_history.clear()
+
+    def step(self, band: int):
+        hit = bool(self._scan_grid[band, self._current_slot])
+        obs = {"hit": hit}
+        self._observation_history.append(obs)
+        self._current_slot += 1
+        return obs, False
+
+    @property
+    def done(self) -> bool:
+        return self._current_slot >= self.n_slots
+
+    def receiver_accounting(self):
+        return {}
+
+    def replay_signature(self):
+        return "dummy_signature"
