@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PS26055 :: Smart Scan Strategy — EW Simulation Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-void:#050810;
+  --bg-panel:#0A1220;
+  --bg-panel-raised:#0E1A2E;
+  --bg-panel-deep:#071019;
+  --border-steel:#1B324A;
+  --border-steel-bright:#2D5578;
+  --text-primary:#D8E4EE;
+  --text-dim:#5E7B96;
+  --text-faint:#3D5468;
+  --cyan-signal:#4DD8E8;
+  --cyan-bright:#8FEFFA;
+  --cyan-dim:#164654;
+  --amber-warn:#E8B84D;
+  --red-critical:#E8604D;
+  --green-confirm:#4DE87F;
+  --grid-line:#101C2C;
+  --font-ui:'IBM Plex Sans',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--bg-void);color:var(--text-primary);font-family:var(--font-ui);font-size:13px;height:100%;overflow:hidden;}
+button{font-family:inherit;cursor:pointer;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:var(--bg-void);}
+::-webkit-scrollbar-thumb{background:var(--border-steel);}
+::-webkit-scrollbar-thumb:hover{background:var(--border-steel-bright);}
+
+.app{display:flex;height:100vh;width:100vw;}
+
+/* ===== NAV ===== */
+.nav{
+  width:196px;flex-shrink:0;background:var(--bg-panel-deep);
+  border-right:1px solid var(--border-steel);
+  display:flex;flex-direction:column;
+}
+.nav-brand{
+  padding:16px 14px 12px;border-bottom:1px solid var(--border-steel);
+}
+.nav-brand .code{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--cyan-signal);letter-spacing:0.5px;}
+.nav-brand .sub{font-size:10px;color:var(--text-dim);margin-top:3px;line-height:1.4;}
+.nav-list{flex:1;overflow-y:auto;padding:8px 0;}
+.nav-item{
+  display:flex;align-items:center;gap:10px;padding:9px 14px;
+  color:var(--text-dim);font-size:11.5px;font-weight:500;letter-spacing:0.3px;
+  border-left:2px solid transparent;cursor:pointer;user-select:none;
+  transition:background .12s,color .12s;
+}
+.nav-item:hover{background:var(--bg-panel);color:var(--text-primary);}
+.nav-item.active{
+  background:var(--bg-panel-raised);color:var(--cyan-signal);
+  border-left:2px solid var(--cyan-signal);
+}
+.nav-item .ic{width:14px;height:14px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.nav-item .ic svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.nav-num{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);width:14px;}
+.nav-item.active .nav-num{color:var(--cyan-signal);}
+.nav-foot{
+  padding:10px 14px;border-top:1px solid var(--border-steel);
+  font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);line-height:1.6;
+}
+.nav-foot .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green-confirm);margin-right:5px;box-shadow:0 0 4px var(--green-confirm);}
+
+/* ===== MAIN ===== */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.topbar{
+  height:44px;flex-shrink:0;border-bottom:1px solid var(--border-steel);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;background:var(--bg-panel-deep);
+}
+.topbar-left{display:flex;align-items:center;gap:10px;}
+.topbar-title{font-size:12.5px;font-weight:600;color:var(--text-primary);}
+.topbar-crumb{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);}
+.topbar-right{display:flex;align-items:center;gap:16px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);}
+.topbar-stat{display:flex;align-items:center;gap:5px;}
+.topbar-stat .val{color:var(--cyan-signal);font-weight:600;}
+.clock-live{color:var(--green-confirm);}
+
+.page{flex:1;overflow-y:auto;padding:16px 20px 40px;}
+.page-hidden{display:none;}
+
+/* ===== SHARED PANEL SYSTEM ===== */
+.panel{
+  background:var(--bg-panel);border:1px solid var(--border-steel);
+  margin-bottom:14px;
+}
+.panel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 13px;border-bottom:1px solid var(--border-steel);
+  background:var(--bg-panel-raised);
+}
+.panel-title{font-size:11px;font-weight:600;letter-spacing:0.4px;color:var(--text-primary);}
+.panel-title .unit{color:var(--text-faint);font-weight:400;margin-left:6px;font-family:var(--font-mono);font-size:9.5px;}
+.panel-tag{
+  font-family:var(--font-mono);font-size:9px;padding:2px 6px;border:1px solid var(--border-steel-bright);
+  color:var(--text-dim);letter-spacing:0.5px;
+}
+.panel-tag.live{color:var(--green-confirm);border-color:var(--green-confirm);}
+.panel-tag.sim{color:var(--amber-warn);border-color:var(--amber-warn);}
+.panel-body{padding:14px;}
+
+.grid{display:grid;gap:14px;}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+.grid-3{grid-template-columns:repeat(3,1fr);}
+.grid-2{grid-template-columns:repeat(2,1fr);}
+.grid-12{grid-template-columns:repeat(12,1fr);}
+.col-8{grid-column:span 8;}
+.col-4{grid-column:span 4;}
+.col-6{grid-column:span 6;}
+.col-12{grid-column:span 12;}
+.col-3{grid-column:span 3;}
+.col-9{grid-column:span 9;}
+
+/* Metric tiles */
+.metric{
+  background:var(--bg-panel);border:1px solid var(--border-steel);
+  padding:12px 14px;
+}
+.metric-label{font-size:9.5px;color:var(--text-dim);letter-spacing:0.5px;margin-bottom:6px;}
+.metric-value{font-family:var(--font-mono);font-size:22px;font-weight:600;color:var(--text-primary);line-height:1;}
+.metric-value.cyan{color:var(--cyan-signal);}
+.metric-value.green{color:var(--green-confirm);}
+.metric-value.amber{color:var(--amber-warn);}
+.metric-value.red{color:var(--red-critical);}
+.metric-sub{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:4px;}
+
+/* Status pills */
+.pill{
+  display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);
+  font-size:9.5px;padding:3px 8px;border:1px solid var(--border-steel);letter-spacing:0.4px;
+}
+.pill .d{width:5px;height:5px;border-radius:50%;}
+.pill.pass{color:var(--green-confirm);border-color:var(--green-confirm);}
+.pill.pass .d{background:var(--green-confirm);box-shadow:0 0 4px var(--green-confirm);}
+.pill.warn{color:var(--amber-warn);border-color:var(--amber-warn);}
+.pill.warn .d{background:var(--amber-warn);box-shadow:0 0 4px var(--amber-warn);}
+.pill.fail{color:var(--red-critical);border-color:var(--red-critical);}
+.pill.fail .d{background:var(--red-critical);box-shadow:0 0 4px var(--red-critical);}
+.pill.notval{color:var(--text-dim);border-color:var(--border-steel);}
+.pill.notval .d{background:var(--text-dim);}
+
+/* Tables */
+table.datagrid{width:100%;border-collapse:collapse;font-size:11px;}
+table.datagrid th{
+  text-align:left;font-size:9.5px;color:var(--text-dim);font-weight:500;letter-spacing:0.4px;
+  padding:7px 10px;border-bottom:1px solid var(--border-steel-bright);background:var(--bg-panel-raised);
+  position:sticky;top:0;
+}
+table.datagrid td{
+  padding:6px 10px;border-bottom:1px solid var(--border-steel);color:var(--text-primary);
+  font-family:var(--font-mono);font-size:10.5px;
+}
+table.datagrid tr:hover td{background:var(--bg-panel-raised);}
+.mono{font-family:var(--font-mono);}
+.dim{color:var(--text-dim);}
+.faint{color:var(--text-faint);}
+
+.badge-type{
+  font-family:var(--font-mono);font-size:9px;padding:2px 6px;border:1px solid var(--border-steel);
+  color:var(--text-dim);white-space:nowrap;
+}
+.badge-type.periodic{color:var(--cyan-signal);border-color:var(--cyan-dim);}
+.badge-type.scanning{color:var(--amber-warn);border-color:#5c4a1f;}
+.badge-type.intermittent{color:#B48DE8;border-color:#3d2f5c;}
+.badge-type.agile{color:var(--red-critical);border-color:#5c2b1f;}
+
+.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;}
+.status-dot.active{background:var(--green-confirm);box-shadow:0 0 4px var(--green-confirm);}
+.status-dot.idle{background:var(--text-faint);}
+.status-dot.detected{background:var(--cyan-signal);box-shadow:0 0 4px var(--cyan-signal);}
+
+/* Buttons */
+.btn{
+  font-family:var(--font-mono);font-size:10.5px;font-weight:500;letter-spacing:0.4px;
+  padding:8px 16px;border:1px solid var(--border-steel-bright);background:var(--bg-panel-raised);
+  color:var(--text-primary);transition:all .12s;
+}
+.btn:hover{border-color:var(--cyan-signal);color:var(--cyan-signal);}
+.btn.primary{background:var(--cyan-dim);border-color:var(--cyan-signal);color:var(--cyan-bright);}
+.btn.primary:hover{background:#1d5b68;}
+.btn.stop{border-color:var(--red-critical);color:var(--red-critical);}
+.btn.stop:hover{background:#3a1912;}
+.btn.small{padding:5px 10px;font-size:9.5px;}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+
+.field-row{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+.field-label{font-size:10px;color:var(--text-dim);letter-spacing:0.3px;display:flex;justify-content:space-between;}
+.field-label .fv{font-family:var(--font-mono);color:var(--cyan-signal);}
+input[type=range]{
+  width:100%;height:3px;background:var(--border-steel);appearance:none;outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  appearance:none;width:11px;height:11px;background:var(--cyan-signal);border-radius:50%;cursor:pointer;
+  box-shadow:0 0 6px rgba(77,216,232,.6);
+}
+input[type=number],input[type=text],select{
+  background:var(--bg-panel-deep);border:1px solid var(--border-steel);color:var(--text-primary);
+  padding:6px 9px;font-family:var(--font-mono);font-size:11px;outline:none;width:100%;
+}
+input[type=number]:focus,input[type=text]:focus,select:focus{border-color:var(--cyan-signal);}
+
+.section-label{
+  font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:0.6px;
+  padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border-steel);
+}
+
+.legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:10px;color:var(--text-dim);}
+.legend-item{display:flex;align-items:center;gap:5px;}
+.legend-swatch{width:9px;height:9px;flex-shrink:0;}
+
+.flow-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--font-mono);font-size:10.5px;}
+.flow-node{
+  padding:6px 12px;border:1px solid var(--border-steel-bright);background:var(--bg-panel-raised);color:var(--text-primary);
+  white-space:nowrap;
+}
+.flow-node.active{border-color:var(--cyan-signal);color:var(--cyan-signal);}
+.flow-arrow{color:var(--text-faint);}
+
+.tabbar{display:flex;gap:2px;margin-bottom:12px;border-bottom:1px solid var(--border-steel);}
+.tab{
+  padding:8px 14px;font-size:11px;color:var(--text-dim);cursor:pointer;border-bottom:2px solid transparent;
+  font-weight:500;letter-spacing:0.3px;
+}
+.tab:hover{color:var(--text-primary);}
+.tab.active{color:var(--cyan-signal);border-bottom-color:var(--cyan-signal);}
+
+.data-note{
+  font-size:10px;color:var(--text-faint);font-family:var(--font-mono);display:flex;align-items:center;gap:6px;
+  padding:7px 10px;background:var(--bg-panel-deep);border:1px dashed var(--border-steel);margin-top:8px;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav">
+    <div class="nav-brand">
+      <div class="code">PS26055</div>
+      <div class="sub">Smart Scan Strategy<br>for Electronic Warfare</div>
+    </div>
+    <div class="nav-list" id="navList"></div>
+    <div class="nav-foot"><span class="dot"></span>SIM ENGINE ONLINE<br>BUILD 0.9.3-research</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <span class="topbar-title" id="topbarTitle">Mission Overview</span>
+        <span class="topbar-crumb" id="topbarCrumb">/ PS26055 / MISSION</span>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-stat">T+<span class="val mono clock-live" id="simClock">00:14:22.410</span></div>
+        <div class="topbar-stat">SCENARIO <span class="val" id="topbarScenario">SC-0417-B</span></div>
+        <div class="topbar-stat">SEED <span class="val" id="topbarSeed">88214</span></div>
+      </div>
+    </div>
+    <div class="page" id="pageRoot"></div>
+  </div>
+</div>
+<script>
+// ===== app.js =====
+// ============ NAV CONFIG ============
+const PAGES = [
+  {id:'mission', num:'01', label:'MISSION', title:'Mission Overview', crumb:'/ PS26055 / MISSION', icon:'crosshair'},
+  {id:'spectrum', num:'02', label:'SPECTRUM', title:'RF Spectrum Monitor', crumb:'/ PS26055 / SPECTRUM', icon:'wave'},
+  {id:'emitters', num:'03', label:'EMITTERS', title:'Emitter Environment', crumb:'/ PS26055 / EMITTERS', icon:'grid'},
+  {id:'simulation', num:'04', label:'SIMULATION', title:'Simulation Control', crumb:'/ PS26055 / SIMULATION', icon:'sliders'},
+  {id:'strategy', num:'05', label:'STRATEGIES', title:'Scan Strategy Lab', crumb:'/ PS26055 / STRATEGIES', icon:'target'},
+  {id:'comparison', num:'06', label:'COMPARISON', title:'Algorithm Comparison', crumb:'/ PS26055 / COMPARISON', icon:'bars'},
+  {id:'tsrd', num:'07', label:'TSRD', title:'TSRD / Dataset Analysis', crumb:'/ PS26055 / TSRD', icon:'db'},
+  {id:'pdw', num:'08', label:'PDW', title:'PDW Analysis', crumb:'/ PS26055 / PDW', icon:'pulse'},
+  {id:'detection', num:'09', label:'DETECTION', title:'Detection & Interception Analytics', crumb:'/ PS26055 / DETECTION', icon:'eye'},
+  {id:'experiments', num:'10', label:'EXPERIMENTS', title:'Experiment Results', crumb:'/ PS26055 / EXPERIMENTS', icon:'flask'},
+  {id:'validation', num:'11', label:'VALIDATION', title:'System / Validation Status', crumb:'/ PS26055 / VALIDATION', icon:'check'},
+];
+
+const ICONS = {
+  crosshair:'<circle cx="7" cy="7" r="5.5"/><line x1="7" y1="0.5" x2="7" y2="3"/><line x1="7" y1="11" x2="7" y2="13.5"/><line x1="0.5" y1="7" x2="3" y2="7"/><line x1="11" y1="7" x2="13.5" y2="7"/>',
+  wave:'<path d="M0.5 7 L3 7 L4.5 2 L6.5 12 L8 4 L9.5 10 L11 7 L13.5 7"/>',
+  grid:'<rect x="1" y="1" width="5" height="5"/><rect x="8" y="1" width="5" height="5"/><rect x="1" y="8" width="5" height="5"/><rect x="8" y="8" width="5" height="5"/>',
+  sliders:'<line x1="2" y1="1" x2="2" y2="13"/><circle cx="2" cy="5" r="1.5" fill="currentColor" stroke="none"/><line x1="7" y1="1" x2="7" y2="13"/><circle cx="7" cy="9" r="1.5" fill="currentColor" stroke="none"/><line x1="12" y1="1" x2="12" y2="13"/><circle cx="12" cy="4" r="1.5" fill="currentColor" stroke="none"/>',
+  target:'<circle cx="7" cy="7" r="6"/><circle cx="7" cy="7" r="3"/><circle cx="7" cy="7" r="0.7" fill="currentColor" stroke="none"/>',
+  bars:'<line x1="2" y1="12" x2="2" y2="6"/><line x1="7" y1="12" x2="7" y2="2"/><line x1="12" y1="12" x2="12" y2="8"/>',
+  db:'<ellipse cx="7" cy="3" rx="5.5" ry="2"/><path d="M1.5 3 L1.5 11 C1.5 12.1 4 13 7 13 C10 13 12.5 12.1 12.5 11 L12.5 3"/><path d="M1.5 7 C1.5 8.1 4 9 7 9 C10 9 12.5 8.1 12.5 7"/>',
+  pulse:'<polyline points="0.5,7 3,7 5,2 7,12 9,4 10.5,7 13.5,7"/>',
+  eye:'<path d="M0.5 7 C2.5 3 5 1.5 7 1.5 C9 1.5 11.5 3 13.5 7 C11.5 11 9 12.5 7 12.5 C5 12.5 2.5 11 0.5 7 Z"/><circle cx="7" cy="7" r="2"/>',
+  flask:'<path d="M5 1 L5 6 L1.5 12.5 C1.2 13 1.5 13.5 2 13.5 L12 13.5 C12.5 13.5 12.8 13 12.5 12.5 L9 6 L9 1"/><line x1="4" y1="1" x2="10" y2="1"/><line x1="3.5" y1="10" x2="10.5" y2="10"/>',
+  check:'<path d="M1.5 7.5 L5 11 L12.5 2.5"/>',
+};
+
+function iconSvg(name){
+  return `<svg viewBox="0 0 14 14">${ICONS[name]||''}</svg>`;
+}
+
+// ============ SEEDED RNG (for deterministic-looking sim data) ============
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(88214);
+
+// ============ GLOBAL SIM STATE (simulated/placeholder) ============
+const SIM = {
+  simTimeMs: 14 * 60000 + 22 * 1000 + 410,
+  running: true,
+  scenario: 'SC-0417-B',
+  seed: 88214,
+  bands: 12,
+  freqMin: 2.0, // GHz
+  freqMax: 18.0,
+  detectionCount: 842,
+  interceptRate: 0.734,
+  falseAlarmRate: 0.021,
+  avgInterceptTimeMs: 186,
+};
+
+function fmtClock(ms){
+  const h = Math.floor(ms/3600000);
+  const m = Math.floor((ms%3600000)/60000);
+  const s = Math.floor((ms%60000)/1000);
+  const cs = Math.floor((ms%1000));
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(3,'0')}`;
+}
+
+// ============ NAV RENDER ============
+function renderNav(){
+  const nav = document.getElementById('navList');
+  nav.innerHTML = PAGES.map(p=>`
+    <div class="nav-item ${p.id===currentPage?'active':''}" data-page="${p.id}">
+      <span class="nav-num">${p.num}</span>
+      <span class="ic">${iconSvg(p.icon)}</span>
+      <span>${p.label}</span>
+    </div>
+  `).join('');
+  nav.querySelectorAll('.nav-item').forEach(el=>{
+    el.addEventListener('click', ()=>navigateTo(el.dataset.page));
+  });
+}
+
+let currentPage = 'mission';
+
+function navigateTo(id){
+  currentPage = id;
+  const p = PAGES.find(x=>x.id===id);
+  document.getElementById('topbarTitle').textContent = p.title;
+  document.getElementById('topbarCrumb').textContent = p.crumb;
+  renderNav();
+  renderPage(id);
+}
+
+// ============ CLOCK TICK ============
+setInterval(()=>{
+  if(SIM.running){
+    SIM.simTimeMs += 410 + Math.floor(rng()*40);
+    document.getElementById('simClock').textContent = fmtClock(SIM.simTimeMs);
+  }
+}, 400);
+
+// ============ BOOT ============
+// Boot happens explicitly at the end of index.html after all page-renderer
+// scripts have loaded, since renderPage() depends on functions defined there.
+
+
+// ===== rf-viz.js =====
+// ============ SYNTHETIC EMITTER MODEL (SIMULATED / PLACEHOLDER DATA) ============
+const EMITTER_TYPES = ['PERIODIC','SCANNING','INTERMITTENT','AGILE'];
+const EMITTER_NAMES = ['EM','NX','KX','VS','RD'];
+
+function genEmitters(n, seed){
+  const r = mulberry32(seed);
+  const list = [];
+  for(let i=0;i<n;i++){
+    const type = EMITTER_TYPES[Math.floor(r()*EMITTER_TYPES.length)];
+    const freq = 2.0 + r()*16.0;
+    list.push({
+      id: `${EMITTER_NAMES[i%EMITTER_NAMES.length]}-${String(100+i).padStart(3,'0')}`,
+      type,
+      freq: freq,
+      pri: (50 + r()*900).toFixed(1),
+      pw: (0.2 + r()*4.8).toFixed(2),
+      power: (-30 + r()*50).toFixed(1),
+      active: r() > 0.15,
+      agility: type==='AGILE' ? (5+Math.floor(r()*40)) : 0,
+      detected: r() > 0.3,
+      seedOffset: r()*1000,
+    });
+  }
+  return list;
+}
+
+const EMITTERS = genEmitters(24, 88214);
+
+// ============ SPECTROGRAM / TIME-FREQUENCY PLOT ============
+// Renders pulses as short cyan traces on a freq(y) vs time(x) grid.
+function renderSpectrogram(opts){
+  const {width=900, height=340, emitters=EMITTERS, seed=1, showScanWindow=true, showDetections=true, freqMin=2, freqMax=18} = opts;
+  const r = mulberry32(seed);
+  const padL=48, padR=12, padT=10, padB=24;
+  const plotW = width-padL-padR, plotH = height-padT-padB;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+
+  // grid background
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)" />`;
+  const nHLines = 8;
+  for(let i=0;i<=nHLines;i++){
+    const y = padT + plotH*i/nHLines;
+    const f = freqMax - (freqMax-freqMin)*i/nHLines;
+    svg += `<line x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}" stroke="var(--grid-line)" stroke-width="1"/>`;
+    svg += `<text x="${padL-6}" y="${y+3}" text-anchor="end" font-family="var(--font-mono)" font-size="8.5" fill="var(--text-faint)">${f.toFixed(1)}</text>`;
+  }
+  const nVLines = 12;
+  for(let i=0;i<=nVLines;i++){
+    const x = padL + plotW*i/nVLines;
+    svg += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT+plotH}" stroke="var(--grid-line)" stroke-width="1"/>`;
+    if(i%2===0) svg += `<text x="${x}" y="${height-8}" text-anchor="middle" font-family="var(--font-mono)" font-size="8.5" fill="var(--text-faint)">${(i*1.2).toFixed(1)}s</text>`;
+  }
+  svg += `<text x="${padL+plotW/2}" y="${height-1}" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--text-faint)">SIMULATION TIME</text>`;
+
+  function fy(f){ return padT + plotH*(1-(f-freqMin)/(freqMax-freqMin)); }
+
+  // emitter pulse trains
+  emitters.forEach((em,idx)=>{
+    const baseY = fy(em.freq);
+    const colorActive = em.detected ? 'var(--cyan-bright)' : 'var(--cyan-signal)';
+    const opacity = em.active ? 0.9 : 0.25;
+    if(em.type==='AGILE'){
+      // hopping trajectory: series of short segments at varying freq
+      let x = padL;
+      let prevY = baseY;
+      const segs = 14;
+      for(let s=0;s<segs;s++){
+        const segW = plotW/segs;
+        const hopF = freqMin + r()*(freqMax-freqMin);
+        const y = fy(hopF);
+        if(r() > 0.3){
+          svg += `<line x1="${x}" y1="${y}" x2="${x+segW*0.7}" y2="${y}" stroke="${colorActive}" stroke-width="1.6" opacity="${opacity}" stroke-linecap="round"/>`;
+          if(em.detected && r()>0.5) svg += `<circle cx="${x+segW*0.35}" cy="${y}" r="2.2" fill="var(--green-confirm)" opacity="0.9"/>`;
+        }
+        x += segW;
+      }
+    } else if(em.type==='SCANNING'){
+      // visibility windows: pulse bursts appear in intervals
+      const nBursts = 5;
+      for(let b=0;b<nBursts;b++){
+        if(r()>0.35){
+          const x = padL + plotW*(b/nBursts) + r()*20;
+          const w = 14+r()*20;
+          svg += `<rect x="${x}" y="${baseY-1.5}" width="${w}" height="3" fill="${colorActive}" opacity="${opacity*0.8}"/>`;
+          for(let p=0;p<4;p++){
+            svg += `<line x1="${x+p*w/4}" y1="${baseY-4}" x2="${x+p*w/4}" y2="${baseY+4}" stroke="${colorActive}" stroke-width="1" opacity="${opacity}"/>`;
+          }
+        }
+      }
+    } else if(em.type==='INTERMITTENT'){
+      const nBursts = 4+Math.floor(r()*3);
+      for(let b=0;b<nBursts;b++){
+        const x = padL + r()*plotW*0.9;
+        const w = 8+r()*30;
+        svg += `<rect x="${x}" y="${baseY-1.2}" width="${w}" height="2.4" fill="${colorActive}" opacity="${opacity}"/>`;
+        // pulse markers
+        const nP = Math.floor(w/6);
+        for(let p=0;p<nP;p++){
+          svg += `<line x1="${x+p*6}" y1="${baseY-3.5}" x2="${x+p*6}" y2="${baseY+3.5}" stroke="${colorActive}" stroke-width="0.9" opacity="${opacity}"/>`;
+        }
+      }
+    } else { // PERIODIC
+      const nP = Math.floor(plotW/(6+r()*5));
+      const spacing = plotW/nP;
+      for(let p=0;p<nP;p++){
+        const x = padL + p*spacing;
+        svg += `<line x1="${x}" y1="${baseY-4}" x2="${x}" y2="${baseY+4}" stroke="${colorActive}" stroke-width="1.1" opacity="${opacity}"/>`;
+      }
+      svg += `<line x1="${padL}" y1="${baseY}" x2="${padL+plotW}" y2="${baseY}" stroke="${colorActive}" stroke-width="0.5" opacity="${opacity*0.35}"/>`;
+    }
+  });
+
+  // receiver scan window: moving translucent band
+  if(showScanWindow){
+    const scanX = padL + plotW*0.62;
+    const scanF = 6.4;
+    const scanY = fy(scanF);
+    svg += `<rect x="${scanX-2}" y="${padT}" width="26" height="${plotH}" fill="var(--cyan-signal)" opacity="0.06"/>`;
+    svg += `<line x1="${scanX-2}" y1="${padT}" x2="${scanX-2}" y2="${padT+plotH}" stroke="var(--cyan-bright)" stroke-width="1" stroke-dasharray="2,2" opacity="0.5"/>`;
+    svg += `<rect x="${scanX-2}" y="${scanY-6}" width="26" height="12" fill="none" stroke="var(--cyan-bright)" stroke-width="1.4"/>`;
+    svg += `<text x="${scanX+11}" y="${padT-1}" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--cyan-bright)">RX SCAN</text>`;
+  }
+
+  // detection markers
+  if(showDetections){
+    for(let i=0;i<10;i++){
+      const x = padL + r()*plotW;
+      const y = padT + r()*plotH;
+      if(r()>0.5){
+        svg += `<circle cx="${x}" cy="${y}" r="3" fill="none" stroke="var(--green-confirm)" stroke-width="1.4" opacity="0.85"/>`;
+      } else {
+        svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="none" stroke="var(--red-critical)" stroke-width="1.2" opacity="0.6" stroke-dasharray="1.5,1.5"/>`;
+      }
+    }
+  }
+
+  svg += `</svg>`;
+  return svg;
+}
+
+// ============ AMPLITUDE VS FREQUENCY PLOT ============
+function renderAmplitudeSpectrum(opts){
+  const {width=900, height=160, seed=2, freqMin=2, freqMax=18} = opts;
+  const r = mulberry32(seed);
+  const padL=48, padR=12, padT=10, padB=20;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)"/>`;
+  for(let i=0;i<=4;i++){
+    const y = padT+plotH*i/4;
+    svg += `<line x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}" stroke="var(--grid-line)" stroke-width="1"/>`;
+    svg += `<text x="${padL-6}" y="${y+3}" text-anchor="end" font-family="var(--font-mono)" font-size="8" fill="var(--text-faint)">${(-i*20)}</text>`;
+  }
+  // noise floor baseline with jitter
+  const N = 220;
+  let path = `M ${padL} ${padT+plotH-8}`;
+  const points = [];
+  for(let i=0;i<=N;i++){
+    const x = padL + plotW*i/N;
+    const noise = plotH - 10 - r()*6;
+    points.push([x,noise+padT-plotH+plotH]);
+  }
+  // build noise floor line
+  let d = `M ${padL} ${padT+plotH*0.92}`;
+  for(let i=1;i<=N;i++){
+    const x = padL+plotW*i/N;
+    const y = padT+plotH*0.92 + (r()-0.5)*6;
+    d += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }
+  svg += `<path d="${d}" stroke="var(--text-faint)" stroke-width="1" fill="none" opacity="0.5"/>`;
+  svg += `<text x="${padL+4}" y="${padT+plotH*0.92-4}" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-faint)">NOISE FLOOR</text>`;
+
+  // emitter peaks
+  EMITTERS.slice(0,16).forEach(em=>{
+    const fx = padL + plotW*(em.freq-freqMin)/(freqMax-freqMin);
+    const amp = parseFloat(em.power);
+    const peakY = padT + plotH*(1-(amp+30)/50);
+    const w = 3+r()*4;
+    const color = em.detected ? 'var(--cyan-signal)' : 'var(--cyan-dim)';
+    svg += `<path d="M ${fx-w} ${padT+plotH*0.92} Q ${fx} ${peakY} ${fx+w} ${padT+plotH*0.92}" fill="none" stroke="${color}" stroke-width="1.4" opacity="0.85"/>`;
+    if(em.detected){
+      svg += `<circle cx="${fx}" cy="${peakY}" r="1.8" fill="var(--green-confirm)"/>`;
+    }
+  });
+  for(let i=0;i<=4;i++){
+    const x = padL+plotW*i/4;
+    const f = freqMin+(freqMax-freqMin)*i/4;
+    svg += `<text x="${x}" y="${height-4}" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--text-faint)">${f.toFixed(1)}</text>`;
+  }
+  svg += `<text x="${padL+plotW/2}" y="${height+2}" text-anchor="middle" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-faint)" style="display:none"></text>`;
+  svg += `</svg>`;
+  return svg;
+}
+
+// ============ FREQUENCY BAND HEATMAP (for Scan Strategy Lab) ============
+function renderBandHeatmap(nBands, seed){
+  const r = mulberry32(seed);
+  const rows = [];
+  for(let i=0;i<nBands;i++){
+    const activity = r();
+    const confidence = r();
+    rows.push({
+      band: i+1,
+      freqLo: (2 + i*(16/nBands)).toFixed(2),
+      freqHi: (2 + (i+1)*(16/nBands)).toFixed(2),
+      activity, confidence,
+      lastHit: (r()*8).toFixed(1),
+      sinceObs: (r()*4).toFixed(1),
+    });
+  }
+  return rows;
+}
+
+// ============ PDW RECORD GENERATOR ============
+function genPDWStream(n, seed){
+  const r = mulberry32(seed);
+  const rows = [];
+  let t = 0;
+  for(let i=0;i<n;i++){
+    t += r()*8;
+    const em = EMITTERS[Math.floor(r()*EMITTERS.length)];
+    rows.push({
+      t: t.toFixed(3),
+      freq: (em.freq + (r()-0.5)*0.05).toFixed(3),
+      pw: em.pw,
+      amp: (-20-r()*40).toFixed(1),
+      pri: em.pri,
+      snr: (4+r()*22).toFixed(1),
+      emitter: em.id,
+      detected: r() > 0.25,
+    });
+  }
+  return rows;
+}
+
+// ============ SCAN TIMELINE (which band selected over time) ============
+function renderScanTimeline(width, height, nBands, seed){
+  const r = mulberry32(seed);
+  const padL=40, padR=8, padT=6, padB=16;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)"/>`;
+  const nSteps = 60;
+  const stepW = plotW/nSteps;
+  for(let i=0;i<nSteps;i++){
+    const band = Math.floor(r()*nBands);
+    const hit = r()>0.6;
+    const y = padT + plotH*(band/nBands);
+    const bh = plotH/nBands;
+    const color = hit ? 'var(--green-confirm)' : 'var(--cyan-dim)';
+    svg += `<rect x="${padL+i*stepW}" y="${y}" width="${stepW-1}" height="${bh-1}" fill="${color}" opacity="${hit?0.85:0.5}"/>`;
+  }
+  for(let b=0;b<=nBands;b+=2){
+    const y = padT+plotH*(b/nBands);
+    svg += `<text x="${padL-5}" y="${y+3}" text-anchor="end" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-faint)">B${b}</text>`;
+  }
+  svg += `</svg>`;
+  return svg;
+}
+
+// ============ SIMPLE LINE CHART (generic) ============
+function renderLineChart(opts){
+  const {width=420,height=180,series=[],yMin=0,yMax=1,yLabel='',color='var(--cyan-signal)',xLabels=[]} = opts;
+  const padL=36,padR=10,padT=10,padB=18;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)"/>`;
+  for(let i=0;i<=4;i++){
+    const y = padT+plotH*i/4;
+    svg += `<line x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}" stroke="var(--grid-line)" stroke-width="1"/>`;
+    svg += `<text x="${padL-5}" y="${y+3}" text-anchor="end" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-faint)">${(yMax-(yMax-yMin)*i/4).toFixed(2)}</text>`;
+  }
+  const colors = Array.isArray(color) ? color : [color];
+  series.forEach((s,si)=>{
+    let d='';
+    s.forEach((v,i)=>{
+      const x = padL+plotW*i/(s.length-1);
+      const y = padT+plotH*(1-(v-yMin)/(yMax-yMin));
+      d += (i===0?'M':'L')+` ${x.toFixed(1)} ${y.toFixed(1)} `;
+    });
+    svg += `<path d="${d}" fill="none" stroke="${colors[si%colors.length]}" stroke-width="1.6" opacity="0.9"/>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+function renderBarChart(opts){
+  const {width=420,height=180,values=[],labels=[],color='var(--cyan-signal)',yMax=null} = opts;
+  const padL=36,padR=10,padT=10,padB=22;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  const max = yMax || Math.max(...values)*1.15;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)"/>`;
+  for(let i=0;i<=4;i++){
+    const y = padT+plotH*i/4;
+    svg += `<line x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}" stroke="var(--grid-line)" stroke-width="1"/>`;
+  }
+  const bw = plotW/values.length;
+  const colors = Array.isArray(color) ? color : values.map(()=>color);
+  values.forEach((v,i)=>{
+    const h = plotH*(v/max);
+    const x = padL+i*bw+bw*0.15;
+    svg += `<rect x="${x}" y="${padT+plotH-h}" width="${bw*0.7}" height="${h}" fill="${colors[i]}" opacity="0.85"/>`;
+    svg += `<text x="${x+bw*0.35}" y="${height-6}" text-anchor="middle" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-dim)">${labels[i]||''}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+
+// ===== pages.js =====
+function renderPage(id){
+  const root = document.getElementById('pageRoot');
+  const fns = {
+    mission: pageMission, spectrum: pageSpectrum, emitters: pageEmitters,
+    simulation: pageSimulation, strategy: pageStrategy, comparison: pageComparison,
+    tsrd: pageTSRD, pdw: pagePDW, detection: pageDetection,
+    experiments: pageExperiments, validation: pageValidation,
+  };
+  root.innerHTML = (fns[id]||pageMission)();
+  afterRender(id);
+}
+
+function afterRender(id){
+  // hook per-page interactivity after DOM insert
+  if(id==='simulation') wireSimulationControls();
+  if(id==='strategy') wireStrategyTabs();
+  if(id==='pdw') wirePDWStream();
+}
+
+// ================= PAGE 1: MISSION OVERVIEW =================
+function pageMission(){
+  return `
+  <div class="grid grid-4" style="margin-bottom:14px;">
+    <div class="metric">
+      <div class="metric-label">ACTIVE EMITTERS</div>
+      <div class="metric-value cyan">${EMITTERS.filter(e=>e.active).length} <span style="font-size:13px;color:var(--text-faint)">/ ${EMITTERS.length}</span></div>
+      <div class="metric-sub">4 TYPES · 12 BANDS</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">DETECTION COUNT</div>
+      <div class="metric-value green">${SIM.detectionCount}</div>
+      <div class="metric-sub">SINCE T+00:00:00</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">INTERCEPT RATE</div>
+      <div class="metric-value cyan">${(SIM.interceptRate*100).toFixed(1)}%</div>
+      <div class="metric-sub">ROLLING 60s WINDOW</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">FALSE ALARM RATE</div>
+      <div class="metric-value amber">${(SIM.falseAlarmRate*100).toFixed(2)}%</div>
+      <div class="metric-sub">Pfa THRESHOLD 5.0%</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">SIMULATED RF ENVIRONMENT <span class="unit">2.0–18.0 GHz · 12 BANDS</span></span>
+      <span class="panel-tag sim">SIMULATED / PLACEHOLDER DATA</span>
+    </div>
+    <div class="panel-body">
+      ${renderSpectrogram({width:1100,height:320,seed:3})}
+      <div class="legend" style="margin-top:10px;">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-signal)"></span>Emitter pulse activity</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-bright);border:1px solid var(--cyan-bright)"></span>Receiver scan window</div>
+        <div class="legend-item"><span class="legend-swatch" style="border:1.5px solid var(--green-confirm);background:transparent"></span>Confirmed detection</div>
+        <div class="legend-item"><span class="legend-swatch" style="border:1.5px dashed var(--red-critical);background:transparent"></span>Missed opportunity</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-3">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">MISSION STATUS</span></div>
+      <div class="panel-body">
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Simulation status</span><span class="pill pass"><span class="d"></span>RUNNING</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Current experiment</span><span class="mono">EXP-2026-0091</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Active scenario</span><span class="mono">${SIM.scenario}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Scheduler</span><span class="mono" style="color:var(--cyan-signal)">RESTLESS BANDIT</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Sim time</span><span class="mono">${fmtClock(SIM.simTimeMs)}</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">EMITTER POPULATION</span></div>
+      <div class="panel-body">
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Periodic</span><span class="mono">${EMITTERS.filter(e=>e.type==='PERIODIC').length}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Scanning</span><span class="mono">${EMITTERS.filter(e=>e.type==='SCANNING').length}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Intermittent</span><span class="mono">${EMITTERS.filter(e=>e.type==='INTERMITTENT').length}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Frequency agile</span><span class="mono">${EMITTERS.filter(e=>e.type==='AGILE').length}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Active bands</span><span class="mono">9 / 12</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PERFORMANCE SUMMARY</span></div>
+      <div class="panel-body">
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Avg. intercept time</span><span class="mono">${SIM.avgInterceptTimeMs} ms</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Prob. of detection (Pd)</span><span class="mono" style="color:var(--green-confirm)">0.887</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Prob. false alarm (Pfa)</span><span class="mono" style="color:var(--amber-warn)">0.021</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Scan efficiency</span><span class="mono">76.2%</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Dataset source</span><span class="mono">TSRD-DERIVED</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// ================= PAGE 2: RF SPECTRUM MONITOR =================
+function pageSpectrum(){
+  return `
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">TIME–FREQUENCY SPECTROGRAM <span class="unit">2.0–18.0 GHz</span></span>
+      <div style="display:flex;gap:8px;">
+        <span class="panel-tag live">LIVE SCAN</span>
+        <span class="panel-tag sim">SIMULATED</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      ${renderSpectrogram({width:1100,height:400,seed:7})}
+      <div class="legend" style="margin-top:10px;">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-bright)"></span>Detected pulse (bright)</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-signal);opacity:.4"></span>Active / undetected</div>
+        <div class="legend-item"><span class="legend-swatch" style="border:1px solid var(--cyan-bright);background:transparent"></span>Receiver scan window</div>
+        <div class="legend-item"><span class="legend-swatch" style="border:1.5px solid var(--green-confirm);background:transparent"></span>Detection marker</div>
+        <div class="legend-item"><span class="legend-swatch" style="border:1.5px dashed var(--red-critical);background:transparent"></span>Missed opportunity</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">SIGNAL AMPLITUDE vs FREQUENCY <span class="unit">dBm</span></span></div>
+      <div class="panel-body">${renderAmplitudeSpectrum({width:540,height:200,seed:11})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">BAND OCCUPANCY <span class="unit">% time active, last 30s</span></span></div>
+      <div class="panel-body">
+        ${renderBarChart({width:540,height:200,values:Array.from({length:12},(_,i)=>0.15+mulberry32(20+i)()*0.75),labels:Array.from({length:12},(_,i)=>'B'+(i+1)),color:'var(--cyan-signal)',yMax:1})}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">EMITTER CLASS LEGEND</span>
+    </div>
+    <div class="panel-body">
+      <div class="grid grid-4">
+        <div><span class="badge-type periodic">PERIODIC</span><div class="dim" style="margin-top:6px;font-size:10.5px;">Fixed PRI, constant frequency. Regular vertical pulse ticks.</div></div>
+        <div><span class="badge-type scanning">SCANNING</span><div class="dim" style="margin-top:6px;font-size:10.5px;">Cyclical visibility windows — bursts appear at intervals.</div></div>
+        <div><span class="badge-type intermittent">INTERMITTENT</span><div class="dim" style="margin-top:6px;font-size:10.5px;">Irregular on/off bursts, no fixed schedule.</div></div>
+        <div><span class="badge-type agile">AGILE</span><div class="dim" style="margin-top:6px;font-size:10.5px;">Frequency hops across bands pulse-to-pulse or burst-to-burst.</div></div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// ================= PAGE 3: EMITTER ENVIRONMENT =================
+function pageEmitters(){
+  const rows = EMITTERS.map(em=>`
+    <tr>
+      <td class="mono">${em.id}</td>
+      <td><span class="badge-type ${em.type.toLowerCase()}">${em.type}</span></td>
+      <td class="mono">${em.freq.toFixed(3)} GHz</td>
+      <td class="mono">${em.pri} µs</td>
+      <td class="mono">${em.pw} µs</td>
+      <td class="mono">${em.power} dBm</td>
+      <td><span class="status-dot ${em.active?'active':'idle'}"></span>${em.active?'ACTIVE':'IDLE'}</td>
+      <td class="mono dim">${em.type==='AGILE'?em.agility+' hops/s':em.type==='SCANNING'?'cyclic':'fixed'}</td>
+      <td class="mono dim">${em.agility>0?em.agility+' bands':'—'}</td>
+      <td>${em.detected?'<span class="status-dot detected"></span>DETECTED':'<span class="status-dot idle"></span>UNSEEN'}</td>
+    </tr>
+  `).join('');
+
+  return `
+  <div class="grid grid-4" style="margin-bottom:14px;">
+    <div class="metric"><div class="metric-label">TOTAL EMITTERS</div><div class="metric-value">${EMITTERS.length}</div></div>
+    <div class="metric"><div class="metric-label">ACTIVE NOW</div><div class="metric-value green">${EMITTERS.filter(e=>e.active).length}</div></div>
+    <div class="metric"><div class="metric-label">FREQUENCY AGILE</div><div class="metric-value amber">${EMITTERS.filter(e=>e.type==='AGILE').length}</div></div>
+    <div class="metric"><div class="metric-label">DETECTED TO DATE</div><div class="metric-value cyan">${EMITTERS.filter(e=>e.detected).length}</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">EMITTER TIMELINE <span class="unit">activity / visibility windows, last 12s</span></span><span class="panel-tag sim">SIMULATED</span></div>
+    <div class="panel-body">
+      ${renderEmitterTimeline(1100, 260)}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">EMITTER REGISTRY</span><span class="panel-tag sim">SIMULATED / PLACEHOLDER DATA</span></div>
+    <div class="panel-body" style="padding:0;max-height:420px;overflow-y:auto;">
+      <table class="datagrid">
+        <thead><tr>
+          <th>ID</th><th>TYPE</th><th>FREQ</th><th>PRI</th><th>PW</th><th>POWER</th><th>STATE</th><th>SCAN BEHAVIOUR</th><th>AGILITY</th><th>STATUS</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>
+  `;
+}
+
+function renderEmitterTimeline(width,height){
+  const padL=90,padR=12,padT=8,padB=8;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  const rowH = plotH/EMITTERS.length;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  EMITTERS.forEach((em,idx)=>{
+    const y = padT+idx*rowH;
+    const r = mulberry32(300+idx);
+    svg += `<text x="${padL-6}" y="${y+rowH/2+3}" text-anchor="end" font-family="var(--font-mono)" font-size="8" fill="var(--text-dim)">${em.id}</text>`;
+    svg += `<rect x="${padL}" y="${y}" width="${plotW}" height="${rowH-1}" fill="var(--bg-panel-deep)"/>`;
+    const color = em.type==='PERIODIC'?'var(--cyan-signal)':em.type==='SCANNING'?'var(--amber-warn)':em.type==='INTERMITTENT'?'#B48DE8':'var(--red-critical)';
+    if(em.type==='PERIODIC'){
+      const n = 30;
+      for(let i=0;i<n;i++){ if(r()>0.1){ const x=padL+plotW*i/n; svg+=`<rect x="${x}" y="${y+2}" width="2" height="${rowH-5}" fill="${color}" opacity="0.75"/>`; } }
+    } else if(em.type==='SCANNING'){
+      const n=5;
+      for(let i=0;i<n;i++){ if(r()>0.3){ const x=padL+plotW*(i/n)+r()*20; const w=plotW/n*0.5; svg+=`<rect x="${x}" y="${y+2}" width="${w}" height="${rowH-5}" fill="${color}" opacity="0.6"/>`; } }
+    } else if(em.type==='INTERMITTENT'){
+      const n=8;
+      for(let i=0;i<n;i++){ if(r()>0.55){ const x=padL+r()*plotW*0.92; const w=6+r()*14; svg+=`<rect x="${x}" y="${y+2}" width="${w}" height="${rowH-5}" fill="${color}" opacity="0.7"/>`; } }
+    } else { // AGILE - show as small hop ticks at varying heights within row
+      const n=16;
+      for(let i=0;i<n;i++){ if(r()>0.2){ const x=padL+plotW*i/n; const hOff=(r()-0.5)*(rowH-6); svg+=`<circle cx="${x}" cy="${y+rowH/2+hOff}" r="1.6" fill="${color}" opacity="0.85"/>`; } }
+    }
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+// ================= PAGE 4: SIMULATION CONTROL =================
+function pageSimulation(){
+  return `
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">SCENARIO CONFIGURATION</span></div>
+      <div class="panel-body">
+        <div class="field-row"><div class="field-label">Number of emitters <span class="fv" id="v_nEmit">24</span></div><input type="range" min="4" max="64" value="24" id="nEmit"></div>
+        <div class="field-row"><div class="field-label">Frequency range (GHz) <span class="fv">2.0 – 18.0</span></div><div style="display:flex;gap:8px;"><input type="number" value="2.0" step="0.1"><input type="number" value="18.0" step="0.1"></div></div>
+        <div class="field-row"><div class="field-label">Number of bands <span class="fv" id="v_nBands">12</span></div><input type="range" min="4" max="32" value="12" id="nBands"></div>
+        <div class="field-row"><div class="field-label">Simulation duration (s) <span class="fv">600</span></div><input type="number" value="600"></div>
+        <div class="field-row"><div class="field-label">Time-slot duration (ms) <span class="fv">50</span></div><input type="number" value="50"></div>
+        <div class="field-row"><div class="field-label">Receiver bandwidth (MHz) <span class="fv">400</span></div><input type="number" value="400"></div>
+        <div class="field-row"><div class="field-label">Dwell time (ms) <span class="fv" id="v_dwell">40</span></div><input type="range" min="5" max="200" value="40" id="dwell"></div>
+        <div class="field-row"><div class="field-label">Switching time (ms) <span class="fv">2.5</span></div><input type="number" value="2.5" step="0.5"></div>
+        <div class="field-row"><div class="field-label">Noise floor (dBm) <span class="fv">-92</span></div><input type="number" value="-92"></div>
+        <div class="field-row"><div class="field-label">Detection threshold (dB SNR) <span class="fv">8.0</span></div><input type="number" value="8.0" step="0.5"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">ENVIRONMENT CONFIGURATION</span></div>
+        <div class="panel-body">
+          <div class="field-row"><div class="field-label">Periodic emitter ratio <span class="fv">0.35</span></div><input type="range" min="0" max="1" step="0.05" value="0.35"></div>
+          <div class="field-row"><div class="field-label">Intermittent emitter ratio <span class="fv">0.25</span></div><input type="range" min="0" max="1" step="0.05" value="0.25"></div>
+          <div class="field-row"><div class="field-label">Frequency-agile ratio <span class="fv">0.20</span></div><input type="range" min="0" max="1" step="0.05" value="0.20"></div>
+          <div class="field-row"><div class="field-label">Emitter density <span class="fv">MEDIUM</span></div>
+            <select><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option><option>DENSE (STRESS TEST)</option></select>
+          </div>
+          <div class="field-row"><div class="field-label">Arrival / departure behaviour</div>
+            <select><option>Static population</option><option selected>Poisson arrivals</option><option>Bursty arrivals</option></select>
+          </div>
+          <div class="field-row"><div class="field-label">Channel effects</div>
+            <select><option>None (ideal channel)</option><option selected>Free-space path loss</option><option>Path loss + multipath fading</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">RANDOMIZATION SEEDS</span></div>
+        <div class="panel-body">
+          <div class="grid grid-2" style="gap:10px;">
+            <div class="field-row"><div class="field-label">Master seed</div><input type="text" class="mono" value="88214"></div>
+            <div class="field-row"><div class="field-label">Scenario seed</div><input type="text" class="mono" value="4417"></div>
+            <div class="field-row"><div class="field-label">Emitter seed</div><input type="text" class="mono" value="20981"></div>
+            <div class="field-row"><div class="field-label">Evaluation seed</div><input type="text" class="mono" value="7735"></div>
+          </div>
+          <div class="data-note">Fixed seeds guarantee reproducible scenario generation across paired algorithm evaluations.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">SIMULATION ENGINE CONTROL</span><span class="pill pass" id="engineStatus"><span class="d"></span>RUNNING</span></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn primary" id="btnStart">▶ START SIMULATION</button>
+        <button class="btn" id="btnPause">❙❙ PAUSE</button>
+        <button class="btn stop" id="btnReset">↺ RESET</button>
+        <button class="btn" id="btnRunExp">⚙ RUN EXPERIMENT</button>
+        <div style="flex:1"></div>
+        <div class="mono dim" style="font-size:10.5px;">T+<span id="ctrlClock" class="mono" style="color:var(--cyan-signal)">${fmtClock(SIM.simTimeMs)}</span></div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+function wireSimulationControls(){
+  const bind=(id,disp,suffix='')=>{
+    const el=document.getElementById(id); const d=document.getElementById(disp);
+    if(el&&d) el.addEventListener('input',()=>{d.textContent=el.value+suffix;});
+  };
+  bind('nEmit','v_nEmit');
+  bind('nBands','v_nBands');
+  bind('dwell','v_dwell');
+
+  const status = document.getElementById('engineStatus');
+  document.getElementById('btnStart')?.addEventListener('click',()=>{
+    SIM.running=true; status.className='pill pass'; status.innerHTML='<span class="d"></span>RUNNING';
+  });
+  document.getElementById('btnPause')?.addEventListener('click',()=>{
+    SIM.running=false; status.className='pill warn'; status.innerHTML='<span class="d"></span>PAUSED';
+  });
+  document.getElementById('btnReset')?.addEventListener('click',()=>{
+    SIM.simTimeMs=0; status.className='pill notval'; status.innerHTML='<span class="d"></span>RESET';
+    document.getElementById('simClock').textContent=fmtClock(0);
+    document.getElementById('ctrlClock').textContent=fmtClock(0);
+  });
+  document.getElementById('btnRunExp')?.addEventListener('click',()=>{
+    status.className='pill warn'; status.innerHTML='<span class="d"></span>EXPERIMENT QUEUED';
+  });
+}
+
+
+// ===== pages2.js =====
+// ================= PAGE 5: SCAN STRATEGY LAB =================
+const STRATEGIES = ['ROUND ROBIN','RANDOM','ε-GREEDY','UCB','THOMPSON SAMPLING','RESTLESS BANDIT','RL SCHEDULER'];
+let activeStrategy = 'RESTLESS BANDIT';
+
+function pageStrategy(){
+  const bandRows = renderBandHeatmap(12, 42);
+  return `
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">STRATEGY SELECTION</span></div>
+    <div class="panel-body" style="padding:10px 14px;">
+      <div class="tabbar" id="stratTabs">
+        ${STRATEGIES.map(s=>`<div class="tab ${s===activeStrategy?'active':''}" data-strat="${s}">${s}</div>`).join('')}
+      </div>
+      <div class="flow-row">
+        <div class="flow-node active" id="flowBand">BAND 07 · 8.42 GHz</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node active">DWELL 40ms</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node active" style="color:var(--green-confirm);border-color:var(--green-confirm);">DETECTION: HIT</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">BELIEF UPDATE</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node" id="flowNext">NEXT: BAND 03</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-12">
+    <div class="col-8">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">FREQUENCY-BAND BELIEF HEATMAP <span class="unit">${activeStrategy}</span></span></div>
+        <div class="panel-body" style="padding:0;">
+          <table class="datagrid">
+            <thead><tr><th>BAND</th><th>RANGE (GHz)</th><th>ESTIMATED ACTIVITY</th><th>CONFIDENCE</th><th>LAST HIT (s ago)</th><th>SINCE OBSERVED (s)</th></tr></thead>
+            <tbody>
+              ${bandRows.map(b=>`
+                <tr>
+                  <td class="mono">B${b.band}</td>
+                  <td class="mono dim">${b.freqLo}–${b.freqHi}</td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <div style="flex:1;height:6px;background:var(--bg-panel-deep);border:1px solid var(--border-steel);">
+                        <div style="height:100%;width:${(b.activity*100).toFixed(0)}%;background:${b.activity>0.6?'var(--cyan-signal)':b.activity>0.3?'var(--amber-warn)':'var(--border-steel-bright)'};"></div>
+                      </div>
+                      <span class="mono" style="width:34px;">${(b.activity*100).toFixed(0)}%</span>
+                    </div>
+                  </td>
+                  <td class="mono">${(b.confidence*100).toFixed(0)}%</td>
+                  <td class="mono dim">${b.lastHit}</td>
+                  <td class="mono dim">${b.sinceObs}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">SCHEDULER STATE</span></div>
+        <div class="panel-body">
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <div style="display:flex;justify-content:space-between;"><span class="dim">Active policy</span><span class="mono" style="color:var(--cyan-signal)">${activeStrategy}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span class="dim">Decision epoch</span><span class="mono">4,821</span></div>
+            <div style="display:flex;justify-content:space-between;"><span class="dim">Exploration rate</span><span class="mono">ε = 0.08</span></div>
+            <div style="display:flex;justify-content:space-between;"><span class="dim">Cumulative reward</span><span class="mono">3,204.6</span></div>
+            <div style="display:flex;justify-content:space-between;"><span class="dim">Regret (vs. oracle)</span><span class="mono">211.4</span></div>
+          </div>
+          <div class="data-note">Belief state updates after every dwell using observed hit/miss outcome per band.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">BAND SELECTION TIMELINE <span class="unit">last 60 decision steps</span></span></div>
+    <div class="panel-body">
+      ${renderScanTimeline(1100, 220, 12, 55)}
+      <div class="legend" style="margin-top:8px;">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--green-confirm)"></span>Band selected — hit</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-dim)"></span>Band selected — no activity</div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+function wireStrategyTabs(){
+  document.getElementById('stratTabs')?.addEventListener('click',(e)=>{
+    const t = e.target.closest('.tab');
+    if(!t) return;
+    activeStrategy = t.dataset.strat;
+    renderPage('strategy');
+  });
+}
+
+// ================= PAGE 6: ALGORITHM COMPARISON =================
+function pageComparison(){
+  const algos = STRATEGIES;
+  const seedFor = (name,off)=>mulberry32(name.length*97+off);
+  const pd = algos.map((a,i)=>0.55+mulberry32(i*13+1)()*0.38);
+  const pfa = algos.map((a,i)=>0.008+mulberry32(i*13+2)()*0.05);
+  const interceptTime = algos.map((a,i)=>90+mulberry32(i*13+3)()*220);
+  const scanEff = algos.map((a,i)=>0.4+mulberry32(i*13+4)()*0.5);
+
+  const colorFor = i => i===5 ? 'var(--cyan-bright)' : i===6 ? 'var(--green-confirm)' : `hsl(${190+i*8},40%,${45+i*2}%)`;
+
+  return `
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">PAIRED EXPERIMENT CONFIGURATION</span><span class="panel-tag sim">SIMULATED / PLACEHOLDER DATA</span></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:11px;">
+        <div><span class="dim">Scenario</span> &nbsp;<span class="mono">${SIM.scenario}</span></div>
+        <div><span class="dim">Master seed</span> &nbsp;<span class="mono">88214</span></div>
+        <div><span class="dim">Emitter config</span> &nbsp;<span class="mono">24 emitters · mixed density</span></div>
+        <div><span class="dim">Trials per algorithm</span> &nbsp;<span class="mono">30</span></div>
+        <div><span class="dim">Dataset source</span> &nbsp;<span class="mono" style="color:var(--amber-warn)">HYBRID (TSRD + SYNTHETIC)</span></div>
+      </div>
+      <div class="data-note">All algorithms evaluated against identical emitter realizations per trial (paired design) — differences reflect scheduling policy, not scenario variance.</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PROBABILITY OF DETECTION (Pd)</span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:210,values:pd,labels:algos.map(a=>a.split(' ')[0].slice(0,4)),color:algos.map((a,i)=>colorFor(i)),yMax:1})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">FALSE ALARM PROBABILITY (Pfa)</span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:210,values:pfa,labels:algos.map(a=>a.split(' ')[0].slice(0,4)),color:'var(--amber-warn)',yMax:0.08})}</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">AVERAGE INTERCEPT TIME <span class="unit">ms, lower is better</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:210,values:interceptTime,labels:algos.map(a=>a.split(' ')[0].slice(0,4)),color:'var(--cyan-signal)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">SCAN EFFICIENCY</span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:210,values:scanEff,labels:algos.map(a=>a.split(' ')[0].slice(0,4)),color:'var(--green-confirm)',yMax:1})}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">DETECTION RATE OVER TIME <span class="unit">rolling window</span></span></div>
+    <div class="panel-body">
+      ${renderLineChart({width:1100,height:220,series:algos.map((a,i)=>Array.from({length:40},(_,t)=>{const r=mulberry32(i*97+t);return Math.min(1,0.3+t*0.014+r()*0.1);})),yMin:0,yMax:1,color:algos.map((a,i)=>colorFor(i))})}
+      <div class="legend" style="margin-top:8px;">
+        ${algos.map((a,i)=>`<div class="legend-item"><span class="legend-swatch" style="background:${colorFor(i)}"></span>${a}</div>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PERFORMANCE vs EMITTER DENSITY</span></div>
+      <div class="panel-body">
+        ${renderLineChart({width:540,height:200,series:[[0.91,0.84,0.71,0.58],[0.62,0.55,0.44,0.33]],yMin:0,yMax:1,color:['var(--green-confirm)','var(--text-faint)']})}
+        <div class="legend" style="margin-top:6px;"><div class="legend-item"><span class="legend-swatch" style="background:var(--green-confirm)"></span>Restless Bandit</div><div class="legend-item"><span class="legend-swatch" style="background:var(--text-faint)"></span>Round Robin</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PERFORMANCE vs FREQUENCY AGILITY</span></div>
+      <div class="panel-body">
+        ${renderLineChart({width:540,height:200,series:[[0.89,0.79,0.68,0.54],[0.7,0.68,0.65,0.61]],yMin:0,yMax:1,color:['var(--cyan-bright)','var(--text-faint)']})}
+        <div class="legend" style="margin-top:6px;"><div class="legend-item"><span class="legend-swatch" style="background:var(--cyan-bright)"></span>RL Scheduler</div><div class="legend-item"><span class="legend-swatch" style="background:var(--text-faint)"></span>Random</div></div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// ================= PAGE 7: TSRD / DATASET ANALYSIS =================
+function pageTSRD(){
+  return `
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">TURING SYNTHETIC RADAR DATASET (TSRD)</span><span class="panel-tag live">DATASET LOADED</span></div>
+    <div class="panel-body">
+      <div class="flow-row" style="justify-content:center;padding:8px 0;">
+        <div class="flow-node active">TSRD DATA</div><span class="flow-arrow">↓</span>
+        <div class="flow-node">ADAPTER</div><span class="flow-arrow">↓</span>
+        <div class="flow-node">COMMON RF / PULSE REPRESENTATION</div><span class="flow-arrow">↓</span>
+        <div class="flow-node">SIMULATOR</div><span class="flow-arrow">↓</span>
+        <div class="flow-node">SCHEDULER</div><span class="flow-arrow">↓</span>
+        <div class="flow-node" style="color:var(--green-confirm);border-color:var(--green-confirm);">METRICS</div>
+      </div>
+      <div class="data-note">This experiment's data source: <span class="mono" style="color:var(--amber-warn)">HYBRID</span> — emitter characteristics sampled from TSRD, arrival/channel dynamics synthetically generated. TSRD does not include scheduler outcomes; those are computed by the simulator.</div>
+    </div>
+  </div>
+
+  <div class="grid grid-4">
+    <div class="metric"><div class="metric-label">DATASET SAMPLES</div><div class="metric-value">18,204</div></div>
+    <div class="metric"><div class="metric-label">EMITTER CLASSES</div><div class="metric-value">4</div></div>
+    <div class="metric"><div class="metric-label">LABELLED SCENARIOS</div><div class="metric-value">62</div></div>
+    <div class="metric"><div class="metric-label">DATASET VERSION</div><div class="metric-value mono" style="font-size:16px;">TSRD v2.3</div></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">FREQUENCY DISTRIBUTION <span class="unit">TSRD samples</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:190,values:Array.from({length:14},(_,i)=>mulberry32(600+i)()),labels:Array.from({length:14},(_,i)=>(2+i).toString()),color:'var(--cyan-signal)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PULSE-WIDTH DISTRIBUTION <span class="unit">µs</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:190,values:Array.from({length:10},(_,i)=>mulberry32(700+i)()),labels:Array.from({length:10},(_,i)=>((i+1)*0.5).toFixed(1)),color:'var(--cyan-bright)'})}</div>
+    </div>
+  </div>
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PRI DISTRIBUTION <span class="unit">µs</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:190,values:Array.from({length:10},(_,i)=>mulberry32(800+i)()),labels:Array.from({length:10},(_,i)=>(50+i*100)),color:'var(--amber-warn)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">AMPLITUDE DISTRIBUTION <span class="unit">dBm</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:190,values:Array.from({length:10},(_,i)=>mulberry32(900+i)()),labels:Array.from({length:10},(_,i)=>(-40+i*4)),color:'var(--green-confirm)'})}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">AVAILABLE LABELS &amp; SCENARIOS</span></div>
+    <div class="panel-body" style="padding:0;">
+      <table class="datagrid">
+        <thead><tr><th>SCENARIO ID</th><th>EMITTER CLASSES</th><th>SAMPLE COUNT</th><th>SOURCE</th><th>USE IN EXPERIMENT</th></tr></thead>
+        <tbody>
+          ${['TSRD-S01-BASE','TSRD-S07-DENSE','TSRD-S12-AGILE','TSRD-S19-MIXED','TSRD-S24-LOWSNR'].map((s,i)=>`
+            <tr><td class="mono">${s}</td><td class="mono dim">${2+i%3}</td><td class="mono">${(1200+i*340)}</td>
+            <td><span class="pill ${i%2===0?'pass':'warn'}"><span class="d"></span>${i%2===0?'TSRD-DERIVED':'HYBRID'}</span></td>
+            <td>${i===1?'<span class="mono" style="color:var(--cyan-signal)">ACTIVE</span>':'<span class="dim mono">—</span>'}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  `;
+}
+
+// ================= PAGE 8: PDW ANALYSIS =================
+let pdwPaused = false;
+function pagePDW(){
+  const pdwRows = genPDWStream(40, 999);
+  return `
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">PDW STREAM <span class="unit">Pulse Descriptor Words</span></span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="panel-tag sim">SIMULATED</span>
+        <button class="btn small" id="btnPdwPause">${pdwPaused?'▶ RESUME':'❙❙ PAUSE'}</button>
+      </div>
+    </div>
+    <div class="panel-body" style="padding:0;max-height:320px;overflow-y:auto;" id="pdwTableWrap">
+      <table class="datagrid">
+        <thead><tr><th>TIME (s)</th><th>FREQ (GHz)</th><th>PW (µs)</th><th>AMP (dBm)</th><th>PRI (µs)</th><th>SNR (dB)</th><th>EMITTER ID</th><th>DETECTION</th></tr></thead>
+        <tbody id="pdwBody">
+          ${pdwRows.map(row=>pdwRowHtml(row)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PULSE TRAIN VISUALIZATION</span></div>
+      <div class="panel-body">${renderSpectrogram({width:540,height:230,seed:321,showScanWindow:false})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">FREQUENCY HOPPING PLOT <span class="unit">agile emitters</span></span></div>
+      <div class="panel-body">${renderSpectrogram({width:540,height:230,seed:654,emitters:EMITTERS.filter(e=>e.type==='AGILE'),showScanWindow:false,showDetections:false})}</div>
+    </div>
+  </div>
+  <div class="grid grid-3">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PRI HISTOGRAM <span class="unit">µs</span></span></div>
+      <div class="panel-body">${renderBarChart({width:350,height:170,values:Array.from({length:8},(_,i)=>mulberry32(1000+i)()),labels:Array.from({length:8},(_,i)=>(50+i*120)),color:'var(--cyan-signal)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">AMPLITUDE DISTRIBUTION</span></div>
+      <div class="panel-body">${renderBarChart({width:350,height:170,values:Array.from({length:8},(_,i)=>mulberry32(1100+i)()),labels:Array.from({length:8},(_,i)=>(-40+i*5)),color:'var(--amber-warn)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PULSE-WIDTH DISTRIBUTION</span></div>
+      <div class="panel-body">${renderBarChart({width:350,height:170,values:Array.from({length:8},(_,i)=>mulberry32(1200+i)()),labels:Array.from({length:8},(_,i)=>((i+1)*0.5).toFixed(1)),color:'var(--green-confirm)'})}</div>
+    </div>
+  </div>
+  `;
+}
+
+function pdwRowHtml(row){
+  return `<tr>
+    <td class="mono">${row.t}</td><td class="mono">${row.freq}</td><td class="mono">${row.pw}</td>
+    <td class="mono">${row.amp}</td><td class="mono">${row.pri}</td><td class="mono">${row.snr}</td>
+    <td class="mono" style="color:var(--cyan-signal)">${row.emitter}</td>
+    <td>${row.detected?'<span class="status-dot detected"></span>HIT':'<span class="status-dot idle"></span>MISS'}</td>
+  </tr>`;
+}
+
+let pdwInterval = null;
+function wirePDWStream(){
+  document.getElementById('btnPdwPause')?.addEventListener('click',(e)=>{
+    pdwPaused = !pdwPaused;
+    e.target.textContent = pdwPaused?'▶ RESUME':'❙❙ PAUSE';
+  });
+  if(pdwInterval) clearInterval(pdwInterval);
+  let counter = 2000;
+  pdwInterval = setInterval(()=>{
+    if(pdwPaused || currentPage!=='pdw') return;
+    const body = document.getElementById('pdwBody');
+    if(!body) return;
+    const row = genPDWStream(1, counter++)[0];
+    body.insertAdjacentHTML('afterbegin', pdwRowHtml(row));
+    if(body.children.length>60) body.removeChild(body.lastChild);
+  }, 900);
+}
+
+
+// ===== pages3.js =====
+// ================= PAGE 9: DETECTION & INTERCEPTION ANALYTICS =================
+function pageDetection(){
+  const r = mulberry32(2200);
+  const hitMiss = Array.from({length:70},()=>r()>0.28);
+  return `
+  <div class="grid grid-4" style="margin-bottom:14px;">
+    <div class="metric"><div class="metric-label">Pd (PROB. OF DETECTION)</div><div class="metric-value green">0.887</div></div>
+    <div class="metric"><div class="metric-label">Pfa (FALSE ALARM)</div><div class="metric-value amber">0.021</div></div>
+    <div class="metric"><div class="metric-label">AVG SNR AT DETECTION</div><div class="metric-value cyan">14.6 dB</div></div>
+    <div class="metric"><div class="metric-label">DETECTION THRESHOLD</div><div class="metric-value">8.0 dB</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">DETECTION PIPELINE</span></div>
+    <div class="panel-body" style="padding:16px 14px;">
+      <div class="flow-row" style="justify-content:center;">
+        <div class="flow-node">EMITTER TRANSMITS</div><span class="flow-arrow">→</span>
+        <div class="flow-node active">RECEIVER SCANS</div><span class="flow-arrow">→</span>
+        <div class="flow-node">SIGNAL PRESENT?</div><span class="flow-arrow">→</span>
+        <div class="flow-node" style="color:var(--cyan-signal);border-color:var(--cyan-signal);">DETECTION</div><span class="flow-arrow">→</span>
+        <div class="flow-node" style="color:var(--green-confirm);border-color:var(--green-confirm);">HIT / MISS</div><span class="flow-arrow">→</span>
+        <div class="flow-node">SCHEDULER UPDATE</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">HIT / MISS SEQUENCE <span class="unit">last 70 scan decisions</span></span></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:2px;flex-wrap:wrap;">
+        ${hitMiss.map(h=>`<div style="width:14px;height:24px;background:${h?'var(--green-confirm)':'var(--red-critical)'};opacity:${h?0.85:0.6};"></div>`).join('')}
+      </div>
+      <div class="legend" style="margin-top:10px;">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--green-confirm)"></span>Hit — confirmed intercept</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--red-critical)"></span>Miss — missed opportunity</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">INTERCEPT LATENCY DISTRIBUTION <span class="unit">ms</span></span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:200,values:Array.from({length:12},(_,i)=>mulberry32(2300+i)()),labels:Array.from({length:12},(_,i)=>(50+i*40)),color:'var(--cyan-signal)'})}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">MISSED OPPORTUNITIES BY BAND</span></div>
+      <div class="panel-body">${renderBarChart({width:540,height:200,values:Array.from({length:12},(_,i)=>mulberry32(2400+i)()*0.4),labels:Array.from({length:12},(_,i)=>'B'+(i+1)),color:'var(--red-critical)'})}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">HIT / MISS EVENTS ON RF TIMELINE</span></div>
+    <div class="panel-body">${renderSpectrogram({width:1100,height:280,seed:2500})}</div>
+  </div>
+  `;
+}
+
+// ================= PAGE 10: EXPERIMENT RESULTS =================
+function pageExperiments(){
+  return `
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">EXPERIMENT RECORD</span><span class="panel-tag sim">SIMULATED / PLACEHOLDER DATA</span></div>
+    <div class="panel-body">
+      <div class="grid grid-4">
+        <div><div class="dim" style="font-size:10px;">EXPERIMENT ID</div><div class="mono" style="font-size:13px;color:var(--cyan-signal);">EXP-2026-0091</div></div>
+        <div><div class="dim" style="font-size:10px;">SCENARIO ID</div><div class="mono" style="font-size:13px;">SC-0417-B</div></div>
+        <div><div class="dim" style="font-size:10px;">ALGORITHM</div><div class="mono" style="font-size:13px;">RESTLESS BANDIT</div></div>
+        <div><div class="dim" style="font-size:10px;">SEED</div><div class="mono" style="font-size:13px;">88214</div></div>
+      </div>
+      <div class="grid grid-3" style="margin-top:12px;">
+        <div><div class="dim" style="font-size:10px;">EMITTER CONFIGURATION</div><div class="mono" style="font-size:11.5px;">24 emitters · mixed density · 12 bands</div></div>
+        <div><div class="dim" style="font-size:10px;">DATASET SOURCE</div><div class="mono" style="font-size:11.5px;color:var(--amber-warn)">HYBRID (TSRD + SYNTHETIC)</div></div>
+        <div><div class="dim" style="font-size:10px;">SIMULATION CONFIGURATION</div><div class="mono" style="font-size:11.5px;">600s · 50ms slots · BW 400MHz</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">DETECTION PROBABILITY <span class="unit">± 95% CI</span></span></div>
+      <div class="panel-body">${renderErrorBarChart(540,210,[0.887,0.72,0.55,0.68,0.79,0.83],[0.02,0.03,0.04,0.03,0.025,0.03],['RBandit','εGreedy','Random','UCB','Thomp.','RR'])}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">FALSE ALARM RATE <span class="unit">± 95% CI</span></span></div>
+      <div class="panel-body">${renderErrorBarChart(540,210,[0.021,0.031,0.048,0.028,0.024,0.035],[0.004,0.006,0.008,0.005,0.005,0.007],['RBandit','εGreedy','Random','UCB','Thomp.','RR'],'var(--amber-warn)')}</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">INTERCEPT TIME <span class="unit">ms, ± 95% CI</span></span></div>
+      <div class="panel-body">${renderErrorBarChart(540,210,[186,244,301,229,201,268],[12,18,22,15,14,19],['RBandit','εGreedy','Random','UCB','Thomp.','RR'],'var(--cyan-signal)')}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">PREDICTION ACCURACY <span class="unit">band-activity forecast</span></span></div>
+      <div class="panel-body">${renderErrorBarChart(540,210,[0.81,0.63,0.41,0.70,0.76,0.58],[0.03,0.04,0.05,0.035,0.03,0.045],['RBandit','εGreedy','Random','UCB','Thomp.','RR'],'var(--green-confirm)')}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">PERFORMANCE ACROSS EMITTER DENSITY &amp; AGILITY</span></div>
+    <div class="panel-body">
+      <div class="grid grid-2">
+        <div>
+          <div class="dim" style="font-size:10px;margin-bottom:6px;">Pd vs emitter density (low → dense)</div>
+          ${renderLineChart({width:520,height:180,series:[[0.94,0.89,0.82,0.71]],yMin:0,yMax:1,color:'var(--cyan-signal)'})}
+        </div>
+        <div>
+          <div class="dim" style="font-size:10px;margin-bottom:6px;">Pd vs frequency agility (none → high)</div>
+          ${renderLineChart({width:520,height:180,series:[[0.91,0.85,0.76,0.65]],yMin:0,yMax:1,color:'var(--cyan-bright)'})}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">EXPORT</span></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:10px;">
+        <button class="btn primary">⭳ EXPORT RESULTS (PDF)</button>
+        <button class="btn">⭳ EXPORT CSV</button>
+        <button class="btn">💾 SAVE EXPERIMENT</button>
+      </div>
+      <div class="data-note">Values shown are from simulated evaluation runs. No live hardware results are represented on this page.</div>
+    </div>
+  </div>
+  `;
+}
+
+function renderErrorBarChart(width,height,values,errors,labels,color='var(--cyan-signal)'){
+  const padL=40,padR=10,padT=10,padB=22;
+  const plotW=width-padL-padR, plotH=height-padT-padB;
+  const max = Math.max(...values.map((v,i)=>v+errors[i]))*1.15;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none">`;
+  svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="var(--bg-panel-deep)"/>`;
+  for(let i=0;i<=4;i++){
+    const y = padT+plotH*i/4;
+    svg += `<line x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}" stroke="var(--grid-line)" stroke-width="1"/>`;
+  }
+  const bw = plotW/values.length;
+  values.forEach((v,i)=>{
+    const h = plotH*(v/max);
+    const x = padL+i*bw+bw*0.2;
+    const barW = bw*0.6;
+    const errH = plotH*(errors[i]/max);
+    const topY = padT+plotH-h;
+    svg += `<rect x="${x}" y="${topY}" width="${barW}" height="${h}" fill="${color}" opacity="0.8"/>`;
+    svg += `<line x1="${x+barW/2}" y1="${topY-errH}" x2="${x+barW/2}" y2="${topY+errH}" stroke="var(--text-primary)" stroke-width="1.2"/>`;
+    svg += `<line x1="${x+barW/2-4}" y1="${topY-errH}" x2="${x+barW/2+4}" y2="${topY-errH}" stroke="var(--text-primary)" stroke-width="1.2"/>`;
+    svg += `<line x1="${x+barW/2-4}" y1="${topY+errH}" x2="${x+barW/2+4}" y2="${topY+errH}" stroke="var(--text-primary)" stroke-width="1.2"/>`;
+    svg += `<text x="${x+barW/2}" y="${height-6}" text-anchor="middle" font-family="var(--font-mono)" font-size="7.5" fill="var(--text-dim)">${labels[i]}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+// ================= PAGE 11: VALIDATION / SYSTEM STATUS =================
+const VALIDATION_ITEMS = [
+  {name:'Unified band/slot mapping', status:'pass'},
+  {name:'Detection model consistency', status:'pass'},
+  {name:'TSRD integration', status:'pass'},
+  {name:'Truth-leakage protection', status:'pass'},
+  {name:'Seed reproducibility', status:'pass'},
+  {name:'Paired experiment design', status:'pass'},
+  {name:'Metric calculation', status:'warn'},
+  {name:'PDW conversion', status:'pass'},
+  {name:'Scenario configuration', status:'pass'},
+  {name:'Protocol compliance', status:'notval'},
+];
+
+function pageValidation(){
+  const statusLabel = {pass:'PASS',warn:'WARNING',fail:'FAILED',notval:'NOT VALIDATED'};
+  return `
+  <div class="grid grid-4" style="margin-bottom:14px;">
+    <div class="metric"><div class="metric-label">SIMULATOR VERSION</div><div class="metric-value mono" style="font-size:16px;">v0.9.3</div></div>
+    <div class="metric"><div class="metric-label">PROTOCOL VERSION</div><div class="metric-value mono" style="font-size:16px;">PS26055-P2</div></div>
+    <div class="metric"><div class="metric-label">DATASET VERSION</div><div class="metric-value mono" style="font-size:16px;">TSRD v2.3</div></div>
+    <div class="metric"><div class="metric-label">EXPERIMENT SEED</div><div class="metric-value mono" style="font-size:16px;">88214</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">CONFORMANCE CHECKLIST</span><span class="mono dim" style="font-size:10px;">LAST RUN: ${fmtClock(SIM.simTimeMs)}</span></div>
+    <div class="panel-body" style="padding:0;">
+      <table class="datagrid">
+        <thead><tr><th>VALIDATION ITEM</th><th>STATUS</th><th>NOTE</th></tr></thead>
+        <tbody>
+          ${VALIDATION_ITEMS.map(v=>`
+            <tr>
+              <td>${v.name}</td>
+              <td><span class="pill ${v.status}"><span class="d"></span>${statusLabel[v.status]}</span></td>
+              <td class="dim" style="font-family:var(--font-ui);font-size:10.5px;">
+                ${v.status==='pass'?'No issues detected in latest conformance run.':
+                  v.status==='warn'?'Minor discrepancy in metric aggregation across paired trials — under review.':
+                  v.status==='fail'?'Failed conformance check — see log for details.':
+                  'Awaiting formal protocol sign-off from review board.'}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">DATA SOURCE INTEGRITY</span></div>
+      <div class="panel-body">
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Real hardware data</span><span class="pill notval"><span class="d"></span>NOT CONNECTED</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">TSRD-derived data</span><span class="pill pass"><span class="d"></span>VALIDATED</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Simulated data</span><span class="pill pass"><span class="d"></span>VALIDATED</span></div>
+          <div style="display:flex;justify-content:space-between;"><span class="dim">Placeholder / UI demo data</span><span class="pill warn"><span class="d"></span>LABELLED ONLY</span></div>
+        </div>
+        <div class="data-note">This console currently displays simulated and placeholder data throughout. No values represent live field measurements.</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">REPRODUCIBILITY LOG</span></div>
+      <div class="panel-body" style="padding:0;">
+        <table class="datagrid">
+          <thead><tr><th>RUN</th><th>SEED</th><th>RESULT HASH</th><th>MATCH</th></tr></thead>
+          <tbody>
+            ${['R-001','R-002','R-003'].map((r,i)=>`<tr><td class="mono">${r}</td><td class="mono">88214</td><td class="mono dim">a3f${i}9c...e1${i}b</td><td><span class="pill pass"><span class="d"></span>IDENTICAL</span></td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+
+// ===== boot =====
+renderNav();
+renderPage(currentPage);
+</script>
+</body>
+</html>
