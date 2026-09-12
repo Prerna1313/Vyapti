@@ -147,6 +147,8 @@ class TSRDMetricsEngine(MetricsEngine):
             "per_band_metrics": per_band,
             "temporal_metrics": temporal,
             "emitter_population": self.emitter_data if self.emitter_data else {},
+            "threat_assessment": self._calculate_threat_assessment(self.emitter_data) if getattr(self, "emitter_data", None) else {},
+            "spatial_analysis": self._calculate_spatial_metrics(self.emitter_data) if getattr(self, "emitter_data", None) else {},
             "spectral_environment": {
                 "total_spectrum_mhz": occupancy_grid.shape[0] * 500,
                 "occupied_spectrum_mhz": unique_occupied_bands * 500,
@@ -160,5 +162,135 @@ class TSRDMetricsEngine(MetricsEngine):
                 "shadowing_fading": "Not modeled",
                 "jammer_info": "Not available",
                 "weather_effects": "Not modeled"
+            }
+        }
+
+    def _calculate_threat_assessment(self, emitter_data: Dict[str, Any]) -> Dict[str, Any]:
+        if not emitter_data or 'emitters' not in emitter_data or not emitter_data['emitters']:
+            return {}
+            
+        threat_distribution = {"High": 0, "Medium": 0, "Low": 0}
+        per_emitter_threat = []
+        
+        for e in emitter_data['emitters']:
+            score = 0
+            
+            # PRI logic
+            min_pri = min(e.get('pris_us', [100])) if e.get('pris_us') else 100
+            if min_pri < 10:
+                score += 5
+            elif min_pri < 50:
+                score += 3
+            else:
+                score += 1
+                
+            # Frequency logic
+            max_freq = max(e.get('frequencies_mhz', [1000])) if e.get('frequencies_mhz') else 1000
+            if max_freq > 10000:
+                score += 2
+            elif max_freq > 5000:
+                score += 1
+                
+            # Pulse Width logic
+            min_pw = min(e.get('pws_us', [2.0])) if e.get('pws_us') else 2.0
+            if min_pw < 0.5:
+                score += 2
+            elif min_pw < 1.0:
+                score += 1
+                
+            # Type logic
+            e_type = str(e.get('type', '')).lower()
+            if 'fire' in e_type or 'missile' in e_type:
+                score += 3
+            elif 'search' in e_type:
+                score += 1
+                
+            # Classification
+            if score >= 7:
+                level = "High"
+            elif score >= 4:
+                level = "Medium"
+            else:
+                level = "Low"
+                
+            threat_distribution[level] += 1
+            per_emitter_threat.append({
+                "emitter_id": e.get('emitter_id'),
+                "threat_level": level,
+                "threat_score": score
+            })
+            
+        total = len(per_emitter_threat)
+        threat_percentage = {k: (v / total * 100) for k, v in threat_distribution.items()}
+        dominant = max(threat_distribution, key=threat_distribution.get)
+        
+        return {
+            "threat_distribution": threat_distribution,
+            "threat_percentage": threat_percentage,
+            "dominant_threat_level": dominant,
+            "per_emitter_threat": per_emitter_threat
+        }
+
+    def _calculate_spatial_metrics(self, emitter_data: Dict[str, Any]) -> Dict[str, Any]:
+        import numpy as np
+        import math
+        
+        if not emitter_data or 'emitters' not in emitter_data or not emitter_data['emitters']:
+            return {}
+            
+        ranges = []
+        aoas = []
+        
+        for e in emitter_data['emitters']:
+            pos = e.get('position_km')
+            if pos and len(pos) >= 2:
+                x, y = pos[0], pos[1]
+                z = pos[2] if len(pos) >= 3 else 0.0
+                r = math.sqrt(x**2 + y**2 + z**2)
+                aoa = math.degrees(math.atan2(y, x))
+                if aoa < 0:
+                    aoa += 360.0
+                ranges.append(r)
+                aoas.append(aoa)
+                
+        if not ranges:
+            return {}
+            
+        ranges = np.array(ranges)
+        aoas = np.array(aoas)
+        
+        # Clustering
+        q1 = int(np.sum((aoas >= 0) & (aoas < 90)))
+        q2 = int(np.sum((aoas >= 90) & (aoas < 180)))
+        q3 = int(np.sum((aoas >= 180) & (aoas < 270)))
+        q4 = int(np.sum((aoas >= 270) & (aoas <= 360)))
+        
+        r_close = int(np.sum(ranges < 50))
+        r_med = int(np.sum((ranges >= 50) & (ranges <= 200)))
+        r_long = int(np.sum(ranges > 200))
+        
+        return {
+            "aoa_statistics": {
+                "mean_deg": float(np.mean(aoas)),
+                "std_deg": float(np.std(aoas)),
+                "min_deg": float(np.min(aoas)),
+                "max_deg": float(np.max(aoas))
+            },
+            "aoa_clustering": {
+                "0_to_90": q1,
+                "90_to_180": q2,
+                "180_to_270": q3,
+                "270_to_360": q4
+            },
+            "range_statistics": {
+                "mean_km": float(np.mean(ranges)),
+                "std_km": float(np.std(ranges)),
+                "min_km": float(np.min(ranges)),
+                "max_km": float(np.max(ranges))
+            },
+            "range_distribution": {
+                "close_under_50km": r_close,
+                "medium_50_to_200km": r_med,
+                "long_over_200km": r_long
             }
         }
