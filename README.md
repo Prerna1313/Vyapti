@@ -158,3 +158,6 @@ Both are valid per the frozen protocol's research-platform extension clause.
 7. Negative-result reporting — p ≥ 0.05 is a result, not a failure
 8. Provenance — every parameter tagged `[PS-DEFINED]` / `[LITERATURE-GROUNDED]` /
    `[TSRD-DERIVED]` / `[ENGINEERING-ASSUMPTION]` / `[EXPERIMENTAL-VARIABLE]`
+
+## ?? TSRD Metrics Documentation
+If you are evaluating custom schedulers against the Turing Synthetic Radar Dataset (TSRD), please see the new [TSRD Metrics Usage Guide](TSRD_METRICS_USAGE_GUIDE.md) for full instructions on imports, instantiation, and metrics extraction.
