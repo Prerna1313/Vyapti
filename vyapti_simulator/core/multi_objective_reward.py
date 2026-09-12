@@ -513,6 +513,11 @@ class MultiObjectiveRewardConfig:
                 self.reference_ranges[name] = range_vals
 
 
+# NOTE: This advanced Chebyshev/Pareto scalarizer is not currently wired 
+# into ExperimentRunner. The runner uses MetricsEngine._reward_composite 
+# (weighted composite) by default. To use this engine, modify 
+# experiment_runner.py to call self.reward_engine.compute_reward(...) 
+# instead of metrics_engine._reward_composite(...).
 class MultiObjectiveRewardEngine:
     """
     Engine for computing multi-objective rewards.

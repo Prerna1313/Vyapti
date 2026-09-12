@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Any, Optional
-from vyapti_simulator.core.metrics import MetricsEngine, MetricsConfig
+from vyapti_simulator.core.metrics import MetricsEngine, MetricsConfig, compute_exploration_metrics
 from vyapti_simulator.tsrd.tsrd_adapter import load_stare_mode_as_occupancy_grid, extract_emitter_metadata
 
 class TSRDMetricsEngine(MetricsEngine):
@@ -144,6 +144,7 @@ class TSRDMetricsEngine(MetricsEngine):
                 "wasted_dwells": int(np.sum(empty)),
             },
             "comprehensive_latency": latency_metrics,
+            "exploration_metrics": compute_exploration_metrics(trajectory, occupancy_grid.shape[0]),
             "per_band_metrics": per_band,
             "temporal_metrics": temporal,
             "emitter_population": self.emitter_data if self.emitter_data else {},
