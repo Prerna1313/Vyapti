@@ -15,9 +15,6 @@ data_provenance/
 
 # Research documentation (not simulator docs)
 research_docs/
-COMPREHENSIVE_RESULTS_REPORT.md
-PROVENANCE.md
-RESEARCH_PROGRESS_REPORT.md
 
 # Development status tracker (internal team artifact)
 SIMULATOR_STATUS.md
