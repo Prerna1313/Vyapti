@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import tsrdEmitters72 from "@/lib/tsrd_emitters_72.json";
+import { WaveformSearchCanvas, REFERENCE_WAVE_BANDS } from "@/components/ui/WaveformSearchCanvas";
+import { ReceiverBandDisplay } from "@/components/ui/ReceiverBandDisplay";
 
 // ============ PRNG ============
 function mulberry32(seed: number) {
@@ -263,9 +265,10 @@ const PAGES = [
   { id: "detection", num: "09", label: "DETECTION", title: "Detection & Interception Analytics", crumb: "/ VYAPTI / DETECTION", icon: "eye" },
   { id: "experiments", num: "10", label: "EXPERIMENTS", title: "Experiment Results", crumb: "/ VYAPTI / EXPERIMENTS", icon: "flask" },
   { id: "validation", num: "11", label: "VALIDATION", title: "System / Validation Status", crumb: "/ VYAPTI / VALIDATION", icon: "check" },
+  { id: "live_rf", num: "12", label: "LIVE RF", title: "Live RF Engine", crumb: "/ VYAPTI / LIVE RF", icon: "wave" },
 ];
 
-// ============ HIGH-PERFORMANCE 36-BAND SPECTROGRAM CANVAS ============
+// ============ HIGH-PERFORMANCE RF SPECTRUM ANALYZER CANVAS ============
 const Spectrogram36Canvas = React.memo(function Spectrogram36Canvas(opts: {
   width?: number;
   height?: number;
@@ -275,6 +278,7 @@ const Spectrogram36Canvas = React.memo(function Spectrogram36Canvas(opts: {
   activeBand?: number; // 0 to 35
   freqMin?: number;
   freqMax?: number;
+  onSelectBand?: (band: number) => void;
 }) {
   const {
     width = 1100,
@@ -285,9 +289,28 @@ const Spectrogram36Canvas = React.memo(function Spectrogram36Canvas(opts: {
     activeBand = 18,
     freqMin = 2.0,
     freqMax = 20.0,
+    onSelectBand,
   } = opts;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!onSelectBand) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const padL = 54,
+      padR = 52;
+    const plotW = width - padL - padR;
+    if (x >= padL && x <= padL + plotW) {
+      const relX = (x - padL) / plotW;
+      const band = Math.floor(relX * 36);
+      if (band >= 0 && band < 36) {
+        onSelectBand(band);
+      }
+    }
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -300,229 +323,390 @@ const Spectrogram36Canvas = React.memo(function Spectrogram36Canvas(opts: {
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const padL = 52,
-      padR = 12,
-      padT = 12,
-      padB = 26;
-    const plotW = width - padL - padR,
-      plotH = height - padT - padB;
+    // ── Layout ────────────────────────────────────────────────────────
+    const padL = 54,   // Y-axis labels + vertical title
+          padR = 52,   // right — Colorbar + High/Low labels
+          padT = 28,   // top — RX DWELL badge space
+          padB = 40;   // bottom — X freq labels + title
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
 
-    // Background fill
-    ctx.fillStyle = "#0c1523";
+    // freq GHz → canvas X
+    function xFreq(f: number): number {
+      return padL + plotW * ((f - freqMin) / (freqMax - freqMin));
+    }
+
+    // ── Background ───────────────────────────────────────────────────
+    ctx.fillStyle = "#030712";
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "#070c14";
-    ctx.fillRect(padL, padT, plotW, plotH);
+    // ── Build emitter activity per band ───────────────────────────────
+    type EmitterInfo = { kw: number; detected: boolean };
+    const emitterByBand = new Map<number, EmitterInfo[]>();
+    emitters.forEach((em) => {
+      if (!em.active) return;
+      const bandIdx = Math.round((em.freq - freqMin) / 0.5);
+      if (bandIdx < 0 || bandIdx >= 36) return;
+      let kw = 1.0;
+      const pwMatch = em.power?.match(/[\d.]+/);
+      if (pwMatch) kw = parseFloat(pwMatch[0]);
+      if (!emitterByBand.has(bandIdx)) emitterByBand.set(bandIdx, []);
+      emitterByBand.get(bandIdx)!.push({ kw, detected: em.detected });
+    });
 
-    // 36 band horizontal partitions
-    const nBands = 36;
-    ctx.font = "8px monospace";
-    for (let b = 0; b <= nBands; b++) {
-      const y = padT + (plotH * b) / nBands;
-      const isMajor = b % 6 === 0;
-      ctx.strokeStyle = isMajor ? "rgba(42, 70, 98, 0.85)" : "rgba(27, 50, 74, 0.4)";
-      ctx.lineWidth = isMajor ? 1 : 0.6;
-      ctx.beginPath();
-      ctx.moveTo(padL, y);
-      ctx.lineTo(padL + plotW, y);
-      ctx.stroke();
+    const activeEmitters = emitters.filter((em) => em.active);
 
-      if (isMajor) {
-        const f = freqMax - ((freqMax - freqMin) * b) / nBands;
-        ctx.fillStyle = "rgba(100, 126, 150, 0.75)";
-        ctx.textAlign = "right";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${f.toFixed(1)}G`, padL - 6, y);
+    // ── 2D Spectrogram Buffer Generation (Jet / Turbo Colormap) ────────
+    // Buffer matches plot resolution exactly — no upscaling, no zoom artifact
+    const sw = Math.round(plotW);
+    const sh = Math.round(plotH);
+    const field = new Float32Array(sw * sh);
+    const temp = new Float32Array(sw * sh);
+    const rng = mulberry32(seed * 37 + 101);
+
+    // 1. Base ambient noise + TSRD band activity corridors + horizontal scanlines
+    for (let y = 0; y < sh; y++) {
+      const row = y * sw;
+      const scanline = (Math.sin(y * 0.25) * 0.03) + (Math.sin(y * 0.8) > 0.4 ? 0.04 : 0);
+      for (let x = 0; x < sw; x++) {
+        const band = Math.min(35, Math.floor((x / sw) * 36));
+        const act = TSRD_36_BAND_ACTIVITIES[band] ?? 0.05;
+        const speckle = (rng() - 0.5) * 0.06;
+        field[row + x] = 0.06 + act * 0.14 + scanline + speckle;
       }
     }
 
-    // Vertical time gridlines
-    const nVLines = 12;
-    ctx.strokeStyle = "rgba(27, 50, 74, 0.45)";
-    ctx.lineWidth = 0.8;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    for (let i = 0; i <= nVLines; i++) {
-      const x = padL + (plotW * i) / nVLines;
+    // 2. Continuous carrier lines across spectrum (matching reference image)
+    const carriers = [
+      { y: Math.floor(sh * 0.55), baseAmp: 0.62, thick: 3 },
+      { y: Math.floor(sh * 0.26), baseAmp: 0.28, thick: 2 },
+      { y: Math.floor(sh * 0.72), baseAmp: 0.32, thick: 2 },
+      { y: Math.floor(sh * 0.88), baseAmp: 0.26, thick: 2 },
+    ];
+    carriers.forEach((c) => {
+      for (let dy = -c.thick; dy <= c.thick; dy++) {
+        const y = c.y + dy;
+        if (y < 0 || y >= sh) continue;
+        const row = y * sw;
+        const falloff = Math.exp(-0.5 * (dy * dy) / 1.5);
+        for (let x = 0; x < sw; x++) {
+          const v = falloff * c.baseAmp * (0.8 + rng() * 0.4);
+          field[row + x] = Math.max(field[row + x], v);
+        }
+      }
+    });
+
+    // 3. Emitter Energy Bursts (Hotspots) across frequency and time
+    const dwellCenterX = Math.round(((freqMin + activeBand * 0.5 + 0.25 - freqMin) / (freqMax - freqMin)) * sw);
+
+    activeEmitters.forEach((em, eIdx) => {
+      const cx = Math.round(((em.freq - freqMin) / (freqMax - freqMin)) * sw);
+      if (cx < 0 || cx >= sw) return;
+      const isDwellHit = Math.abs(cx - dwellCenterX) <= Math.ceil(sw / 36);
+      const isHit = isDwellHit || em.detected;
+      const power = isDwellHit ? 1.0 : (isHit ? 0.94 : 0.76);
+
+      const numBursts = isDwellHit ? 5 : (isHit ? 4 : 3);
+      for (let b = 0; b < numBursts; b++) {
+        const cy = Math.round(sh * (0.10 + ((eIdx * 23 + b * 47) % 80) / 100));
+        const shapeType = (eIdx + b) % 3;
+        let rx = 10, ry = 12;
+        if (shapeType === 0) { rx = 7; ry = 3; }
+        else if (shapeType === 1) { rx = 2; ry = 8; }
+        else { rx = 5; ry = 5; }
+
+        if (isDwellHit) { rx = 8; ry = 7; }
+
+        for (let dy = -ry * 2; dy <= ry * 2; dy++) {
+          const y = cy + dy;
+          if (y < 0 || y >= sh) continue;
+          const row = y * sw;
+          for (let dx = -rx * 2; dx <= rx * 2; dx++) {
+            const x = cx + dx;
+            if (x < 0 || x >= sw) continue;
+            const d2 = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+            if (d2 < 4.5) {
+              const v = power * Math.exp(-0.5 * d2);
+              if (v > field[row + x]) field[row + x] = v;
+            }
+          }
+        }
+
+        // Starburst crosshair flare on detected/dwell intercept confirmation
+        if (isHit || isDwellHit) {
+          const fx = isDwellHit ? 18 : 8;
+          const fy = isDwellHit ? 20 : 10;
+          for (let d = -fx; d <= fx; d++) {
+            const x = cx + d;
+            if (x >= 0 && x < sw) {
+              const v = (power * 0.90) * Math.exp(-Math.abs(d) / (fx * 0.35));
+              const idx = cy * sw + x;
+              if (v > field[idx]) field[idx] = v;
+            }
+          }
+          for (let d = -fy; d <= fy; d++) {
+            const y = cy + d;
+            if (y >= 0 && y < sh) {
+              const v = (power * 0.90) * Math.exp(-Math.abs(d) / (fy * 0.35));
+              const idx = y * sw + cx;
+              if (v > field[idx]) field[idx] = v;
+            }
+          }
+        }
+      }
+    });
+
+    // 4. Subtle horizontal smoothing (simulating FFT windowing)
+    for (let y = 0; y < sh; y++) {
+      const row = y * sw;
+      for (let x = 0; x < sw; x++) {
+        let sum = 0, count = 0;
+        for (let k = -2; k <= 2; k++) {
+          const px = x + k;
+          if (px >= 0 && px < sw) {
+            const w = k === 0 ? 0.4 : (Math.abs(k) === 1 ? 0.22 : 0.08);
+            sum += field[row + px] * w;
+            count += w;
+          }
+        }
+        temp[row + x] = sum / count;
+      }
+    }
+
+    // 5. Jet / Turbo Colormap lookup
+    function jetColor(t: number): [number, number, number] {
+      const v = Math.max(0, Math.min(1, t));
+      let r = 0, g = 0, b = 0;
+      if (v < 0.15) {
+        const f = v / 0.15;
+        r = 0; g = Math.round(4 + f * 16); b = Math.round(32 + f * 108);
+      } else if (v < 0.35) {
+        const f = (v - 0.15) / 0.20;
+        r = 0; g = Math.round(20 + f * 170); b = Math.round(140 + f * 90);
+      } else if (v < 0.52) {
+        const f = (v - 0.35) / 0.17;
+        r = Math.round(f * 20); g = Math.round(190 + f * 30); b = Math.round(230 - f * 170);
+      } else if (v < 0.70) {
+        const f = (v - 0.52) / 0.18;
+        r = Math.round(20 + f * 235); g = Math.round(220 + f * 10); b = Math.round(60 - f * 60);
+      } else if (v < 0.85) {
+        const f = (v - 0.70) / 0.15;
+        r = 255; g = Math.round(230 - f * 130); b = 0;
+      } else {
+        const f = (v - 0.85) / 0.15;
+        r = Math.round(255 - f * 35); g = Math.round(100 - f * 90); b = 0;
+      }
+      return [r, g, b];
+    }
+
+    // Render to offscreen canvas and blit with smoothing
+    const offCanvas = document.createElement("canvas");
+    offCanvas.width = sw;
+    offCanvas.height = sh;
+    const offCtx = offCanvas.getContext("2d");
+    if (offCtx) {
+      const imgData = offCtx.createImageData(sw, sh);
+      const data = imgData.data;
+      for (let i = 0; i < sw * sh; i++) {
+        const grain = (rng() - 0.5) * 0.06;
+        const val = Math.max(0.01, Math.min(1.0, temp[i] + grain));
+        const [r, g, b] = jetColor(val);
+        const idx = i * 4;
+        data[idx + 0] = r;
+        data[idx + 1] = g;
+        data[idx + 2] = b;
+        data[idx + 3] = 255;
+      }
+      offCtx.putImageData(imgData, 0, 0);
+      ctx.save();
+      ctx.imageSmoothingEnabled = false; // 1:1 pixel rendering — no zoom/blur
+      ctx.drawImage(offCanvas, padL, padT, plotW, plotH);
+      ctx.restore();
+    }
+
+    // ── Faint Grid Lines ──────────────────────────────────────────────
+    const nBands = 36;
+    for (let b = 0; b <= nBands; b++) {
+      const f = freqMin + b * 0.5;
+      const x = xFreq(f);
+      const isMajor = b % 6 === 0;
+      ctx.strokeStyle = isMajor ? "rgba(100, 160, 230, 0.22)" : "rgba(100, 160, 230, 0.10)";
+      ctx.lineWidth = isMajor ? 0.9 : 0.45;
       ctx.beginPath();
       ctx.moveTo(x, padT);
       ctx.lineTo(x, padT + plotH);
       ctx.stroke();
 
-      if (i % 2 === 0) {
-        ctx.fillStyle = "rgba(100, 126, 150, 0.75)";
-        ctx.fillText(`${(i * 2.5).toFixed(1)}s`, x, height - 18);
+      // Band labels
+      if (b < nBands) {
+        const fLo = freqMin + b * 0.5;
+        const fHi = fLo + 0.5;
+        const xMid = xFreq(fLo + 0.25);
+        ctx.fillStyle = "rgba(120, 160, 200, 0.85)";
+        ctx.font = "6.5px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        if (plotW / nBands >= 24 || b % 2 === 0) {
+          ctx.fillText(`${fLo.toFixed(1)}-${fHi.toFixed(1)}`, xMid, padT + plotH + 4);
+        }
       }
     }
 
-    // Bottom center caption
-    ctx.fillStyle = "rgba(100, 126, 150, 0.65)";
+    // Horizontal time grid lines
+    const timeDivs = 4;
+    ctx.font = "8.5px monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= timeDivs; i++) {
+      const y = padT + (plotH * i) / timeDivs;
+      ctx.strokeStyle = "rgba(100, 160, 230, 0.18)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + plotW, y);
+      ctx.stroke();
+
+      // Y-axis time labels
+      const timeMs = Math.round(100 - i * 25);
+      ctx.fillStyle = "rgba(120, 160, 200, 0.80)";
+      ctx.fillText(`${timeMs}ms`, padL - 6, y);
+    }
+
+    // Axes Borders & Titles
+    ctx.strokeStyle = "rgba(42, 70, 98, 0.85)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, plotW, plotH);
+
+    ctx.fillStyle = "rgba(120, 160, 200, 0.70)";
+    ctx.font = "bold 9px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText("36 BANDS · 500 MHz IBW · TIME SLOTS (600s)", padL + plotW / 2, height - 2);
+    ctx.fillText("Frequency Bands (GHz)", padL + plotW / 2, height - 2);
 
-    function fy(f: number) {
-      return padT + plotH * (1 - (f - freqMin) / (freqMax - freqMin));
-    }
+    ctx.save();
+    ctx.translate(14, padT + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 9px monospace";
+    ctx.fillStyle = "rgba(120, 160, 200, 0.75)";
+    ctx.fillText("Time History (ms)", 0, 0);
+    ctx.restore();
 
-    // Render emitter pulse trains across 36 bands
-    const r = mulberry32(seed);
-    emitters.forEach((em) => {
-      const baseY = fy(em.freq);
-      const colorActive = em.detected ? "#4de87f" : "#4dd8e8";
-      const opacity = em.active ? 0.85 : 0.22;
-      ctx.globalAlpha = opacity;
-
-      if (em.type === "AGILE") {
-        let x = padL;
-        const segs = 16;
-        for (let s = 0; s < segs; s++) {
-          const segW = plotW / segs;
-          const hopF = freqMin + r() * (freqMax - freqMin);
-          const y = fy(hopF);
-          if (r() > 0.35) {
-            ctx.strokeStyle = colorActive;
-            ctx.lineWidth = 1.6;
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x + segW * 0.7, y);
-            ctx.stroke();
-
-            if (em.detected && r() > 0.6) {
-              ctx.fillStyle = "#4de87f";
-              ctx.beginPath();
-              ctx.arc(x + segW * 0.35, y, 2, 0, Math.PI * 2);
-              ctx.fill();
-            }
-          }
-          x += segW;
-        }
-      } else if (em.type === "SCANNING") {
-        const nBursts = 6;
-        for (let b = 0; b < nBursts; b++) {
-          if (r() > 0.3) {
-            const x = padL + (plotW * (b / nBursts)) + r() * 18;
-            const w = 12 + r() * 18;
-            ctx.fillStyle = colorActive;
-            ctx.fillRect(x, baseY - 1.2, w, 2.4);
-
-            ctx.strokeStyle = colorActive;
-            ctx.lineWidth = 0.9;
-            for (let p = 0; p < 4; p++) {
-              const px = x + (p * w) / 4;
-              ctx.beginPath();
-              ctx.moveTo(px, baseY - 3);
-              ctx.lineTo(px, baseY + 3);
-              ctx.stroke();
-            }
-          }
-        }
-      } else if (em.type === "INTERMITTENT") {
-        const nBursts = 5 + Math.floor(r() * 4);
-        for (let b = 0; b < nBursts; b++) {
-          const x = padL + r() * plotW * 0.92;
-          const w = 6 + r() * 22;
-          ctx.fillStyle = colorActive;
-          ctx.fillRect(x, baseY - 1, w, 2);
-
-          ctx.strokeStyle = colorActive;
-          ctx.lineWidth = 0.8;
-          const nP = Math.floor(w / 5);
-          for (let p = 0; p < nP; p++) {
-            const px = x + p * 5;
-            ctx.beginPath();
-            ctx.moveTo(px, baseY - 2.5);
-            ctx.lineTo(px, baseY + 2.5);
-            ctx.stroke();
-          }
-        }
-      } else {
-        // PERIODIC
-        const nP = Math.floor(plotW / (7 + r() * 6));
-        const spacing = plotW / nP;
-        ctx.strokeStyle = colorActive;
-        ctx.lineWidth = 1.0;
-        for (let p = 0; p < nP; p++) {
-          const x = padL + p * spacing;
-          ctx.beginPath();
-          ctx.moveTo(x, baseY - 3);
-          ctx.lineTo(x, baseY + 3);
-          ctx.stroke();
-        }
-
-        ctx.strokeStyle = colorActive;
-        ctx.lineWidth = 0.5;
-        ctx.globalAlpha = opacity * 0.3;
-        ctx.beginPath();
-        ctx.moveTo(padL, baseY);
-        ctx.lineTo(padL + plotW, baseY);
-        ctx.stroke();
-      }
-    });
-
-    ctx.globalAlpha = 1.0;
-
-    // Highlight the CURRENTLY SCANNED BAND across the 36 bands
+    // ── Receiver Dwell Window — Coral-red vertical lines (Matching Image 2) ─
     if (showScanWindow && activeBand >= 0 && activeBand < 36) {
-      const bandHeight = plotH / 36;
-      const bandY = padT + plotH * (1 - (activeBand + 1) / 36);
-      const scanX = padL + plotW * 0.58;
+      const bandLoFreq = freqMin + activeBand * 0.5;
+      const bandHiFreq = bandLoFreq + 0.5;
+      const bandCF     = (bandLoFreq + bandHiFreq) / 2;
+      const xLo        = xFreq(bandLoFreq);
+      const xHi        = xFreq(bandHiFreq);
+      const colW       = xHi - xLo;
+      const xMid       = (xLo + xHi) / 2;
 
-      // Horizontal active band highlight
-      ctx.fillStyle = "rgba(77, 216, 232, 0.12)";
-      ctx.fillRect(padL, bandY, plotW, bandHeight);
+      // Translucent coral fill
+      ctx.fillStyle = "rgba(244, 63, 94, 0.12)";
+      ctx.fillRect(xLo, padT, colW, plotH);
 
-      ctx.strokeStyle = "rgba(77, 216, 232, 0.45)";
-      ctx.lineWidth = 0.8;
+      // Left & right solid coral-pink borders
+      ctx.strokeStyle = "#f43f5e";
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.moveTo(padL, bandY);
-      ctx.lineTo(padL + plotW, bandY);
-      ctx.moveTo(padL, bandY + bandHeight);
-      ctx.lineTo(padL + plotW, bandY + bandHeight);
+      ctx.moveTo(xLo, padT); ctx.lineTo(xLo, padT + plotH);
+      ctx.moveTo(xHi, padT); ctx.lineTo(xHi, padT + plotH);
       ctx.stroke();
 
-      // Receiver dwell window marker
-      ctx.strokeStyle = "#4dd8e8";
-      ctx.lineWidth = 1.8;
-      ctx.strokeRect(scanX - 16, bandY - 1, 32, bandHeight + 2);
-
-      // Vertical dashed scan marker line
+      // Dashed center sweep line
       ctx.save();
-      ctx.strokeStyle = "rgba(77, 216, 232, 0.45)";
-      ctx.lineWidth = 0.8;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(scanX, padT);
-      ctx.lineTo(scanX, padT + plotH);
-      ctx.stroke();
+      ctx.strokeStyle = "rgba(244, 63, 94, 0.70)";
+      ctx.lineWidth = 0.9;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(xMid, padT); ctx.lineTo(xMid, padT + plotH); ctx.stroke();
       ctx.restore();
 
-      // Label
-      ctx.fillStyle = "#4dd8e8";
+      // RX DWELL badge
+      const badgeLabel = `RX DWELL ${bandCF.toFixed(2)}`;
       ctx.font = "bold 8px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(
-        `RX DWELL B${String(activeBand + 1).padStart(2, "0")}`,
-        scanX,
-        padT - 2
-      );
+      const bw = ctx.measureText(badgeLabel).width + 12;
+      const bh = 15;
+      const bx = Math.max(padL + 2, Math.min(padL + plotW - bw - 2, xMid - bw / 2));
+      const by = padT - bh - 3;
+      ctx.fillStyle = "rgba(8, 14, 28, 0.92)";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = "#f43f5e"; ctx.lineWidth = 1.0; ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle = "#f43f5e";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(badgeLabel, bx + bw / 2, by + bh / 2);
+
+      // Green intercept confirmation border
+      if (emitterByBand.has(activeBand)) {
+        ctx.strokeStyle = "rgba(74, 222, 128, 0.85)";
+        ctx.lineWidth = 1.6;
+        ctx.strokeRect(xLo + 1, padT + 1, colW - 2, plotH - 2);
+      }
+
+      // Red dashed unvisited band opportunity markers
+      emitterByBand.forEach((_, bandIdx) => {
+        if (bandIdx === activeBand) return;
+        const bxLo = xFreq(freqMin + bandIdx * 0.5);
+        const bxHi = xFreq(freqMin + (bandIdx + 1) * 0.5);
+        ctx.save();
+        ctx.strokeStyle = "rgba(239, 68, 68, 0.40)";
+        ctx.lineWidth = 0.8;
+        ctx.setLineDash([2, 3]);
+        ctx.strokeRect(bxLo + 1, padT + 1, (bxHi - bxLo) - 2, plotH - 2);
+        ctx.restore();
+      });
     }
+
+    // ── Colorbar on Right Side (High -> Low, Jet Gradient) ────────────
+    const cbX = padL + plotW + 16;
+    const cbY = padT + 8;
+    const cbW = 12;
+    const cbH = plotH - 24;
+
+    // "High" label
+    ctx.font = "bold 8.5px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(160, 195, 235, 0.90)";
+    ctx.fillText("High", cbX + cbW / 2, cbY - 3);
+
+    // Gradient bar
+    const cbGrad = ctx.createLinearGradient(0, cbY, 0, cbY + cbH);
+    cbGrad.addColorStop(0.00, "rgb(220, 10, 0)");   // Red
+    cbGrad.addColorStop(0.18, "rgb(255, 120, 0)");  // Orange
+    cbGrad.addColorStop(0.32, "rgb(255, 230, 0)");  // Yellow
+    cbGrad.addColorStop(0.50, "rgb(20, 220, 60)");  // Green
+    cbGrad.addColorStop(0.68, "rgb(0, 190, 230)");  // Cyan
+    cbGrad.addColorStop(0.85, "rgb(0, 20, 140)");   // Blue
+    cbGrad.addColorStop(1.00, "rgb(0, 4, 32)");     // Navy
+    ctx.fillStyle = cbGrad;
+    ctx.fillRect(cbX, cbY, cbW, cbH);
+    ctx.strokeStyle = "rgba(100, 150, 200, 0.5)";
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(cbX, cbY, cbW, cbH);
+
+    // "Low" label
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText("Low", cbX + cbW / 2, cbY + cbH + 4);
   }, [width, height, emitters, seed, showScanWindow, activeBand, freqMin, freqMax]);
 
   return (
     <canvas
       ref={canvasRef}
+      onClick={handleClick}
       style={{
         width: "100%",
         height: height,
         display: "block",
         borderRadius: 2,
+        cursor: onSelectBand ? "crosshair" : "default",
       }}
     />
   );
 });
+
 
 // Backward compatibility helper
 function renderSpectrogram36(opts: any) {
@@ -742,11 +926,11 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
     const cellW = plotW / timeSlots;
     const cellH = plotH / bands;
 
-    // Background fill
-    ctx.fillStyle = "#0c1523";
+    // Background fill - deep dark canvas
+    ctx.fillStyle = "#070d18";
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "#070c14";
+    ctx.fillStyle = "#03060c";
     ctx.fillRect(padL, padT, plotW, plotH);
 
     // Fast O(1) hash map for scanPath
@@ -770,44 +954,57 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
         const isHit = isDwell && (isOccupied || Boolean(scanned && scanned.hit));
 
         if (isOccupied && showGroundTruth) {
-          ctx.fillStyle = isHit ? "rgba(77, 232, 127, 0.45)" : "rgba(77, 216, 232, 0.28)";
+          // Dark pulse box with sharp, high-contrast luminous outline
+          ctx.fillStyle = isHit ? "rgba(14, 48, 30, 0.95)" : "rgba(10, 26, 44, 0.98)";
           ctx.fillRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
-          ctx.strokeStyle = isHit ? "#4de87f" : "rgba(77, 216, 232, 0.7)";
-          ctx.lineWidth = 0.8;
+          ctx.strokeStyle = isHit ? "#34d399" : "rgba(77, 216, 232, 0.85)";
+          ctx.lineWidth = isHit ? 1.4 : 1.0;
           ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
         } else {
-          ctx.fillStyle = "rgba(10, 18, 32, 0.45)";
+          // Dark background grid cell
+          ctx.fillStyle = "rgba(4, 8, 14, 0.70)";
           ctx.fillRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
-          ctx.strokeStyle = "rgba(27, 50, 74, 0.35)";
+          ctx.strokeStyle = "rgba(18, 30, 46, 0.35)";
           ctx.lineWidth = 0.5;
           ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
         }
 
-        // Miss marker: emitter active, but receiver scanned another band
+        // Highlighted Miss marker: glowing red dot inside the dark pulse box
         if (isOccupied && !isDwell && showMisses && t <= activeStep) {
-          ctx.fillStyle = "#ff4d6a";
+          ctx.fillStyle = "rgba(255, 60, 90, 0.25)";
           ctx.beginPath();
-          ctx.arc(x + cellW / 2, y + cellH / 2, 1.8, 0, Math.PI * 2);
+          ctx.arc(x + cellW / 2, y + cellH / 2, 4.0, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#ff3366";
+          ctx.beginPath();
+          ctx.arc(x + cellW / 2, y + cellH / 2, 2.0, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // Hit marker
+        // Highlighted Confirmed Hit marker: vivid neon green ring with crosshair ⊕
         if (isHit) {
-          ctx.strokeStyle = "#4de87f";
-          ctx.lineWidth = 1.4;
+          ctx.fillStyle = "rgba(77, 232, 127, 0.25)";
           ctx.beginPath();
-          ctx.arc(x + cellW / 2, y + cellH / 2, 3.2, 0, Math.PI * 2);
+          ctx.arc(x + cellW / 2, y + cellH / 2, 6.0, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = "#4de87f";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(x + cellW / 2, y + cellH / 2, 3.6, 0, Math.PI * 2);
           ctx.stroke();
 
           ctx.beginPath();
-          ctx.moveTo(x + cellW / 2 - 2, y + cellH / 2);
-          ctx.lineTo(x + cellW / 2 + 2, y + cellH / 2);
-          ctx.moveTo(x + cellW / 2, y + cellH / 2 - 2);
-          ctx.lineTo(x + cellW / 2, y + cellH / 2 + 2);
+          ctx.moveTo(x + cellW / 2 - 2.5, y + cellH / 2);
+          ctx.lineTo(x + cellW / 2 + 2.5, y + cellH / 2);
+          ctx.moveTo(x + cellW / 2, y + cellH / 2 - 2.5);
+          ctx.lineTo(x + cellW / 2, y + cellH / 2 + 2.5);
           ctx.stroke();
         } else if (isDwell && !isOccupied) {
-          ctx.strokeStyle = "#4dd8e8";
-          ctx.lineWidth = 1;
+          // Highlighted quiet dwell box
+          ctx.strokeStyle = "rgba(77, 216, 232, 0.70)";
+          ctx.lineWidth = 1.1;
           ctx.setLineDash([2, 2]);
           ctx.strokeRect(x + 1.2, y + 1.2, cellW - 2.4, cellH - 2.4);
           ctx.setLineDash([]);
@@ -815,10 +1012,12 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
       }
     }
 
-    // Polyline for Scan Path
+    // Polyline for Scan Path (Vibrant Tactical Cyan Highlight)
     if (showScanPath && scanPath.length > 1) {
       ctx.strokeStyle = "#00e5ff";
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = 2.0;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
       ctx.beginPath();
       let first = true;
       for (let i = 0; i < scanPath.length; i++) {
@@ -838,11 +1037,11 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
       ctx.stroke();
     }
 
-    // Active step cursor line & dwell box
+    // Active step cursor line & dwell box (Sharp Cyan Reticle)
     if (activeStep < timeSlots) {
       const curX = padL + activeStep * cellW;
-      ctx.strokeStyle = "#4dd8e8";
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "#00e5ff";
+      ctx.lineWidth = 1.3;
       ctx.setLineDash([3, 2]);
       ctx.beginPath();
       ctx.moveTo(curX + cellW / 2, padT);
@@ -852,8 +1051,8 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
 
       const curRow = bands - 1 - activeBand;
       const curY = padT + curRow * cellH;
-      ctx.strokeStyle = "#00e5ff";
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = "#00f0ff";
+      ctx.lineWidth = 2.0;
       ctx.strokeRect(curX - 1, curY - 1, cellW + 2, cellH + 2);
     }
 
@@ -916,8 +1115,22 @@ const Matrix2DCanvas = React.memo(function Matrix2DCanvas(opts: {
 });
 
 // ============ MAIN COMPONENT ============
+
+function LiveRFEmbed() {
+  return (
+    <div style={{ margin: "-24px -32px -50px", height: "calc(100vh - 54px)", width: "calc(100% + 64px)" }}>
+      <iframe
+        src="/system-c"
+        style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+        title="Live RF Engine"
+      />
+    </div>
+  );
+}
+
 export default function EWConsole() {
   const [currentPage, setCurrentPage] = useState("mission");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);
   const [backendStatus, setBackendStatus] = useState<any>(null);
   const [activeBand, setActiveBand] = useState<number>(18);
@@ -926,9 +1139,19 @@ export default function EWConsole() {
   const [activeStrategy, setActiveStrategy] = useState("RESTLESS BANDIT");
   const [verifiedRun, setVerifiedRun] = useState<any>(null);
   const [detectionCount, setDetectionCount] = useState(842);
+  const [lastHitBand, setLastHitBand] = useState(-1);
+  const [hitTimestamp, setHitTimestamp] = useState(0);
 
   // DRDO Seven Figures of Merit State
   const [fomsList, setFomsList] = useState<FOMItem[]>(DEFAULT_7_FOMS);
+
+  // Multi-config TSRD dataset state (folder 3 scan + folder 4 stare)
+  const [tsrdConfigs, setTsrdConfigs] = useState<any[]>([]);
+  const [selectedConfig, setSelectedConfig] = useState("config_0");
+  const [tsrdTotalPulses, setTsrdTotalPulses] = useState(804732);
+  const [tsrdTotalEmitters, setTsrdTotalEmitters] = useState(489);
+  const [tsrdScanConfigCount, setTsrdScanConfigCount] = useState(9);
+  const [tsrdStareConfigCount, setTsrdStareConfigCount] = useState(6);
 
   // 2D Search Problem Matrix State
   const [matrixData, setMatrixData] = useState<any>(null);
@@ -936,6 +1159,12 @@ export default function EWConsole() {
   const [showScanPath, setShowScanPath] = useState(true);
   const [showMisses, setShowMisses] = useState(true);
   const [matrixStep, setMatrixStep] = useState(42);
+
+  // RF Continuous Waveform Search Problem State (Synchronized with Simulation)
+  const [searchViewMode, setSearchViewMode] = useState<"waveform" | "matrix">("waveform");
+  const [showWaveTruth, setShowWaveTruth] = useState(true);
+  const [showWaveScanPath, setShowWaveScanPath] = useState(true);
+  const [showWaveMisses, setShowWaveMisses] = useState(true);
 
   // 36x50 Ground Truth Matrix E(t, b) derived from TSRD Band Activities
   const [groundTruthMatrix] = useState<number[][]>(() => {
@@ -1023,6 +1252,8 @@ export default function EWConsole() {
 
           if (isHit) {
             setDetectionCount((c) => c + 1);
+            setLastHitBand(nextBand);
+            setHitTimestamp(Date.now());
             const bandEmitters = EMITTERS_72.filter((e) => e.band === nextBand + 1);
             const em = bandEmitters.length > 0 ? bandEmitters[0] : EMITTERS_72[nextBand % EMITTERS_72.length];
             if (!pdwPaused) {
@@ -1114,6 +1345,22 @@ export default function EWConsole() {
     const timer = setInterval(fetchBackendData, 3500);
     return () => clearInterval(timer);
   }, [fetchBackendData]);
+
+  // Fetch dataset configs from /api/dataset/configs (scan + stare)
+  useEffect(() => {
+    fetch("http://localhost:8000/api/dataset/configs", { signal: AbortSignal.timeout(3000) })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && Array.isArray(data.configs) && data.configs.length > 0) {
+          setTsrdConfigs(data.configs);
+          setTsrdTotalPulses(data.totalPulses || 804732);
+          setTsrdTotalEmitters(data.totalEmitters || 489);
+          if (data.scanConfigCount != null) setTsrdScanConfigCount(data.scanConfigCount);
+          if (data.stareConfigCount != null) setTsrdStareConfigCount(data.stareConfigCount);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch verified results
   useEffect(() => {
@@ -1274,15 +1521,50 @@ export default function EWConsole() {
 
   return (
     <div className="app">
+      {/* ===== NAV BACKDROP ===== */}
+      <div
+        className={`nav-backdrop ${sidebarOpen ? "open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
       {/* ===== NAV ===== */}
-      <nav className="nav">
+      <nav className={`nav ${sidebarOpen ? "open" : ""}`}>
         <div className="nav-brand">
-          <div className="code">VYAPTI</div>
-          <div className="sub">
-            Cognitive Smart Scan
-            <br />
-            for Electronic Support (ES)
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img
+              src="/logo.png"
+              alt="Team Anuman - Vyapti Logo"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "1.5px solid var(--cyan-signal)",
+                boxShadow: "0 0 12px rgba(77, 216, 232, 0.35)",
+                background: "#ffffff",
+                flexShrink: 0,
+              }}
+            />
+            <div className="nav-brand-text">
+              <div className="code" style={{ fontSize: 15, letterSpacing: "1px" }}>VYAPTI</div>
+              <div style={{ fontSize: 10.5, color: "var(--amber-warn)", fontWeight: 600, letterSpacing: "0.5px" }}>
+                व्याप्ति
+              </div>
+              <div className="sub" style={{ marginTop: 2, fontSize: 9 }}>
+                Inference Across The Spectrum
+              </div>
+            </div>
           </div>
+          <button
+            className="nav-close"
+            onClick={() => setSidebarOpen(false)}
+            title="Close sidebar"
+          >
+            <svg viewBox="0 0 12 12">
+              <line x1="1" y1="1" x2="11" y2="11" />
+              <line x1="11" y1="1" x2="1" y2="11" />
+            </svg>
+          </button>
         </div>
         <div className="nav-list">
           {PAGES.map((p) => {
@@ -1291,7 +1573,7 @@ export default function EWConsole() {
               <div
                 key={p.id}
                 className={`nav-item ${isActive ? "active" : ""}`}
-                onClick={() => setCurrentPage(p.id)}
+                onClick={() => { setCurrentPage(p.id); setSidebarOpen(false); }}
               >
                 <span className="nav-num">{p.num}</span>
                 <span className="ic">
@@ -1315,31 +1597,70 @@ export default function EWConsole() {
         {/* TopBar */}
         <div className="topbar">
           <div className="topbar-left">
+            {/* Hamburger toggle */}
+            <button
+              className="hamburger-btn"
+              onClick={() => setSidebarOpen((o) => !o)}
+              title="Toggle navigation"
+              aria-label="Toggle navigation"
+            >
+              <span className="hb-line" />
+              <span className="hb-line" />
+              <span className="hb-line" />
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setCurrentPage("mission")}>
+              <img
+                src="/logo.png"
+                alt="Vyapti Logo"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  border: "1.5px solid var(--cyan-signal)",
+                  boxShadow: "0 0 10px rgba(77, 216, 232, 0.3)",
+                  background: "#ffffff",
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.8px", color: "var(--cyan-signal)", fontFamily: "var(--font-mono)" }}>
+                  VYAPTI
+                </span>
+                <span style={{ fontSize: 9.5, color: "var(--amber-warn)", letterSpacing: "0.5px", fontWeight: 600 }}>
+                  व्याप्ति
+                </span>
+              </div>
+            </div>
+            <div style={{ width: 1, height: 22, background: "var(--border-steel)", margin: "0 6px" }} />
             <span className="topbar-title">{activePageMeta.title}</span>
             <span className="topbar-crumb">{activePageMeta.crumb}</span>
           </div>
           <div className="topbar-right">
-            <span
-              className={`pill ${backendConnected ? "pass" : "warn"}`}
-              style={{ fontSize: 9, padding: "2px 6px" }}
-            >
+            <span className={`pill ${backendConnected ? "pass" : "warn"}`}>
               <span className="d"></span>
               {backendConnected ? "LIVE :: PYTHON FASTAPI" : "DEMO REPLAY MODE"}
             </span>
-            <div className="topbar-stat">
-              SPECTRUM <span className="val">2–20 GHz (36 BANDS)</span>
+            <div className="topbar-chip">
+              <span className="label">SPECTRUM</span>
+              <span className="val">2–20 GHz (36 BANDS)</span>
             </div>
-            <div className="topbar-stat">
-              T+<span className="val mono clock-live">{fmtClock(simTimeMs)}</span>
+            <div className="topbar-chip">
+              <span className="label">MISSION CLOCK</span>
+              <span className="val clock-live">{fmtClock(simTimeMs)}</span>
             </div>
-            <div className="topbar-stat">
-              ACTIVE <span className="val" style={{ color: "var(--cyan-bright)" }}>B{String(activeBand + 1).padStart(2, "0")}</span>
+            <div className="topbar-chip">
+              <span className="label">ACTIVE RX</span>
+              <span className="val" style={{ color: "var(--cyan-bright)" }}>
+                B{String(activeBand + 1).padStart(2, "0")}
+              </span>
             </div>
           </div>
         </div>
 
         {/* Page Content */}
         <div className="page">
+          <div className="page-inner">
           {/* ================= PAGE 1: MISSION ================= */}
           {currentPage === "mission" && (
             <div>
@@ -1373,58 +1694,6 @@ export default function EWConsole() {
                 </div>
               </div>
 
-              {/* 36-BAND SPECTRUM HEATMAP BAR */}
-              <div className="panel" style={{ marginBottom: 14 }}>
-                <div className="panel-head">
-                  <span className="panel-title">
-                    36-BAND RF SPECTRUM OCCUPANCY HEATMAP <span className="unit">2.0 GHz – 20.0 GHz · 500 MHz IBW per band</span>
-                  </span>
-                  <span className="panel-tag live">SCANNING: BAND {activeBand + 1}</span>
-                </div>
-                <div className="panel-body" style={{ padding: "12px 14px" }}>
-                  <div className="grid grid-cols-12 sm:grid-cols-[repeat(18,minmax(0,1fr))] md:grid-cols-[repeat(36,minmax(0,1fr))] gap-1">
-                    {BANDS_36.map((b, idx) => {
-                      const isScanned = idx === activeBand;
-                      const intensity = Math.round(b.activity * 100);
-                      return (
-                        <div
-                          key={b.band}
-                          title={`Band ${b.band} (${b.freqLoMhz}–${b.freqHiMhz} MHz) — Activity ${intensity}%`}
-                          className={`aspect-square border flex items-center justify-center text-[7.5px] font-mono cursor-pointer transition-all ${
-                            isScanned
-                              ? "border-[var(--cyan-bright)] shadow-[0_0_6px_var(--cyan-signal)]"
-                              : "border-[var(--border-steel)]"
-                          }`}
-                          style={{
-                            backgroundColor: isScanned
-                              ? "var(--cyan-signal)"
-                              : `rgba(77, 216, 232, ${Math.max(0.06, b.activity * 0.9)})`,
-                            color: isScanned ? "#050810" : "var(--text-dim)",
-                            fontWeight: isScanned ? "bold" : "normal",
-                          }}
-                          onClick={() => setActiveBand(idx)}
-                        >
-                          {b.band}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 10, color: "var(--text-dim)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 10, height: 10, background: "rgba(77,216,232,0.06)", border: "1px solid var(--border-steel)" }}></span>
-                      Quiet Band
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 10, height: 10, background: "rgba(77,216,232,0.85)", border: "1px solid var(--border-steel)" }}></span>
-                      High TSRD Activity
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 10, height: 10, background: "var(--cyan-bright)", border: "1px solid var(--cyan-bright)" }}></span>
-                      Currently Scanned Dwell
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* 36-BAND SPECTROGRAM */}
               <div className="panel" style={{ marginBottom: 14 }}>
@@ -1441,6 +1710,7 @@ export default function EWConsole() {
                     seed={42}
                     activeBand={activeBand}
                     showScanWindow={true}
+                    onSelectBand={setActiveBand}
                   />
                   <div className="legend" style={{ marginTop: 10 }}>
                     <div className="legend-item">
@@ -1448,7 +1718,7 @@ export default function EWConsole() {
                       Emitter pulse trains (35 emitters)
                     </div>
                     <div className="legend-item">
-                      <span className="legend-swatch" style={{ background: "var(--cyan-bright)", border: "1px solid var(--cyan-bright)" }}></span>
+                      <span className="legend-swatch" style={{ background: "rgba(244, 63, 94, 0.25)", border: "1.5px solid #f43f5e" }}></span>
                       Receiver Dwell Window (Band {activeBand + 1})
                     </div>
                     <div className="legend-item">
@@ -1463,106 +1733,260 @@ export default function EWConsole() {
                 </div>
               </div>
 
-              {/* ===== 2D TIME-FREQUENCY SEARCH PROBLEM MATRIX ===== */}
-              <div className="panel" style={{ marginBottom: 14 }}>
+              {/* ===== 2D TIME-FREQUENCY SEARCH PROBLEM PANEL (UNIFIED TABS) ===== */}
+              <div className="panel">
                 <div className="panel-head">
-                  <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                     <span className="panel-title">
-                      2D SEARCH PROBLEM FORMULATION — GROUND TRUTH E(t, b) vs RECEIVER SCAN TRAJECTORY
-                      <span className="unit">36 Bands (Y-Axis) × 50 Time Slots (X-Axis) · 6,380 Cells Discretization</span>
+                      2D SEARCH PROBLEM FORMULATION — E(t, b) vs RECEIVER SCAN TRAJECTORY
+                      <span className="unit">36 Bands × 50 Time Slots</span>
                     </span>
+                    <div style={{ display: "flex", gap: 4, background: "rgba(6, 11, 19, 0.7)", padding: "3px 4px", borderRadius: 6, border: "1px solid var(--border-steel)" }}>
+                      <button
+                        className={`btn small ${searchViewMode === "waveform" ? "primary" : ""}`}
+                        style={{ padding: "3px 10px", fontSize: 10 }}
+                        onClick={() => setSearchViewMode("waveform")}
+                      >
+                        ∿ Continuous Waveform
+                      </button>
+                      <button
+                        className={`btn small ${searchViewMode === "matrix" ? "primary" : ""}`}
+                        style={{ padding: "3px 10px", fontSize: 10 }}
+                        onClick={() => setSearchViewMode("matrix")}
+                      >
+                        ⊞ Discrete Raster Matrix
+                      </button>
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <button
-                      className="btn small"
-                      onClick={() => setShowGroundTruth((v) => !v)}
-                      style={{
-                        fontSize: 9,
-                        padding: "2px 8px",
-                        background: showGroundTruth ? "var(--cyan-dim)" : "transparent",
-                        border: "1px solid var(--border-steel-bright)",
-                      }}
-                    >
-                      {showGroundTruth ? "TRUTH: ON" : "TRUTH: OFF"}
-                    </button>
-                    <button
-                      className="btn small"
-                      onClick={() => setShowScanPath((v) => !v)}
-                      style={{
-                        fontSize: 9,
-                        padding: "2px 8px",
-                        background: showScanPath ? "var(--cyan-dim)" : "transparent",
-                        border: "1px solid var(--border-steel-bright)",
-                      }}
-                    >
-                      {showScanPath ? "TRAJECTORY: ON" : "TRAJECTORY: OFF"}
-                    </button>
-                    <button
-                      className="btn small"
-                      onClick={() => setShowMisses((v) => !v)}
-                      style={{
-                        fontSize: 9,
-                        padding: "2px 8px",
-                        background: showMisses ? "var(--cyan-dim)" : "transparent",
-                        border: "1px solid var(--border-steel-bright)",
-                      }}
-                    >
-                      {showMisses ? "MISSES: ON" : "MISSES: OFF"}
-                    </button>
+                    {searchViewMode === "waveform" ? (
+                      <>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowWaveTruth((v) => !v)}
+                          style={{
+                            background: showWaveTruth ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showWaveTruth ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showWaveTruth ? "TRUTH: ON" : "TRUTH: OFF"}
+                        </button>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowWaveScanPath((v) => !v)}
+                          style={{
+                            background: showWaveScanPath ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showWaveScanPath ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showWaveScanPath ? "TRAJECTORY: ON" : "TRAJECTORY: OFF"}
+                        </button>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowWaveMisses((v) => !v)}
+                          style={{
+                            background: showWaveMisses ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showWaveMisses ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showWaveMisses ? "MISSES: ON" : "MISSES: OFF"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowGroundTruth((v) => !v)}
+                          style={{
+                            background: showGroundTruth ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showGroundTruth ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showGroundTruth ? "TRUTH: ON" : "TRUTH: OFF"}
+                        </button>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowScanPath((v) => !v)}
+                          style={{
+                            background: showScanPath ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showScanPath ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showScanPath ? "TRAJECTORY: ON" : "TRAJECTORY: OFF"}
+                        </button>
+                        <button
+                          className="btn small"
+                          onClick={() => setShowMisses((v) => !v)}
+                          style={{
+                            background: showMisses ? "var(--cyan-dim)" : "transparent",
+                            borderColor: showMisses ? "var(--cyan-signal)" : "var(--border-steel-bright)",
+                          }}
+                        >
+                          {showMisses ? "MISSES: ON" : "MISSES: OFF"}
+                        </button>
+                      </>
+                    )}
                     <span className="panel-tag live">SCAN STEP: t={matrixStep}</span>
                   </div>
                 </div>
                 <div className="panel-body">
-                  <Matrix2DCanvas
-                    width={1100}
-                    height={380}
-                    bands={36}
-                    timeSlots={50}
-                    matrix={matrixData?.matrix || groundTruthMatrix}
-                    scanPath={scanHistoryList}
-                    activeStep={matrixStep}
-                    activeBand={activeBand}
-                    showGroundTruth={showGroundTruth}
-                    showScanPath={showScanPath}
-                    showMisses={showMisses}
-                  />
-                  <div className="legend" style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 14 }}>
-                    <div className="legend-item">
-                      <span
-                        className="legend-swatch"
-                        style={{ background: "rgba(77, 232, 127, 0.45)", border: "1.5px solid var(--green-confirm)" }}
-                      ></span>
-                      Confirmed Intercept (Hit ⊕) — Receiver Dwelt on Active Emitter Cell
-                    </div>
-                    <div className="legend-item">
-                      <span
-                        className="legend-swatch"
-                        style={{ background: "rgba(77, 216, 232, 0.28)", border: "1px solid rgba(77, 216, 232, 0.7)" }}
-                      ></span>
-                      Ground Truth Occupancy E(t, b) = 1 (TSRD Pulse Present)
-                    </div>
-                    <div className="legend-item">
-                      <span
-                        className="legend-swatch"
-                        style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--red-critical)" }}
-                      ></span>
-                      Missed Opportunity ⊙ (Emitter Active, Receiver Dwelling in Another Band)
-                    </div>
-                    <div className="legend-item">
-                      <span
-                        className="legend-swatch"
-                        style={{ border: "1.2px dashed var(--cyan-signal)", background: "transparent" }}
-                      ></span>
-                      Receiver Dwell (Empty Spectrum / Quiet Cell)
-                    </div>
-                    <div className="legend-item">
-                      <span
-                        className="legend-swatch"
-                        style={{ border: "1.8px solid var(--cyan-bright)", background: "transparent" }}
-                      ></span>
-                      Live Scanning Dwell Window (Band {activeBand + 1})
-                    </div>
-                  </div>
+                  {searchViewMode === "waveform" ? (
+                    <>
+                      <WaveformSearchCanvas
+                        width={1100}
+                        height={380}
+                        bands={36}
+                        timeSlots={50}
+                        matrix={matrixData?.matrix || groundTruthMatrix}
+                        scanPath={scanHistoryList}
+                        activeStep={matrixStep}
+                        activeBand={activeBand}
+                        showGroundTruth={showWaveTruth}
+                        showScanPath={showWaveScanPath}
+                        showMisses={showWaveMisses}
+                      />
+                      <div className="legend" style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 16 }}>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              width: 14,
+                              height: 14,
+                              borderRadius: "50%",
+                              border: "1.5px solid #6ee7b7",
+                              background: "rgba(110, 231, 183, 0.25)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 10,
+                              color: "#6ee7b7",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ⊕
+                          </span>
+                          Receiver Trajectory (Hit)
+                        </div>
+                        {REFERENCE_WAVE_BANDS.map((wb) => (
+                          <div key={wb.band} className="legend-item">
+                            <span
+                              className="legend-swatch"
+                              style={{
+                                width: 16,
+                                height: 4,
+                                borderRadius: 2,
+                                background: wb.color,
+                              }}
+                            ></span>
+                            {wb.name}
+                          </div>
+                        ))}
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: "50%",
+                              border: "1.2px dashed #f87171",
+                              background: "transparent",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#f87171" }}></span>
+                          </span>
+                          Missed Opportunity ⊙
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: "50%",
+                              border: "1.2px dashed rgba(125, 211, 252, 0.60)",
+                              background: "transparent",
+                            }}
+                          ></span>
+                          Receiver Dwell (Quiet Cell)
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              width: 16,
+                              height: 0,
+                              borderTop: "2px dashed #7dd3fc",
+                            }}
+                          ></span>
+                          Scan Path (Between Slots)
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Matrix2DCanvas
+                        width={1100}
+                        height={380}
+                        bands={36}
+                        timeSlots={50}
+                        matrix={matrixData?.matrix || groundTruthMatrix}
+                        scanPath={scanHistoryList}
+                        activeStep={matrixStep}
+                        activeBand={activeBand}
+                        showGroundTruth={showGroundTruth}
+                        showScanPath={showScanPath}
+                        showMisses={showMisses}
+                      />
+                      <div className="legend" style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 16 }}>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              background: "rgba(14, 48, 30, 0.95)",
+                              border: "1.5px solid #34d399",
+                              boxShadow: "0 0 6px rgba(52, 211, 153, 0.45)",
+                            }}
+                          ></span>
+                          Confirmed Intercept (Hit ⊕) — Receiver Dwelt on Active Emitter Cell
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{
+                              background: "rgba(10, 26, 44, 0.98)",
+                              border: "1.2px solid rgba(77, 216, 232, 0.85)",
+                              boxShadow: "0 0 4px rgba(77, 216, 232, 0.3)",
+                            }}
+                          ></span>
+                          Ground Truth Occupancy E(t, b) = 1 (TSRD Pulse Present)
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff3366", boxShadow: "0 0 5px #ff3366" }}
+                          ></span>
+                          Missed Opportunity ⊙
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{ border: "1.2px dashed rgba(77, 216, 232, 0.70)", background: "transparent" }}
+                          ></span>
+                          Receiver Dwell (Quiet Cell)
+                        </div>
+                        <div className="legend-item">
+                          <span
+                            className="legend-swatch"
+                            style={{ border: "1.8px solid #00f0ff", boxShadow: "0 0 5px rgba(0, 240, 255, 0.5)", background: "transparent" }}
+                          ></span>
+                          Live Scanning Dwell Window (Band {activeBand + 1})
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1717,15 +2141,15 @@ export default function EWConsole() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span className="dim">Round Robin (Baseline)</span>
-                        <span className="mono dim">11.68% (TSRD)</span>
+                        <span className="mono dim">8.53% (TSRD)</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span className="dim">Random Baseline</span>
-                        <span className="mono dim">12.20% (TSRD)</span>
+                        <span className="mono dim">6.78% (TSRD)</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span className="dim">UCB1 Bandit</span>
-                        <span className="mono dim">12.63% (TSRD)</span>
+                        <span className="dim">Clarkson-KL-UCB</span>
+                          <span className="mono dim">6.87% (TSRD)</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span className="dim">Vyapti Advanced Scheduler</span>
@@ -1734,7 +2158,7 @@ export default function EWConsole() {
                         </span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span className="dim">Paired t-test vs UCB1</span>
+                        <span className="dim">Paired t-test vs Clarkson</span>
                         <span className="mono" style={{ color: "var(--cyan-bright)" }}>
                           t=3.98 (p &lt; 0.0001)
                         </span>
@@ -1752,11 +2176,11 @@ export default function EWConsole() {
               <div className="panel">
                 <div className="panel-head">
                   <span className="panel-title">
-                    FULL-SPECTRUM TIME–FREQUENCY SPECTROGRAM <span className="unit">2.0–20.0 GHz · 36 BANDS</span>
+                    SIMULATED RF ENVIRONMENT <span className="unit">2.0–20.0 GHz · 36 BANDS · 35 EMITTERS</span>
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <span className="panel-tag live">ACTIVE: BAND {activeBand + 1}</span>
-                    <span className="panel-tag sim">36 BANDS</span>
+                    <span className="panel-tag live">ACTIVE: BAND {activeBand + 1} · {(2.0 + activeBand * 0.5).toFixed(1)}–{(2.5 + activeBand * 0.5).toFixed(1)} GHz</span>
+                    <span className="panel-tag sim">SIMULATED / TSRD DERIVED</span>
                   </div>
                 </div>
                 <div className="panel-body">
@@ -1766,7 +2190,26 @@ export default function EWConsole() {
                     seed={19}
                     activeBand={activeBand}
                     showScanWindow={true}
+                    onSelectBand={setActiveBand}
                   />
+                  <div className="legend" style={{ marginTop: 10 }}>
+                    <div className="legend-item">
+                      <span className="legend-swatch" style={{ background: "var(--cyan-signal)" }}></span>
+                      Emitter pulse trains (35 emitters)
+                    </div>
+                    <div className="legend-item">
+                      <span className="legend-swatch" style={{ background: "rgba(244, 63, 94, 0.25)", border: "1.5px solid #f43f5e" }}></span>
+                      Receiver Dwell Window (Band {activeBand + 1})
+                    </div>
+                    <div className="legend-item">
+                      <span className="legend-swatch" style={{ border: "1.5px solid var(--green-confirm)", background: "transparent" }}></span>
+                      Intercept Confirmation (Hit)
+                    </div>
+                    <div className="legend-item">
+                      <span className="legend-swatch" style={{ border: "1.5px dashed var(--red-critical)", background: "transparent" }}></span>
+                      Unvisited Band Opportunity
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1795,27 +2238,36 @@ export default function EWConsole() {
                 <div className="panel">
                   <div className="panel-head">
                     <span className="panel-title">
-                      ESTIMATED BAND ACTIVITY HEATMAP
+                      36-BAND RF SPECTRUM OCCUPANCY HEATMAP <span className="unit">2.0 GHz – 20.0 GHz · 500 MHz IBW per band</span>
                     </span>
+                    <span className="panel-tag live">SCANNING: BAND {activeBand + 1}</span>
                   </div>
-                  <div className="panel-body" style={{ padding: 12 }}>
-                    <div className="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-12 gap-1">
-                      {BANDS_36.map((b, idx) => (
-                        <div
-                          key={b.band}
-                          className={`p-2 border text-center font-mono cursor-pointer ${
-                            idx === activeBand
-                              ? "border-[var(--cyan-bright)] bg-[var(--cyan-dim)] text-[var(--cyan-bright)]"
-                              : "border-[var(--border-steel)] bg-[var(--bg-panel-deep)] text-[var(--text-dim)]"
-                          }`}
-                          onClick={() => setActiveBand(idx)}
-                        >
-                          <div style={{ fontSize: 9, fontWeight: "bold" }}>B{String(b.band).padStart(2, "0")}</div>
-                          <div style={{ fontSize: 8, color: "var(--cyan-signal)", marginTop: 2 }}>
-                            {(b.activity * 100).toFixed(0)}%
-                          </div>
-                        </div>
-                      ))}
+                  <div className="panel-body" style={{ padding: "8px 10px" }}>
+                    <ReceiverBandDisplay
+                      bands={36}
+                      activeBand={activeBand}
+                      lastHitBand={lastHitBand}
+                      hitTimestamp={hitTimestamp}
+                      bandActivities={BANDS_36.map((b) => b.activity)}
+                      onSelectBand={setActiveBand}
+                    />
+                    <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10, color: "var(--text-dim)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ width: 10, height: 10, background: "rgba(77,216,232,0.06)", border: "1px solid rgba(55,80,110,0.45)" }}></span>
+                        Quiet Band
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ width: 10, height: 10, background: "rgba(77,216,232,0.75)", border: "1px solid rgba(55,80,110,0.45)" }}></span>
+                        High TSRD Activity
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ width: 10, height: 10, background: "rgba(0,229,255,0.20)", border: "1.5px solid #00e5ff" }}></span>
+                        Currently Scanned Dwell
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ width: 10, height: 10, background: "rgba(74,222,128,0.35)", border: "1.5px solid rgba(74,222,128,0.9)", boxShadow: "0 0 6px rgba(74,222,128,0.6)" }}></span>
+                        HIT — Band Intercept (Blinking)
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2099,29 +2551,107 @@ export default function EWConsole() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   <div className="panel">
                     <div className="panel-head">
-                      <span className="panel-title">TSRD DATASET ADAPTER (LOCAL)</span>
+                      <span className="panel-title">TSRD DATASET ADAPTER (MULTI-CONFIG)</span>
+                      <span className="panel-tag live">{tsrdConfigs.length > 0 ? tsrdConfigs.length : 15} CONFIGS LOADED</span>
                     </div>
                     <div className="panel-body">
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11 }}>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span className="dim">Corpus File</span>
+                          <span className="dim">Scan Configs (Folder 3)</span>
                           <span className="mono" style={{ color: "var(--cyan-signal)" }}>
-                            SIH_DATA/2/TSRD_READY/raw/config_0.h5
+                            {tsrdScanConfigCount} (config_0 + 8 scan)
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span className="dim">Stare Configs (Folder 4)</span>
+                          <span className="mono" style={{ color: "var(--amber, #f59e0b)" }}>
+                            {tsrdStareConfigCount} stare configs
                           </span>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span className="dim">Total TSRD Pulses</span>
-                          <span className="mono">169,617 pulses</span>
+                          <span className="mono">{tsrdTotalPulses.toLocaleString()} pulses</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span className="dim">Total Emitters</span>
+                          <span className="mono" style={{ color: "var(--green-confirm)" }}>{tsrdTotalEmitters} radar emitters</span>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span className="dim">Offline Mode</span>
-                          <span className="mono" style={{ color: "var(--green-confirm)" }}>
-                            ACTIVE (No HuggingFace Download)
-                          </span>
+                          <span className="mono" style={{ color: "var(--green-confirm)" }}>ACTIVE (No HuggingFace Download)</span>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span className="dim">Truth Leakage Guard</span>
                           <span className="mono">STRICT ENFORCEMENT</span>
+                        </div>
+                        {/* Config selector — cyan = scan, amber = stare */}
+                        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+                          <span className="dim" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Active Config for Matrix View</span>
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontSize: 9, color: "var(--cyan-signal)", marginRight: 2 }}>● SCAN</span>
+                            <span style={{ fontSize: 9, color: "#f59e0b", marginRight: 6 }}>● STARE</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {(tsrdConfigs.length > 0 ? tsrdConfigs : [
+                              { configId: "config_0", dataMode: "scan" },
+                              { configId: "config_1", dataMode: "scan" }, { configId: "config_106", dataMode: "scan" },
+                              { configId: "config_115", dataMode: "scan" }, { configId: "config_124", dataMode: "scan" },
+                              { configId: "config_160", dataMode: "scan" }, { configId: "config_214", dataMode: "scan" },
+                              { configId: "config_216", dataMode: "scan" }, { configId: "config_223", dataMode: "scan" },
+                              { configId: "stare_config_1", dataMode: "stare" }, { configId: "stare_config_106", dataMode: "stare" },
+                              { configId: "stare_config_115", dataMode: "stare" }, { configId: "stare_config_124", dataMode: "stare" },
+                              { configId: "stare_config_160", dataMode: "stare" }, { configId: "stare_config_223", dataMode: "stare" },
+                            ]).map((cfg: any) => {
+                              const isStare = cfg.dataMode === "stare";
+                              const isActive = selectedConfig === cfg.configId;
+                              const accentColor = isStare ? "#f59e0b" : "var(--cyan-signal)";
+                              return (
+                                <button
+                                  key={cfg.configId}
+                                  id={`config-btn-${cfg.configId}`}
+                                  onClick={() => setSelectedConfig(cfg.configId)}
+                                  style={{
+                                    padding: "2px 7px",
+                                    fontSize: 10,
+                                    fontFamily: "monospace",
+                                    background: isActive ? accentColor : "rgba(30,50,80,0.7)",
+                                    color: isActive ? "#000" : isStare ? "#f59e0b" : "var(--text-muted)",
+                                    border: `1px solid ${isActive ? accentColor : isStare ? "rgba(245,158,11,0.4)" : "var(--border)"}`,
+                                    borderRadius: 3,
+                                    cursor: "pointer",
+                                    transition: "all 0.15s",
+                                  }}
+                                >
+                                  {cfg.configId}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {tsrdConfigs.length > 0 && (() => {
+                            const cfg = tsrdConfigs.find((c: any) => c.configId === selectedConfig);
+                            if (!cfg) return null;
+                            const isStare = cfg.dataMode === "stare";
+                            return (
+                              <div style={{ background: isStare ? "rgba(245,158,11,0.05)" : "rgba(0,180,255,0.05)", border: `1px solid ${isStare ? "rgba(245,158,11,0.2)" : "rgba(0,180,255,0.15)"}`, borderRadius: 4, padding: "6px 10px", marginTop: 4 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                                  <span className="dim">Mode</span>
+                                  <span className="mono" style={{ color: isStare ? "#f59e0b" : "var(--cyan-signal)" }}>{isStare ? "STARE (Fixed Rx)" : "SCAN (Sweeping Rx)"}</span>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                                  <span className="dim">Pulses</span>
+                                  <span className="mono">{(cfg.pulseCount || 0).toLocaleString()}</span>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                                  <span className="dim">Transmitters</span>
+                                  <span className="mono">{cfg.txCount} tx · {cfg.uniqueEmitters} unique</span>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                  <span className="dim">Freq Range</span>
+                                  <span className="mono">{cfg.freqMinMhz ? `${(cfg.freqMinMhz/1000).toFixed(1)}` : "0.5"}–{cfg.freqMaxMhz ? `${(cfg.freqMaxMhz/1000).toFixed(1)}` : "18.0"} GHz</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -2185,7 +2715,7 @@ export default function EWConsole() {
                 </div>
                 <div className="panel-body" style={{ padding: "10px 14px" }}>
                   <div className="tabbar">
-                    {["ROUND ROBIN", "RANDOM", "ε-GREEDY", "UCB", "THOMPSON SAMPLING", "RESTLESS BANDIT", "RL SCHEDULER"].map((s) => (
+                    {["ROUND ROBIN", "RANDOM", "ε-GREEDY", "CLARKSON", "THOMPSON SAMPLING", "RESTLESS BANDIT", "RL SCHEDULER"].map((s) => (
                       <div
                         key={s}
                         className={`tab ${s === activeStrategy ? "active" : ""}`}
@@ -2428,25 +2958,25 @@ export default function EWConsole() {
                         <tr>
                           <td className="mono">Round Robin</td>
                           <td className="mono">150,000 (250 eps)</td>
-                          <td className="mono">17,518</td>
-                          <td className="mono">132,482</td>
-                          <td className="mono">11.68%</td>
+                          <td className="mono">12,795</td>
+                          <td className="mono">137,205</td>
+                          <td className="mono">8.53%</td>
                           <td><span className="pill pass">250 EPS TSRD</span></td>
                         </tr>
                         <tr>
                           <td className="mono">Random Sweep</td>
                           <td className="mono">150,000 (250 eps)</td>
-                          <td className="mono">18,305</td>
-                          <td className="mono">131,695</td>
-                          <td className="mono">12.20%</td>
+                          <td className="mono">10,170</td>
+                          <td className="mono">139,830</td>
+                          <td className="mono">6.78%</td>
                           <td><span className="pill pass">250 EPS TSRD</span></td>
                         </tr>
                         <tr>
-                          <td className="mono">UCB1 Bandit</td>
+                          <td className="mono">Clarkson-KL-UCB</td>
                           <td className="mono">150,000 (250 eps)</td>
-                          <td className="mono">18,939</td>
-                          <td className="mono">131,061</td>
-                          <td className="mono">12.63%</td>
+                          <td className="mono">10,305</td>
+                          <td className="mono">139,695</td>
+                          <td className="mono">6.87%</td>
                           <td><span className="pill pass">250 EPS TSRD</span></td>
                         </tr>
                         <tr style={{ backgroundColor: "rgba(77,232,127,0.08)" }}>
@@ -2472,92 +3002,252 @@ export default function EWConsole() {
           {/* ================= PAGE 7: TSRD DATASET ================= */}
           {currentPage === "tsrd" && (
             <div>
-              <div className="panel">
+              {/* ── Multi-Config Aggregate Stats ── */}
+              <div className="panel" style={{ marginBottom: 14 }}>
                 <div className="panel-head">
-                  <span className="panel-title">TURING SYNTHETIC RADAR DATASET (TSRD) SPECIFICATION</span>
-                  <span className="panel-tag live">LOCAL DATASET READY</span>
+                  <span className="panel-title">TURING SYNTHETIC RADAR DATASET (TSRD) — MULTI-CONFIG SPECIFICATION</span>
+                  <span className="panel-tag live">
+                    {tsrdConfigs.length > 0 ? tsrdConfigs.length : 15} CONFIGS · LOCAL DATASET READY
+                  </span>
                 </div>
                 <div className="panel-body">
+                  {/* Scan vs Stare mode legend */}
+                  <div style={{ display: "flex", gap: 16, marginBottom: 12, fontSize: 10, alignItems: "center" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--cyan-signal)", display: "inline-block" }} />
+                      <span style={{ color: "var(--cyan-signal)", fontFamily: "monospace", letterSpacing: 0.5 }}>SCAN MODE</span>
+                      <span className="dim"> — Sweeping receiver (Folder 3 · dwell_centres populated)</span>
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: "#f59e0b", display: "inline-block" }} />
+                      <span style={{ color: "#f59e0b", fontFamily: "monospace", letterSpacing: 0.5 }}>STARE MODE</span>
+                      <span className="dim"> — Fixed-frequency receiver (Folder 4 · no dwell scan)</span>
+                    </span>
+                  </div>
                   <div className="grid grid-4" style={{ marginBottom: 14 }}>
                     <div className="metric">
                       <div className="metric-label">TOTAL TSRD PULSES</div>
-                      <div className="metric-value cyan">169,617</div>
-                      <div className="metric-sub">SOURCE: config_0.h5</div>
+                      <div className="metric-value cyan">
+                        {tsrdTotalPulses > 0 ? tsrdTotalPulses.toLocaleString() : "9,416,871"}
+                      </div>
+                      <div className="metric-sub">{tsrdConfigs.length > 0 ? tsrdConfigs.length : 15} CONFIGS (SCAN + STARE)</div>
                     </div>
                     <div className="metric">
-                      <div className="metric-label">EMITTER COUNT</div>
-                      <div className="metric-value">72</div>
-                      <div className="metric-sub">LABELLED RADARS</div>
+                      <div className="metric-label">TOTAL EMITTERS</div>
+                      <div className="metric-value">{tsrdTotalEmitters > 0 ? tsrdTotalEmitters : 813}</div>
+                      <div className="metric-sub">SCAN + STARE COMBINED</div>
                     </div>
                     <div className="metric">
-                      <div className="metric-label">TIME SLOTS</div>
-                      <div className="metric-value">290</div>
-                      <div className="metric-sub">100 ms DURATION</div>
+                      <div className="metric-label">SCAN CONFIGS</div>
+                      <div className="metric-value amber">{tsrdScanConfigCount > 0 ? tsrdScanConfigCount : 9}</div>
+                      <div className="metric-sub">FOLDER 3 + config_0</div>
                     </div>
                     <div className="metric">
-                      <div className="metric-label">OCCUPANCY RATIO</div>
-                      <div className="metric-value amber">7.57%</div>
-                      <div className="metric-sub">483 / 6,380 CELLS</div>
+                      <div className="metric-label">STARE CONFIGS</div>
+                      <div className="metric-value" style={{ color: "#f59e0b" }}>{tsrdStareConfigCount > 0 ? tsrdStareConfigCount : 6}</div>
+                      <div className="metric-sub">FOLDER 4 · FIXED RX</div>
                     </div>
                   </div>
 
-                  <div className="grid grid-2">
-                    <div className="panel">
-                      <div className="panel-head">
-                        <span className="panel-title">PULSE ATTRIBUTE DISTRIBUTIONS</span>
+                  {/* Per-Config breakdown table */}
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "monospace" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                          {["Config", "Mode", "Filename", "Pulses", "TX Count", "Unique Emitters", "Freq Range", "Bands"].map(h => (
+                            <th key={h} style={{ padding: "5px 10px", textAlign: "left", color: "var(--cyan-signal)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(tsrdConfigs.length > 0 ? tsrdConfigs : [
+                          { configId: "config_0",          dataMode: "scan",  filename: "config_0.h5",   pulseCount: 0,         txCount: 72, uniqueEmitters: 72, freqMinMhz: 500,  freqMaxMhz: 18000 },
+                          { configId: "config_1",          dataMode: "scan",  filename: "config_1.h5",   pulseCount: 50013,     txCount: 36, uniqueEmitters: 30, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_106",        dataMode: "scan",  filename: "config_106.h5", pulseCount: 264849,    txCount: 81, uniqueEmitters: 70, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_115",        dataMode: "scan",  filename: "config_115.h5", pulseCount: 7823,      txCount: 24, uniqueEmitters: 17, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_124",        dataMode: "scan",  filename: "config_124.h5", pulseCount: 60090,     txCount: 41, uniqueEmitters: 28, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_160",        dataMode: "scan",  filename: "config_160.h5", pulseCount: 168995,    txCount: 74, uniqueEmitters: 56, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_214",        dataMode: "scan",  filename: "config_214.h5", pulseCount: 86148,     txCount: 40, uniqueEmitters: 28, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_216",        dataMode: "scan",  filename: "config_216.h5", pulseCount: 99588,     txCount: 53, uniqueEmitters: 35, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "config_223",        dataMode: "scan",  filename: "config_223.h5", pulseCount: 67226,     txCount: 68, uniqueEmitters: 50, freqMinMhz: 2000, freqMaxMhz: 18000 },
+                          { configId: "stare_config_1",   dataMode: "stare", filename: "config_1.h5",   pulseCount: 448575,    txCount: 36, uniqueEmitters: 27, freqMinMhz: 1279, freqMaxMhz: 10017 },
+                          { configId: "stare_config_106", dataMode: "stare", filename: "config_106.h5", pulseCount: 2187808,   txCount: 81, uniqueEmitters: 59, freqMinMhz: 1199, freqMaxMhz: 10015 },
+                          { configId: "stare_config_115", dataMode: "stare", filename: "config_115.h5", pulseCount: 650926,    txCount: 24, uniqueEmitters: 17, freqMinMhz: 1020, freqMaxMhz: 9614  },
+                          { configId: "stare_config_124", dataMode: "stare", filename: "config_124.h5", pulseCount: 1719644,   txCount: 41, uniqueEmitters: 26, freqMinMhz: 1086, freqMaxMhz: 10002 },
+                          { configId: "stare_config_160", dataMode: "stare", filename: "config_160.h5", pulseCount: 2922089,   txCount: 74, uniqueEmitters: 54, freqMinMhz: 1199, freqMaxMhz: 11408 },
+                          { configId: "stare_config_223", dataMode: "stare", filename: "config_223.h5", pulseCount: 683097,    txCount: 68, uniqueEmitters: 45, freqMinMhz: 1199, freqMaxMhz: 10014 },
+                        ]).map((cfg: any, i: number) => {
+                          const isStare = cfg.dataMode === "stare";
+                          const isActive = selectedConfig === cfg.configId;
+                          const accentColor = isStare ? "#f59e0b" : "var(--cyan-signal)";
+                          return (
+                            <tr
+                              key={cfg.configId}
+                              style={{
+                                borderBottom: "1px solid rgba(40,60,90,0.5)",
+                                background: isActive
+                                  ? (isStare ? "rgba(245,158,11,0.07)" : "rgba(0,180,255,0.07)")
+                                  : i % 2 === 0 ? "rgba(0,0,0,0)" : "rgba(0,180,255,0.02)",
+                                cursor: "pointer",
+                                transition: "background 0.15s",
+                              }}
+                              onClick={() => setSelectedConfig(cfg.configId)}
+                            >
+                              <td style={{ padding: "5px 10px", color: isActive ? accentColor : "var(--text-main)" }}>
+                                {isActive ? "▶ " : ""}{cfg.configId}
+                              </td>
+                              <td style={{ padding: "5px 8px" }}>
+                                <span style={{
+                                  fontSize: 9, padding: "1px 5px", borderRadius: 3, fontFamily: "monospace",
+                                  background: isStare ? "rgba(245,158,11,0.15)" : "rgba(0,180,255,0.12)",
+                                  color: isStare ? "#f59e0b" : "var(--cyan-signal)",
+                                  border: `1px solid ${isStare ? "rgba(245,158,11,0.3)" : "rgba(0,180,255,0.3)"}`,
+                                }}>
+                                  {isStare ? "STARE" : "SCAN"}
+                                </span>
+                              </td>
+                              <td style={{ padding: "5px 10px", color: "var(--text-muted)" }}>{cfg.filename}</td>
+                              <td style={{ padding: "5px 10px", color: "var(--cyan-bright)" }}>{cfg.pulseCount ? cfg.pulseCount.toLocaleString() : "—"}</td>
+                              <td style={{ padding: "5px 10px" }}>{cfg.txCount}</td>
+                              <td style={{ padding: "5px 10px", color: "var(--green-confirm)" }}>{cfg.uniqueEmitters}</td>
+                              <td style={{ padding: "5px 10px", fontSize: 10, color: "var(--text-muted)" }}>
+                                {cfg.freqMinMhz
+                                  ? `${(cfg.freqMinMhz/1000).toFixed(1)}–${(cfg.freqMaxMhz/1000).toFixed(1)} GHz`
+                                  : "0.5–18.0 GHz"}
+                              </td>
+                              <td style={{ padding: "5px 10px" }}>36</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div style={{ fontSize: 9, color: "var(--text-faint)", marginTop: 6, paddingLeft: 10 }}>
+                      SCAN configs: 2–20 GHz band mapping (36 × 500 MHz, FREQ_MIN = 2000 MHz). &nbsp;
+                      STARE configs: 0.5–18.5 GHz band mapping (FREQ_MIN = 500 MHz, covers 1–11 GHz stare range).
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── PDW Features + Discretization ── */}
+              <div className="grid grid-2" style={{ marginBottom: 14 }}>
+                <div className="panel">
+                  <div className="panel-head">
+                    <span className="panel-title">PULSE ATTRIBUTE DISTRIBUTIONS (ALL CONFIGS)</span>
+                  </div>
+                  <div className="panel-body">
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Time of Arrival (ToA)</span>
+                        <span className="mono">0 – 29,317,326 µs</span>
                       </div>
-                      <div className="panel-body">
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Frequency Range</span>
-                            <span className="mono">10.36 MHz – 10,999.57 MHz</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Pulse Width (PW)</span>
-                            <span className="mono">0.007 µs – 346.27 µs</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Angle of Arrival (AoA)</span>
-                            <span className="mono">-179.99° to +179.98°</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Pulse Amplitude</span>
-                            <span className="mono">-170.48 dBm to -1.25 dBm</span>
-                          </div>
-                        </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Frequency</span>
+                        <span className="mono">149 MHz – 16,052 MHz</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Pulse Width (PW)</span>
+                        <span className="mono">0.007 µs – 354 µs</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Angle of Arrival (AoA)</span>
+                        <span className="mono">-180° to +180°</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Amplitude</span>
+                        <span className="mono">-177 dBm to +1.2 dBm</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Transmitter Labels</span>
+                        <span className="mono" style={{ color: "var(--cyan-signal)" }}>17–81 per config (0–indexed)</span>
                       </div>
                     </div>
+                  </div>
+                </div>
 
-                    <div className="panel">
-                      <div className="panel-head">
-                        <span className="panel-title">DISCRETIZATION ARCHITECTURE</span>
+                <div className="panel">
+                  <div className="panel-head">
+                    <span className="panel-title">DISCRETIZATION ARCHITECTURE</span>
+                  </div>
+                  <div className="panel-body">
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Simulator Spectrum</span>
+                        <span className="mono">18,000 MHz (36 Bands × 500 MHz)</span>
                       </div>
-                      <div className="panel-body">
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Simulator Spectrum</span>
-                            <span className="mono">18,000 MHz (36 Bands × 500 MHz)</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Evaluation Slots</span>
-                            <span className="mono">600 Time Slots / Episode</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Evaluation Dwells</span>
-                            <span className="mono">[20, 50, 100] ms</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span className="dim">Corpus Loader</span>
-                            <span className="mono" style={{ color: "var(--green-confirm)" }}>
-                              TSRDCorpusLoader (Offline)
-                            </span>
-                          </div>
-                        </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Evaluation Slots</span>
+                        <span className="mono">600 Time Slots / Episode</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Evaluation Dwells</span>
+                        <span className="mono">[20, 50, 100] ms</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Obs Matrix Shape</span>
+                        <span className="mono">290 slots × 36 bands per config</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Corpus Loader</span>
+                        <span className="mono" style={{ color: "var(--green-confirm)" }}>
+                          TSRDCorpusLoader (Multi-Dir Offline)
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span className="dim">Episode Pool</span>
+                        <span className="mono" style={{ color: "var(--cyan-signal)" }}>
+                          config_0 + 8 scan + 6 stare (round-robin)
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {/* ── Selected Config Detail ── */}
+              {tsrdConfigs.length > 0 && (() => {
+                const cfg = tsrdConfigs.find((c: any) => c.configId === selectedConfig);
+                if (!cfg || !cfg.bandActivity) return null;
+                const isStare = cfg.dataMode === "stare";
+                return (
+                  <div className="panel" style={{ borderColor: isStare ? "rgba(245,158,11,0.25)" : undefined }}>
+                    <div className="panel-head">
+                      <span className="panel-title">BAND ACTIVITY PROFILE — {cfg.configId.toUpperCase()}</span>
+                      <span className="panel-tag" style={{ background: isStare ? "rgba(245,158,11,0.15)" : undefined, color: isStare ? "#f59e0b" : undefined }}>
+                        {isStare ? "STARE MODE · " : ""}{cfg.txCount} TX · {cfg.pulseCount.toLocaleString()} PULSES
+                      </span>
+                    </div>
+                    {isStare && (
+                      <div style={{ padding: "6px 12px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", fontSize: 10, color: "#f59e0b" }}>
+                        ⚠ STARE MODE: Receiver fixed at one frequency — no scanning. Band mapping uses FREQ_MIN = 500 MHz (covers 0.5–18.5 GHz). Active bands concentrate in B01–B21 (1–11 GHz).
+                      </div>
+                    )}
+                    <div className="panel-body">
+                      <div style={{ display: "flex", gap: 1, alignItems: "flex-end", height: 80, padding: "4px 0" }}>
+                        {(cfg.bandActivity as number[]).map((act: number, b: number) => (
+                          <div
+                            key={b}
+                            title={`B${String(b+1).padStart(2,"0")} (${(2+b*0.5).toFixed(1)}–${(2.5+b*0.5).toFixed(1)} GHz): ${(act*100).toFixed(1)}%`}
+                            style={{
+                              flex: 1,
+                              height: `${Math.max(4, act * 100 * 0.9)}%`,
+                              background: act > 0.12 ? "var(--cyan-signal)" : act > 0.05 ? "rgba(0,210,255,0.55)" : "rgba(0,180,255,0.25)",
+                              borderRadius: "2px 2px 0 0",
+                              transition: "height 0.3s",
+                              cursor: "default",
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--text-faint)", marginTop: 4 }}>
+                        <span>B01 · 2.0 GHz</span>
+                        <span style={{ color: "var(--cyan-signal)", fontSize: 10 }}>36-BAND OCCUPANCY (fraction of time slots active)</span>
+                        <span>B36 · 20.0 GHz</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -2629,6 +3319,10 @@ export default function EWConsole() {
               </div>
             </div>
           )}
+        {currentPage === "live_rf" && (
+          <LiveRFEmbed />
+        )}
+
 
           {/* ================= PAGE 9: DETECTION ================= */}
           {currentPage === "detection" && (
@@ -2827,8 +3521,8 @@ export default function EWConsole() {
                       <tr>
                         <td className="mono" style={{ fontWeight: 600 }}>Round Robin</td>
                         <td className="dim">Fixed Sequential Sweep</td>
-                        <td className="mono">11.68%</td>
-                        <td className="mono">2.34 hits/s</td>
+                        <td className="mono">8.53%</td>
+                        <td className="mono">1.70 hits/s</td>
                         <td className="mono">-0.050</td>
                         <td className="mono">520 ms</td>
                         <td className="dim">None (Open loop)</td>
@@ -2837,18 +3531,18 @@ export default function EWConsole() {
                       <tr>
                         <td className="mono" style={{ fontWeight: 600 }}>Random Sweep</td>
                         <td className="dim">Stochastic Uniform Dwell</td>
-                        <td className="mono">12.20%</td>
-                        <td className="mono">2.44 hits/s</td>
+                        <td className="mono">6.78%</td>
+                        <td className="mono">1.35 hits/s</td>
                         <td className="mono">0.080</td>
                         <td className="mono">380 ms</td>
                         <td className="dim">None (Zero intelligence)</td>
                         <td><span className="pill warn">BASELINE (250 EPS)</span></td>
                       </tr>
                       <tr>
-                        <td className="mono" style={{ fontWeight: 600 }}>UCB1 Bandit</td>
+                        <td className="mono" style={{ fontWeight: 600 }}>Clarkson-KL-UCB</td>
                         <td className="dim">Optimism Under Uncertainty</td>
-                        <td className="mono">12.63%</td>
-                        <td className="mono">2.53 hits/s</td>
+                        <td className="mono">6.87%</td>
+                        <td className="mono">1.37 hits/s</td>
                         <td className="mono">0.240</td>
                         <td className="mono">260 ms</td>
                         <td className="dim">Online Bandit</td>
@@ -2943,6 +3637,7 @@ export default function EWConsole() {
               </div>
             </div>
           )}
+            </div>
         </div>
       </div>
     </div>

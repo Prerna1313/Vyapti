@@ -16,9 +16,18 @@
 # Importing this module — `import dataset` or `from dataset import
 # load_tsrd_dataset` — triggers NO network access and NO disk scanning.
 # Only calling load_tsrd_dataset() does.
+#
+# --------------------------------------------------------------------------
+# Multi-config support (folder 3 integration):
+# load_tsrd_dataset() now scans BOTH:
+#   SIH_DATA/2/TSRD_READY/raw/  (config_0.h5 — original)
+#   SIH_DATA/3/                 (config_1, 106, 115, 124, 160, 214, 216, 223)
+# Episodes from all configs are pooled into VALID_EPISODES and iterated
+# round-robin during simulation runs, giving access to all 9 TSRD scenarios.
+# --------------------------------------------------------------------------
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import sys
 _vyapti_root = Path(__file__).resolve().parent.parent
 if str(_vyapti_root) not in sys.path:
@@ -34,7 +43,8 @@ DEFAULT_CACHE_DIR = "/root/.cache/huggingface/hub"
 # main.py's VALID_EPISODES global, just populated lazily instead of at
 # import time.
 _VALID_EPISODES: Optional[List[CorpusFileResult]] = None
-_SCAN_DIR: Optional[Path] = None
+_SCAN_DIRS: Optional[List[Path]] = None
+_CONFIG_STATS: Optional[List[Dict[str, Any]]] = None
 
 
 class TSRDLoadError(RuntimeError):
@@ -47,44 +57,89 @@ class TSRDLoadError(RuntimeError):
     """
 
 
+def _scan_dir(scan_dir: Path, label: str) -> List[CorpusFileResult]:
+    """Scan a single directory and return valid CorpusFileResult episodes."""
+    if not scan_dir.is_dir():
+        print(f"[TSRD] WARNING: {label} dir not found: {scan_dir}")
+        return []
+    loader = TSRDCorpusLoader(corpus_dir=str(scan_dir), require_manifest=False)
+    results: List[CorpusFileResult] = []
+    for res in loader.iter_corpus():
+        if res.pdw_stream is None:
+            continue
+        results.append(res)
+    return results
+
+
 def load_tsrd_dataset(
     force_reload: bool = False,
     cache_dir: str = DEFAULT_CACHE_DIR,
 ) -> List[CorpusFileResult]:
     """
-    Download (if needed) and scan the TSRD corpus, returning the same
-    VALID_EPISODES list the original main.py built at import time.
+    Scan ALL available TSRD H5 files (config_0 from SIH_DATA/2 AND the 8 new
+    configs from SIH_DATA/3), returning a merged VALID_EPISODES list.
 
-    Safe to call multiple times — after the first successful call the
-    result is cached in-process and returned immediately, so this is
-    cheap to call from every /api/simulation/start request.
+    Episodes are ordered so that config_0 comes first (preserving original
+    behaviour), followed by the folder-3 configs in alphabetical order.
 
-    Raises TSRDLoadError if the download or corpus scan fails, instead
-    of letting an arbitrary huggingface_hub/vyapti_simulator exception
-    propagate — callers (the FastAPI routes) should catch this and
-    report a clear "TSRD unavailable" status rather than crashing.
+    Safe to call multiple times — result is cached in-process.
+
+    Raises TSRDLoadError if NO valid episodes are found at all.
     """
-    global _VALID_EPISODES, _SCAN_DIR
+    global _VALID_EPISODES, _SCAN_DIRS, _CONFIG_STATS
 
     if _VALID_EPISODES is not None and not force_reload:
         return _VALID_EPISODES
 
     try:
-        scan_dir = Path(__file__).parent / "SIH_DATA" / "2" / "TSRD_READY" / "raw"
-        print(f"[TSRD] Using local TSRD data from: {scan_dir}")
+        base = Path(__file__).parent
 
-        loader = TSRDCorpusLoader(corpus_dir=str(scan_dir), require_manifest=False)
-        valid_episodes: List[CorpusFileResult] = []
-        for res in loader.iter_corpus():
-            if res.pdw_stream is None:
-                continue
-            valid_episodes.append(res)
-        print(f"[TSRD] Found {len(valid_episodes)} valid episodes.")
+        # --- Original single config directory ---
+        dir0 = base / "SIH_DATA" / "2" / "TSRD_READY" / "raw"
+        # --- New folder-3 configs ---
+        dir3 = base / "SIH_DATA" / "3"
 
-        _VALID_EPISODES = valid_episodes
-        _SCAN_DIR = scan_dir
+        all_episodes: List[CorpusFileResult] = []
+        stats: List[Dict[str, Any]] = []
+        scan_dirs: List[Path] = []
+
+        print(f"[TSRD] Scanning config_0 from: {dir0}")
+        ep0 = _scan_dir(dir0, "config_0")
+        if ep0:
+            all_episodes.extend(ep0)
+            stats.append({"dir": str(dir0), "label": "config_0", "count": len(ep0)})
+            scan_dirs.append(dir0)
+            print(f"[TSRD]   config_0: {len(ep0)} valid episode(s)")
+        else:
+            print("[TSRD]   config_0: no valid episodes found (skipping)")
+
+        print(f"[TSRD] Scanning folder-3 configs from: {dir3}")
+        ep3 = _scan_dir(dir3, "folder3")
+        if ep3:
+            # Group by filename for stats
+            by_file: Dict[str, int] = {}
+            for ep in ep3:
+                fname = Path(ep.path).stem if hasattr(ep, "path") else "unknown"
+                by_file[fname] = by_file.get(fname, 0) + 1
+            all_episodes.extend(ep3)
+            stats.append({"dir": str(dir3), "label": "folder3", "count": len(ep3), "by_file": by_file})
+            scan_dirs.append(dir3)
+            print(f"[TSRD]   folder3: {len(ep3)} valid episode(s) across {len(by_file)} configs")
+        else:
+            print("[TSRD]   folder3: no valid episodes found (skipping)")
+
+        if not all_episodes:
+            raise TSRDLoadError("No valid TSRD episodes found in any scan directory.")
+
+        print(f"[TSRD] Total valid episodes available: {len(all_episodes)}")
+
+        _VALID_EPISODES = all_episodes
+        _SCAN_DIRS = scan_dirs
+        _CONFIG_STATS = stats
         return _VALID_EPISODES
 
+    except TSRDLoadError:
+        raise
     except Exception as exc:  # noqa: BLE001 - intentionally broad, re-raised as our own type
         raise TSRDLoadError(
             f"Could not load the TSRD dataset ({TSRD_REPO_ID} @ {TSRD_REVISION}): {exc}"
@@ -102,4 +157,12 @@ def dataset_size() -> Optional[int]:
 
 
 def dataset_scan_dir() -> Optional[str]:
-    return str(_SCAN_DIR) if _SCAN_DIR is not None else None
+    """Return the primary scan directory (config_0 original), or None."""
+    if _SCAN_DIRS:
+        return str(_SCAN_DIRS[0])
+    return None
+
+
+def dataset_config_stats() -> Optional[List[Dict[str, Any]]]:
+    """Return per-directory scan stats, or None if not loaded yet."""
+    return _CONFIG_STATS

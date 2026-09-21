@@ -73,7 +73,8 @@ for the Kaggle TSRD runner.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import field
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -102,8 +103,7 @@ _NOISE_FLOOR_DB_DEFAULT = -130.0
 # =====================================================================
 # Emitter spec
 # =====================================================================
-@dataclass(frozen=True)
-class SyntheticEmitterSpec:
+class SyntheticEmitterSpec(BaseModel):
     """
     One emitter's parameters for the synthetic generator.
 

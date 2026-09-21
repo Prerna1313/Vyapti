@@ -46,6 +46,7 @@ Usage
         KinematicEmitter, RayleighFadingChannel, compute_path_loss,
     )
     import numpy as np
+from vyapti_simulator.rf.hardware import HardwareReceiverModel
 
     cfg = SimulationEngineConfig(
         tick_interval_s=10e-3,  # 10 ms physics tick
@@ -76,6 +77,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional, Tuple, Union
 
 import numpy as np
+from vyapti_simulator.rf.hardware import HardwareReceiverModel
 
 
 # =====================================================================
@@ -114,6 +116,13 @@ class SimulationEngineConfig:
 
     # DSP sample rate (I/Q synthesis rate)
     dsp_sample_rate_hz: float = 10e6   # 10 MHz default
+
+    # Hardware Imperfections (RF Dirt)
+    phase_noise_std_deg: float = 0.5       # degrees of phase noise
+    adc_max_voltage: float = 0.0           # 0.0 means disabled
+    iq_amplitude_imbalance_db: float = 0.5 # 0.5 dB
+    iq_phase_imbalance_deg: float = 2.0    # 2.0 degrees
+    iip3_dbm: float = 30.0                 # 30 dBm (moderate linearity)
 
     # Carrier / emitter parameters
     emitter_frequency_hz: float = 3e9  # 3 GHz default
@@ -460,7 +469,15 @@ class RealTimeRFSimulator:
             chirp = em.channel.apply(chirp)
 
         # Add AWGN at the configured SNR
+                # Add AWGN at the configured SNR
         chirp = waveforms.add_awgn(chirp, snr_db=cfg.snr_db, rng=self.rng)
+        
+        # Apply Hardware Imperfections (RF Dirt)
+        chirp = HardwareReceiverModel.apply_phase_noise(chirp, cfg.phase_noise_std_deg, self.rng)
+        chirp = HardwareReceiverModel.apply_iq_imbalance(chirp, cfg.iq_amplitude_imbalance_db, cfg.iq_phase_imbalance_deg)
+        chirp = HardwareReceiverModel.apply_ip3_nonlinearity(chirp, cfg.iip3_dbm)
+        if cfg.adc_max_voltage > 0.0:
+            chirp = HardwareReceiverModel.apply_adc_clipping(chirp, cfg.adc_max_voltage)
 
         # Advance phase for next pulse (random per emitter)
         em.phase_offset_rad = float(self.rng.uniform(0.0, 2.0 * np.pi))

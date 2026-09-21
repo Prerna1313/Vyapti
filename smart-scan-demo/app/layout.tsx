@@ -4,6 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "VYAPTI :: Smart Scan Strategy — EW Simulation Console",
   description: "Vyapti Intelligent EW/Radar Receiver Scheduler — Mission Dashboard (DRDO PS26055)",
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
@@ -14,6 +19,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <link rel="icon" href="/logo.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap"

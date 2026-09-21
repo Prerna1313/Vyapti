@@ -37,6 +37,7 @@ Levanon, N. (1988). "Radar Principles". Wiley. (LFM pulse compression.)
 """
 
 from __future__ import annotations
+from abc import ABC, abstractmethod
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -104,7 +105,14 @@ class PulseDetectorConfig:
 # =====================================================================
 # Pulse detector
 # =====================================================================
-class PulseDetector:
+
+class BaseDetector(ABC):
+    """Abstract base class for all RF pulse detectors."""
+    @abstractmethod
+    def detect(self, iq_buffer: np.ndarray) -> PDWStream:
+        pass
+
+class CFARMatchedFilterDetector(BaseDetector):
     """
     Detect pulses in I/Q buffers from ``RealTimeRFSimulator``.
 
@@ -692,3 +700,6 @@ __all__ = [
     "DetectedPulse",
     "EmitterInfo",
 ]
+
+
+PulseDetector = CFARMatchedFilterDetector

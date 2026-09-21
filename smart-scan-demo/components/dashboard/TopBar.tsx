@@ -34,9 +34,16 @@ export default function TopBar() {
 
   return (
     <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-steel bg-panel-deep px-[18px]">
-      <div className="flex items-center gap-2.5">
-        <span className="text-[12.5px] font-semibold text-primary">{title}</span>
-        <span className="font-mono text-[10px] text-faint">/ VYAPTI / EW CONSOLE</span>
+      <div className="flex items-center gap-3">
+        <img
+          src="/logo.png"
+          alt="Vyapti Logo"
+          className="w-7 h-7 rounded-full border border-[#4DD8E8] shadow-[0_0_8px_rgba(77,216,232,0.35)] bg-white object-cover flex-shrink-0"
+        />
+        <div className="flex items-center gap-2">
+          <span className="text-[12.5px] font-semibold text-primary">{title}</span>
+          <span className="font-mono text-[10px] text-faint">/ VYAPTI / EW CONSOLE</span>
+        </div>
       </div>
       <div className="flex items-center gap-4 font-mono text-[10.5px] text-dim">
         <Tag variant={mode === "LIVE" ? "live" : "demo"}>{mode === "LIVE" ? "LIVE — PYTHON CONNECTED" : "DEMO MODE — REPLAYING SAVED RESULTS"}</Tag>

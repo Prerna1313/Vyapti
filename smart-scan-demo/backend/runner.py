@@ -34,6 +34,8 @@ if str(_vyapti_root) not in sys.path:
     sys.path.insert(0, str(_vyapti_root))
 
 from scheduler_core import AdvancedSchedulerPrototype, SIM_CONFIG, BEST_DETECTION_CONFIG
+import json
+from vyapti_hybrid_scheduler import HybridMetaScheduler
 from dataset import load_tsrd_dataset, TSRDLoadError
 from vyapti_simulator.tsrd import TSRDEnvironment
 from vyapti_simulator.core.metrics import MetricsEngine, MetricsConfig, TrajectoryStep
@@ -91,7 +93,10 @@ def _run(n_target_episodes: int, n_steps_per_episode: int, band_count: int) -> N
                 simulation_config=SIM_CONFIG,
                 detection_config=BEST_DETECTION_CONFIG,
             )
-            scheduler = AdvancedSchedulerPrototype(band_count=band_count)
+            with open("base_expert_regret_analysis_V3.json", "r", encoding="utf-8") as f:
+                expert_doc = json.load(f)
+            expert_params = expert_doc.get("experts", expert_doc)
+            scheduler = HybridMetaScheduler(band_count=band_count, expert_params=expert_params, horizon=SIM_CONFIG.time_slots)
 
             pd, metrics, hit_flags = _run_episode_streaming(
                 scheduler, env, seed=episode_index, episode_number=ep_count,
@@ -237,7 +242,11 @@ def _run_episode_streaming(scheduler, env, seed: int, episode_number: int, n_ste
         if STATE.stop_requested():
             break
 
-        action = scheduler.select_action(obs_hist, t)
+        action_result = scheduler.select_action(obs_hist, t)
+        if isinstance(action_result, int):
+            action = {"band": action_result, "dwell_ms": 50}
+        else:
+            action = action_result
         band = action["band"]
         dwell = action.get("dwell_ms", 50)
         dwell_times.append(dwell)
@@ -284,7 +293,12 @@ def _run_episode_streaming(scheduler, env, seed: int, episode_number: int, n_ste
         obs["snr"] = obs.get("snr_db", 10.0)
         obs_hist.append(obs)
 
-        scheduler.update(action, obs)
+        if hasattr(scheduler, "update_after_step"):
+            pass # ignore, handled
+        else:
+            # hybrid meta scheduler expects band index as first arg
+            b = action["band"] if isinstance(action, dict) else action
+            scheduler.update(b, obs)
         hit = bool(obs.get("hit", False))
         hits.append(hit)
 
@@ -411,8 +425,8 @@ def _run_episode_streaming(scheduler, env, seed: int, episode_number: int, n_ste
             v_res = metrics_engine.record_result(
                 episode_id=episode_number,
                 seed=seed,
-                scheduler_name="AdvancedSchedulerPrototype",
-                scenario_config={"technique_name": "AdvancedSchedulerPrototype"},
+                scheduler_name="HybridMetaScheduler",
+                scenario_config={"technique_name": "HybridMetaScheduler"},
                 trajectory=trajectory,
                 truth_grid=truth_grid,
             )

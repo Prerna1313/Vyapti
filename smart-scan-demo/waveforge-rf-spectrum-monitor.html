@@ -1,0 +1,2190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WAVEFORGE — RF Spectrum Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050c13;
+  --bg-deep:#02070b;
+  --panel:#0a161f;
+  --panel-2:#0d1e2a;
+  --panel-3:#0b1922;
+  --border:#163040;
+  --border-soft:#0f2230;
+  --cyan:#3fe8ef;
+  --cyan-soft:#1d8f96;
+  --cyan-dim:#134450;
+  --blue:#2f7bff;
+  --blue-soft:#173a6b;
+  --text:#cfeaf0;
+  --text-dim:#6d93a0;
+  --text-faint:#3f5c66;
+  --red:#ff5577;
+  --green:#3ee9a6;
+  --amber:#ffcf6b;
+  --mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans:'IBM Plex Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --radius:3px;
+}
+:root:not([data-theme="light"]){
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    /* This is an instrument-panel style application; it is intentionally
+       always dark, like a hardware RF receiver display. */
+  }
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:13px;
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important;}
+}
+::selection{background:var(--cyan-dim); color:#fff;}
+::-webkit-scrollbar{width:10px; height:10px;}
+::-webkit-scrollbar-track{background:var(--bg-deep);}
+::-webkit-scrollbar-thumb{background:var(--border); border-radius:5px;}
+::-webkit-scrollbar-thumb:hover{background:var(--cyan-soft);}
+
+a, button, select, input, [tabindex]{
+  font-family:inherit;
+}
+button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible, a:focus-visible{
+  outline:2px solid var(--cyan);
+  outline-offset:1px;
+}
+
+/* ---------- Layout shell ---------- */
+#app{
+  display:grid;
+  grid-template-columns:200px 1fr;
+  min-height:100vh;
+}
+.sidebar{
+  background:linear-gradient(180deg, var(--bg-deep), #030a10 60%);
+  border-right:1px solid var(--border-soft);
+  padding:20px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:26px;
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:0 4px;
+}
+.brand-mark{
+  width:30px; height:30px;
+  flex:none;
+  position:relative;
+}
+.brand-mark svg{width:100%; height:100%; display:block;}
+.brand-name{
+  font-family:var(--mono);
+  font-weight:600;
+  letter-spacing:0.14em;
+  font-size:13px;
+  color:var(--text);
+  line-height:1.15;
+}
+.brand-name small{
+  display:block;
+  font-size:8px;
+  letter-spacing:0.24em;
+  color:var(--cyan-soft);
+  font-weight:500;
+  margin-top:2px;
+}
+.nav{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.nav-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:transparent;
+  border:none;
+  border-left:2px solid transparent;
+  color:var(--text-dim);
+  text-align:left;
+  padding:9px 10px;
+  font-size:12.5px;
+  font-weight:500;
+  cursor:pointer;
+  border-radius:0 var(--radius) var(--radius) 0;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+}
+.nav-item .dot{width:5px; height:5px; border-radius:50%; background:var(--text-faint); flex:none; transition:background .15s ease, box-shadow .15s ease;}
+.nav-item:hover{background:var(--panel); color:var(--text);}
+.nav-item[aria-current="page"]{
+  background:var(--panel-2);
+  color:var(--cyan);
+  border-left-color:var(--cyan);
+}
+.nav-item[aria-current="page"] .dot{background:var(--cyan); box-shadow:0 0 6px var(--cyan);}
+.sidebar-footer{
+  margin-top:auto;
+  padding:10px 4px 0;
+  border-top:1px solid var(--border-soft);
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--text-faint);
+  line-height:1.6;
+}
+.status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:.08em;
+  padding:3px 8px;
+  border-radius:20px;
+  border:1px solid var(--border);
+  color:var(--text-dim);
+  background:var(--panel);
+}
+.status-pill .dot{width:6px; height:6px; border-radius:50%; background:var(--text-faint);}
+.status-pill.running{color:var(--green); border-color:var(--cyan-dim);}
+.status-pill.running .dot{background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 1.4s ease-in-out infinite;}
+.status-pill.paused{color:var(--amber); border-color:#4a3a1c;}
+.status-pill.paused .dot{background:var(--amber);}
+.status-pill.stopped{color:var(--text-dim);}
+@keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+
+.content{
+  padding:18px 22px 40px;
+  min-width:0;
+}
+.page{display:none;}
+.page.active{display:block;}
+.page-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:16px;
+  flex-wrap:wrap;
+}
+.page-title{
+  font-family:var(--mono);
+  font-size:15px;
+  letter-spacing:.06em;
+  color:var(--text);
+  font-weight:600;
+  margin:0;
+}
+.page-sub{
+  color:var(--text-dim);
+  font-size:12px;
+  margin:3px 0 0;
+}
+
+/* ---------- Panels / cards ---------- */
+.panel{
+  background:var(--panel);
+  border:1px solid var(--border-soft);
+  border-radius:var(--radius);
+}
+.panel-title{
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.12em;
+  color:var(--cyan);
+  font-weight:600;
+  padding:10px 12px;
+  border-bottom:1px solid var(--border-soft);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+
+/* ---------- Spectrum Monitor layout ---------- */
+.monitor-grid{
+  display:grid;
+  grid-template-columns:280px 1fr;
+  gap:14px;
+  align-items:start;
+}
+@media (max-width:980px){
+  .monitor-grid{grid-template-columns:1fr;}
+}
+
+.control-panel{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.field-group{
+  padding:12px;
+  border-bottom:1px solid var(--border-soft);
+}
+.field-group:last-child{border-bottom:none;}
+.field-label{
+  font-size:10.5px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  margin:0 0 6px;
+  font-weight:600;
+}
+.info-row{
+  display:flex;
+  justify-content:space-between;
+  font-size:11.5px;
+  color:var(--text-dim);
+  padding:2px 0;
+}
+.info-row b{color:var(--text); font-weight:600; font-family:var(--mono); font-size:11px;}
+
+select.control-input, .control-input{
+  width:100%;
+  background:var(--bg-deep);
+  border:1px solid var(--border);
+  color:var(--text);
+  padding:7px 9px;
+  border-radius:var(--radius);
+  font-size:12px;
+  font-family:var(--mono);
+  appearance:none;
+}
+select.control-input{
+  background-image:linear-gradient(45deg, transparent 50%, var(--cyan-soft) 50%), linear-gradient(135deg, var(--cyan-soft) 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size:5px 5px, 5px 5px;
+  background-repeat:no-repeat;
+  cursor:pointer;
+}
+.stepper{
+  display:flex;
+  align-items:stretch;
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
+  background:var(--bg-deep);
+}
+.stepper input{
+  flex:1;
+  background:transparent;
+  border:none;
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:12px;
+  padding:7px 9px;
+  width:0;
+  min-width:0;
+}
+.stepper input:focus-visible{outline:none;}
+.stepper-btns{display:flex; flex-direction:column; border-left:1px solid var(--border);}
+.stepper-btns button{
+  background:var(--panel-2);
+  border:none;
+  color:var(--cyan-soft);
+  width:22px;
+  height:14px;
+  line-height:0;
+  cursor:pointer;
+  font-size:8px;
+  display:flex; align-items:center; justify-content:center;
+}
+.stepper-btns button:hover{background:var(--blue-soft); color:var(--cyan);}
+.stepper-btns button:first-child{border-bottom:1px solid var(--border);}
+.two-col{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+
+.btn{
+  border:1px solid var(--border);
+  background:var(--panel-2);
+  color:var(--text-dim);
+  padding:9px 10px;
+  border-radius:var(--radius);
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.06em;
+  font-weight:600;
+  cursor:pointer;
+  transition:background .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.btn:hover{color:var(--text); border-color:var(--cyan-soft);}
+.btn:disabled{opacity:.4; cursor:not-allowed;}
+.btn:disabled:hover{border-color:var(--border); color:var(--text-dim);}
+.btn-row{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;}
+.btn-primary-active{
+  background:var(--cyan-dim);
+  border-color:var(--cyan);
+  color:#eafcff;
+  box-shadow:0 0 0 1px var(--cyan) inset, 0 0 14px rgba(63,232,239,.25);
+}
+.btn-full{width:100%; margin-top:6px;}
+.btn-ghost{background:transparent;}
+
+.slider-wrap{padding-top:2px;}
+input[type="range"]{
+  -webkit-appearance:none;
+  width:100%;
+  height:4px;
+  border-radius:3px;
+  background:linear-gradient(90deg, var(--red), var(--cyan-soft) 40%, var(--border));
+  outline:none;
+  margin:8px 0 6px;
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:13px; height:13px;
+  border-radius:50%;
+  background:var(--cyan);
+  border:2px solid #04141a;
+  box-shadow:0 0 8px rgba(63,232,239,.6);
+  cursor:pointer;
+  margin-top:-4.5px;
+}
+input[type="range"]::-moz-range-thumb{
+  width:13px; height:13px; border-radius:50%;
+  background:var(--cyan); border:2px solid #04141a; cursor:pointer;
+}
+.slider-value{
+  font-family:var(--mono);
+  color:var(--red);
+  font-size:13px;
+  font-weight:600;
+}
+
+.diagnostics-toggle{
+  width:100%;
+  background:transparent;
+  border:none;
+  color:var(--cyan-soft);
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  padding:10px 12px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  border-top:1px solid var(--border-soft);
+}
+.diagnostics-toggle:hover{color:var(--cyan);}
+.diagnostics-body{
+  padding:0 12px 12px;
+  display:none;
+}
+.diagnostics-body.open{display:block;}
+.diag-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.diag-cell{
+  background:var(--bg-deep);
+  border:1px solid var(--border-soft);
+  padding:8px;
+  border-radius:var(--radius);
+}
+.diag-cell .k{font-size:9.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em;}
+.diag-cell .v{font-family:var(--mono); font-size:14px; color:var(--cyan); margin-top:3px;}
+
+/* ---------- Main charts column ---------- */
+.chart-col{display:flex; flex-direction:column; gap:0; min-width:0;}
+.chart-block{
+  background:var(--panel);
+  border:1px solid var(--border-soft);
+  border-bottom:none;
+  padding:10px 12px 4px;
+  position:relative;
+}
+.chart-block:last-of-type{border-bottom:1px solid var(--border-soft);}
+.chart-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:4px;
+}
+.chart-ylabel{
+  font-size:10px;
+  color:var(--text-dim);
+  letter-spacing:.04em;
+}
+.chart-caption{
+  position:absolute;
+  left:50%;
+  top:44%;
+  transform:translate(-50%,-50%);
+  font-family:var(--mono);
+  font-size:22px;
+  font-weight:600;
+  color:rgba(207,234,240,.9);
+  text-align:center;
+  text-shadow:0 0 20px rgba(63,232,239,.35);
+  pointer-events:none;
+  max-width:80%;
+  line-height:1.3;
+  opacity:0;
+  transition:opacity .4s ease;
+  z-index:5;
+}
+.chart-caption.show{opacity:1;}
+canvas{display:block; width:100%; height:auto; max-width:100%;}
+#spectrumCanvas{height:230px;}
+#waterfallCanvas{height:130px;}
+#heatmapCanvas{height:260px;}
+#learningCanvas{height:260px;}
+#dashMiniCanvas{height:180px;}
+.xaxis-label{
+  text-align:center;
+  font-size:10px;
+  color:var(--text-dim);
+  padding:3px 0 8px;
+}
+
+/* ---------- Tabs ---------- */
+.tabs-row{
+  display:flex;
+  border:1px solid var(--border-soft);
+  border-top:none;
+  background:var(--panel-3);
+  overflow-x:auto;
+}
+.tab-btn{
+  background:transparent;
+  border:none;
+  border-right:1px solid var(--border-soft);
+  color:var(--text-dim);
+  padding:9px 13px;
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.07em;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.tab-btn:hover{color:var(--text);}
+.tab-btn[aria-selected="true"]{color:var(--cyan); background:var(--panel-2); box-shadow:inset 0 -2px 0 var(--cyan);}
+
+.tabbed-area{
+  display:grid;
+  grid-template-columns:1fr 300px;
+  border:1px solid var(--border-soft);
+  border-top:none;
+  min-height:300px;
+}
+@media (max-width:980px){
+  .tabbed-area{grid-template-columns:1fr;}
+}
+.tab-panels{min-width:0; overflow-x:auto;}
+.tab-panel{display:none; padding:0;}
+.tab-panel.active{display:block;}
+
+table{width:100%; border-collapse:collapse; font-size:11.5px;}
+thead th{
+  text-align:left;
+  font-size:9.5px;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  padding:8px 10px;
+  border-bottom:1px solid var(--border-soft);
+  background:var(--panel-2);
+  position:sticky; top:0;
+  white-space:nowrap;
+}
+tbody td{
+  padding:7px 10px;
+  border-bottom:1px solid var(--border-soft);
+  font-family:var(--mono);
+  color:var(--text);
+  white-space:nowrap;
+}
+tbody tr{cursor:pointer; transition:background .1s ease;}
+tbody tr:hover{background:var(--panel-2);}
+tbody tr.selected-row{background:var(--blue-soft); box-shadow:inset 2px 0 0 var(--cyan);}
+.status-badge{
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:.04em;
+  padding:2px 7px;
+  border-radius:10px;
+}
+.status-badge.active{color:var(--green); background:rgba(62,233,166,.12);}
+.status-badge.inactive{color:var(--text-faint); background:rgba(255,255,255,.04);}
+.hits{color:var(--green);}
+.misses{color:var(--red);}
+.scan-action{font-weight:600; letter-spacing:.03em;}
+.scan-action.fine{color:var(--cyan);}
+.scan-action.coarse{color:var(--amber);}
+.empty-state{
+  padding:40px 20px;
+  text-align:center;
+  color:var(--text-faint);
+  font-size:12px;
+}
+
+.reasoning-panel{
+  border-left:1px solid var(--border-soft);
+  padding:14px;
+  font-size:12px;
+  color:var(--text-dim);
+  background:var(--panel-3);
+  min-height:300px;
+}
+.reasoning-empty{color:var(--text-faint); line-height:1.6;}
+.reasoning-title{
+  font-family:var(--mono);
+  color:var(--cyan);
+  font-size:11px;
+  letter-spacing:.08em;
+  margin:14px 0 8px;
+  padding-top:10px;
+  border-top:1px solid var(--border-soft);
+}
+.reasoning-title:first-child{border-top:none; padding-top:0; margin-top:0;}
+.reasoning-stats{display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; margin-bottom:2px;}
+.reasoning-stats div{font-size:11px; color:var(--text-dim);}
+.reasoning-stats b{display:block; color:var(--cyan); font-family:var(--mono); font-size:13px; font-weight:600;}
+.reasoning-bullets{margin:0; padding-left:16px; line-height:1.7; color:var(--text);}
+.reasoning-bullets li{margin-bottom:4px;}
+.legend-list{list-style:none; margin:0; padding:0; line-height:1.8;}
+.legend-list li{display:flex; gap:6px; align-items:flex-start;}
+.legend-dot{width:7px; height:7px; border-radius:50%; margin-top:5px; flex:none;}
+.close-selection{
+  background:none; border:none; color:var(--text-faint); font-size:11px; cursor:pointer; text-decoration:underline; padding:0; margin-top:14px;
+}
+.close-selection:hover{color:var(--cyan);}
+
+/* Adaptive strategy bars */
+.band-alloc{padding:16px;}
+.band-row{display:grid; grid-template-columns:110px 1fr 46px; align-items:center; gap:10px; margin-bottom:9px;}
+.band-row .band-name{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+.band-track{height:8px; background:var(--bg-deep); border:1px solid var(--border-soft); border-radius:5px; overflow:hidden;}
+.band-fill{height:100%; background:linear-gradient(90deg, var(--blue), var(--cyan)); border-radius:5px; transition:width .3s ease;}
+.band-pct{font-family:var(--mono); font-size:11px; color:var(--cyan); text-align:right;}
+.strategy-note{padding:0 16px 16px; color:var(--text-dim); font-size:12px; line-height:1.6;}
+.strategy-note b{color:var(--text);}
+
+/* ---------- Generic dashboard bits ---------- */
+.stat-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px;}
+@media (max-width:900px){.stat-grid{grid-template-columns:repeat(2,1fr);}}
+.stat-card{background:var(--panel); border:1px solid var(--border-soft); border-radius:var(--radius); padding:14px;}
+.stat-card .k{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim);}
+.stat-card .v{font-family:var(--mono); font-size:24px; color:var(--cyan); margin-top:6px; font-weight:600;}
+.stat-card .d{font-size:11px; color:var(--text-faint); margin-top:4px;}
+
+.dash-grid{display:grid; grid-template-columns:1.4fr 1fr; gap:14px;}
+@media (max-width:980px){.dash-grid{grid-template-columns:1fr;}}
+.mini-chart-wrap{padding:12px;}
+#dashMiniCanvas{height:180px;}
+.activity-feed{list-style:none; margin:0; padding:0;}
+.activity-feed li{
+  padding:9px 12px;
+  border-bottom:1px solid var(--border-soft);
+  font-size:11.5px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  color:var(--text-dim);
+}
+.activity-feed li:last-child{border-bottom:none;}
+.activity-feed b{color:var(--text); font-family:var(--mono); font-weight:600;}
+.activity-feed .tag{
+  font-family:var(--mono); font-size:9.5px; padding:1px 6px; border-radius:8px; height:fit-content;
+}
+.tag-det{color:var(--cyan); background:rgba(63,232,239,.1);}
+.tag-anom{color:var(--red); background:rgba(255,85,119,.1);}
+
+/* ---------- Toggle switch ---------- */
+.toggle{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+  user-select:none;
+}
+.toggle input{position:absolute; opacity:0; width:1px; height:1px;}
+.toggle .track{
+  width:38px; height:20px;
+  border-radius:12px;
+  background:var(--bg-deep);
+  border:1px solid var(--border);
+  position:relative;
+  transition:background .15s ease, border-color .15s ease;
+  flex:none;
+}
+.toggle .thumb{
+  position:absolute; top:2px; left:2px;
+  width:14px; height:14px; border-radius:50%;
+  background:var(--text-dim);
+  transition:transform .18s ease, background .18s ease;
+}
+.toggle input:checked + .track{background:var(--cyan-dim); border-color:var(--cyan);}
+.toggle input:checked + .track .thumb{transform:translateX(18px); background:var(--cyan); box-shadow:0 0 8px rgba(63,232,239,.7);}
+.toggle .label{font-size:12.5px; color:var(--text);}
+
+/* ---------- SIH page ---------- */
+.scenario-jump-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+@media (max-width:700px){.scenario-jump-grid{grid-template-columns:1fr 1fr;}}
+.scenario-card{
+  background:var(--panel-2); border:1px solid var(--border-soft); border-radius:var(--radius);
+  padding:12px; cursor:pointer; text-align:left;
+}
+.scenario-card:hover{border-color:var(--cyan-soft);}
+.scenario-card.active{border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan) inset;}
+.scenario-card .t{font-family:var(--mono); font-size:12px; color:var(--text); font-weight:600;}
+.scenario-card .d{font-size:11px; color:var(--text-dim); margin-top:4px; line-height:1.5;}
+.caption-banner{
+  font-family:var(--mono);
+  font-size:12.5px;
+  color:var(--cyan);
+  background:var(--panel-3);
+  border:1px solid var(--cyan-dim);
+  padding:10px 14px;
+  border-radius:var(--radius);
+  margin:14px 0;
+}
+
+/* ---------- Detections page ---------- */
+.filter-row{display:flex; gap:10px; flex-wrap:wrap; padding:12px; border-bottom:1px solid var(--border-soft);}
+.filter-row input, .filter-row select{
+  background:var(--bg-deep); border:1px solid var(--border); color:var(--text);
+  padding:7px 10px; border-radius:var(--radius); font-family:var(--mono); font-size:11.5px;
+}
+.filter-row input{flex:1; min-width:160px;}
+
+/* ---------- Anomalies page ---------- */
+.anomaly-card{
+  display:flex; justify-content:space-between; align-items:flex-start; gap:14px;
+  padding:13px 14px; border-bottom:1px solid var(--border-soft);
+}
+.anomaly-card:last-child{border-bottom:none;}
+.anomaly-card.ack{opacity:.45;}
+.anomaly-main .sev{
+  font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:.06em;
+  padding:2px 7px; border-radius:9px; margin-right:8px;
+}
+.sev-low{color:var(--cyan); background:rgba(63,232,239,.12);}
+.sev-med{color:var(--amber); background:rgba(255,207,107,.12);}
+.sev-high{color:var(--red); background:rgba(255,85,119,.12);}
+.anomaly-main .t{font-family:var(--mono); font-size:12.5px; color:var(--text); margin-top:6px;}
+.anomaly-main .d{font-size:11.5px; color:var(--text-dim); margin-top:4px; line-height:1.5;}
+.anomaly-main .ts{font-size:10px; color:var(--text-faint); margin-top:6px; font-family:var(--mono);}
+
+/* ---------- Strategy engine page ---------- */
+.strategy-grid{display:grid; grid-template-columns:1fr 320px; gap:14px;}
+@media (max-width:980px){.strategy-grid{grid-template-columns:1fr;}}
+.config-row{padding:14px; border-bottom:1px solid var(--border-soft);}
+.config-row:last-child{border-bottom:none;}
+.config-row .field-label{margin-bottom:8px;}
+.range-readout{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
+
+footer.app-footer{
+  margin-top:26px;
+  padding-top:14px;
+  border-top:1px solid var(--border-soft);
+  color:var(--text-faint);
+  font-size:10.5px;
+  font-family:var(--mono);
+  display:flex;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+/* mobile sidebar */
+@media (max-width:760px){
+  #app{grid-template-columns:1fr;}
+  .sidebar{
+    position:static; height:auto; flex-direction:row; align-items:center;
+    overflow-x:auto; padding:12px; gap:14px;
+  }
+  .nav{flex-direction:row;}
+  .nav-item{border-left:none; border-bottom:2px solid transparent; white-space:nowrap;}
+  .nav-item[aria-current="page"]{border-left:none; border-bottom-color:var(--cyan);}
+  .sidebar-footer{display:none;}
+  .content{padding:14px;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 2 L28 26 L16 20 L4 26 Z" stroke="#3fe8ef" stroke-width="1.6" stroke-linejoin="round" fill="rgba(63,232,239,0.08)"/>
+          <path d="M16 20 L16 30" stroke="#2f7bff" stroke-width="1.6"/>
+        </svg>
+      </div>
+      <div class="brand-name">WAVEFORGE<small>RF INTELLIGENCE</small></div>
+    </div>
+
+    <nav class="nav" aria-label="Primary">
+      <button class="nav-item" data-page="dashboard"><span class="dot"></span>Dashboard</button>
+      <button class="nav-item" data-page="sih"><span class="dot"></span>SIH Demo Mode</button>
+      <button class="nav-item" data-page="spectrum" aria-current="page"><span class="dot"></span>Spectrum Monitor</button>
+      <button class="nav-item" data-page="detections"><span class="dot"></span>Detections</button>
+      <button class="nav-item" data-page="anomalies"><span class="dot"></span>Anomalies</button>
+      <button class="nav-item" data-page="strategy"><span class="dot"></span>Strategy Engine</button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div id="sideStatus" class="status-pill stopped"><span class="dot"></span>ENGINE STOPPED</div>
+      <div style="margin-top:10px;">TICK <span id="sideTick">0</span></div>
+      <div>SCENARIO <span id="sideScenario">DYNAMIC</span></div>
+    </div>
+  </aside>
+
+  <main class="content">
+
+    <!-- ================= DASHBOARD ================= -->
+    <section class="page" id="page-dashboard">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">DASHBOARD</h1>
+          <p class="page-sub">Fleet-wide summary of the simulated RF environment.</p>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="k">Tracked Emitters</div><div class="v" id="statTracked">0</div><div class="d">unique IDs seen this session</div></div>
+        <div class="stat-card"><div class="k">Active Now</div><div class="v" id="statActive">0</div><div class="d">above detection threshold</div></div>
+        <div class="stat-card"><div class="k">Detections Logged</div><div class="v" id="statDetections">0</div><div class="d">since last reset</div></div>
+        <div class="stat-card"><div class="k">Anomalies Flagged</div><div class="v" id="statAnomalies">0</div><div class="d">unacknowledged: <span id="statAnomaliesUnack">0</span></div></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="panel">
+          <div class="panel-title">LIVE PSD SNAPSHOT<span id="dashBadge" class="status-pill stopped"><span class="dot"></span>STOPPED</span></div>
+          <div class="mini-chart-wrap"><canvas id="dashMiniCanvas" width="900" height="180"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">RECENT ACTIVITY</div>
+          <ul class="activity-feed" id="activityFeed">
+            <li style="color:var(--text-faint);">No activity yet — start the engine on Spectrum Monitor.</li>
+          </ul>
+        </div>
+      </div>
+
+      <footer class="app-footer">
+        <span>WAVEFORGE simulated telemetry — all signals synthetic</span>
+        <span id="dashClock">t+0s</span>
+      </footer>
+    </section>
+
+    <!-- ================= SIH DEMO MODE ================= -->
+    <section class="page" id="page-sih">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">SIH DEMO MODE</h1>
+          <p class="page-sub">Guided walkthrough — auto-cycles scenario presets to narrate the detection story.</p>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-title">AUTOPLAY STORY MODE</div>
+        <div style="padding:14px;">
+          <label class="toggle">
+            <input type="checkbox" id="demoAutoplayToggle">
+            <span class="track"><span class="thumb"></span></span>
+            <span class="label">Cycle through every scenario automatically (12s each)</span>
+          </label>
+          <div class="caption-banner" id="demoCaption">Dynamic Spectrum — emitters activate and fade unpredictably across the band.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">JUMP TO SCENARIO</div>
+        <div style="padding:14px;">
+          <div class="scenario-jump-grid" id="scenarioJumpGrid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SPECTRUM MONITOR ================= -->
+    <section class="page active" id="page-spectrum">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">SPECTRUM MONITOR</h1>
+          <p class="page-sub">Simulated wideband receiver with adaptive detection &amp; tracking.</p>
+        </div>
+        <div id="mainStatus" class="status-pill stopped"><span class="dot"></span>ENGINE STOPPED</div>
+      </div>
+
+      <div class="monitor-grid">
+        <!-- CONTROL PANEL -->
+        <div class="panel control-panel">
+          <div class="panel-title">RF MONITOR CONTROL</div>
+
+          <div class="field-group">
+            <p class="field-label">Receiver / Data Source</p>
+            <select class="control-input" id="dataSource">
+              <option>Local Simulation</option>
+              <option disabled>Live Receiver (unavailable in demo)</option>
+            </select>
+            <div style="margin-top:8px;">
+              <div class="info-row"><span>Seed:</span><b>42</b></div>
+              <div class="info-row"><span>Freq Range:</span><b id="infoFreqRange">100.0 – 1000.0 MHz</b></div>
+              <div class="info-row"><span>Emitter Count:</span><b id="infoEmitterCount">0 emitters</b></div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <p class="field-label">Scenario Preset</p>
+            <select class="control-input" id="scenarioSelect">
+              <option value="quiet">Quiet Spectrum</option>
+              <option value="busy">Busy Spectrum</option>
+              <option value="sudden">Sudden Activity</option>
+              <option value="dynamic" selected>Dynamic Spectrum</option>
+              <option value="highnoise">High Noise</option>
+              <option value="anomalous">Anomalous Activity</option>
+            </select>
+
+            <p class="field-label" style="margin-top:14px;">Engine Playback State</p>
+            <div class="btn-row">
+              <button class="btn" id="btnStart">START</button>
+              <button class="btn" id="btnPause">PAUSE</button>
+            </div>
+            <div class="btn-row" style="margin-bottom:2px;">
+              <button class="btn" id="btnStop">STOP</button>
+              <button class="btn" id="btnReset">RESET</button>
+            </div>
+
+            <p class="field-label" style="margin-top:14px;">Simulation Speed</p>
+            <div class="stepper">
+              <input type="text" id="speedDisplay" value="1.00x" readonly>
+              <div class="stepper-btns">
+                <button id="speedUp" aria-label="Increase simulation speed">▲</button>
+                <button id="speedDown" aria-label="Decrease simulation speed">▼</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <p class="field-label">Start Frequency (MHz)</p>
+            <div class="stepper">
+              <input type="text" id="startFreqDisplay" value="100.00">
+              <div class="stepper-btns">
+                <button data-target="startFreq" data-dir="1">▲</button>
+                <button data-target="startFreq" data-dir="-1">▼</button>
+              </div>
+            </div>
+            <p class="field-label" style="margin-top:10px;">Stop Frequency (MHz)</p>
+            <div class="stepper">
+              <input type="text" id="stopFreqDisplay" value="1000.00">
+              <div class="stepper-btns">
+                <button data-target="stopFreq" data-dir="1">▲</button>
+                <button data-target="stopFreq" data-dir="-1">▼</button>
+              </div>
+            </div>
+
+            <p class="field-label" style="margin-top:12px;">Detection Threshold (dBm)</p>
+            <div class="slider-wrap">
+              <input type="range" id="thresholdSlider" min="-120" max="-20" value="-77" step="1">
+              <div class="slider-value" id="thresholdValue">-77.0 dBm</div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <p class="field-label">Power Scale (dBm Range)</p>
+            <div class="two-col">
+              <div>
+                <div class="stepper">
+                  <input type="text" id="powerMinDisplay" value="-120.00">
+                  <div class="stepper-btns">
+                    <button data-target="powerMin" data-dir="1">▲</button>
+                    <button data-target="powerMin" data-dir="-1">▼</button>
+                  </div>
+                </div>
+                <div style="font-size:9.5px;color:var(--text-faint);margin-top:3px;">Min</div>
+              </div>
+              <div>
+                <div class="stepper">
+                  <input type="text" id="powerMaxDisplay" value="-20.00">
+                  <div class="stepper-btns">
+                    <button data-target="powerMax" data-dir="1">▲</button>
+                    <button data-target="powerMax" data-dir="-1">▼</button>
+                  </div>
+                </div>
+                <div style="font-size:9.5px;color:var(--text-faint);margin-top:3px;">Max</div>
+              </div>
+            </div>
+
+            <button class="btn btn-full" id="btnPauseViz">PAUSE VISUALIZATION</button>
+            <button class="btn btn-full" id="btnResetView">RESET PLOT VIEW</button>
+          </div>
+
+          <button class="diagnostics-toggle" id="diagToggle">SYSTEM DIAGNOSTICS <span id="diagChevron">▾</span></button>
+          <div class="diagnostics-body" id="diagBody">
+            <div class="diag-grid">
+              <div class="diag-cell"><div class="k">CPU Load</div><div class="v" id="diagCpu">4%</div></div>
+              <div class="diag-cell"><div class="k">Buffer</div><div class="v" id="diagBuffer">0%</div></div>
+              <div class="diag-cell"><div class="k">Uptime</div><div class="v" id="diagUptime">0s</div></div>
+              <div class="diag-cell"><div class="k">Ticks</div><div class="v" id="diagTicks">0</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CHARTS + TABS -->
+        <div class="chart-col">
+          <div class="chart-block">
+            <div class="chart-head"><span class="chart-ylabel">Power Spectral Density (dBm)</span></div>
+            <canvas id="spectrumCanvas" width="1000" height="230"></canvas>
+            <div class="chart-caption" id="chartCaption"></div>
+          </div>
+          <div class="chart-block">
+            <div class="chart-head"><span class="chart-ylabel">STFT History (rows = time)</span></div>
+            <canvas id="waterfallCanvas" width="1000" height="130"></canvas>
+            <div class="xaxis-label">Frequency (MHz)</div>
+          </div>
+
+          <div class="tabs-row" role="tablist">
+            <button class="tab-btn" role="tab" aria-selected="true" data-tab="registry">STATEFUL EMITTER REGISTRY</button>
+            <button class="tab-btn" role="tab" aria-selected="false" data-tab="scheduler">PRIORITY SCAN SCHEDULER</button>
+            <button class="tab-btn" role="tab" aria-selected="false" data-tab="strategy">ADAPTIVE SCAN STRATEGY</button>
+            <button class="tab-btn" role="tab" aria-selected="false" data-tab="heatmap">FREQ × TIME HEATMAP</button>
+            <button class="tab-btn" role="tab" aria-selected="false" data-tab="learning">LEARNING CURVE</button>
+          </div>
+
+          <div class="tabbed-area">
+            <div class="tab-panels">
+              <div class="tab-panel active" data-panel="registry" style="overflow-x:auto;">
+                <table>
+                  <thead><tr>
+                    <th>ID</th><th>Frequency (MHz)</th><th>Bandwidth (kHz)</th><th>Peak Power (dBm)</th>
+                    <th>Signal Type</th><th>Confidence (%)</th><th>Status</th><th>Hits / Misses</th>
+                  </tr></thead>
+                  <tbody id="registryBody"></tbody>
+                </table>
+                <div class="empty-state" id="registryEmpty">No emitters tracked yet. Press START to begin the simulation.</div>
+              </div>
+
+              <div class="tab-panel" data-panel="scheduler" style="overflow-x:auto;">
+                <table>
+                  <thead><tr>
+                    <th>Rank</th><th>Frequency (MHz)</th><th>Priority Score</th><th>Scan Action</th><th>Signal Type</th><th>Top Rationale</th>
+                  </tr></thead>
+                  <tbody id="schedulerBody"></tbody>
+                </table>
+                <div class="empty-state" id="schedulerEmpty">No scan tasks queued yet.</div>
+              </div>
+
+              <div class="tab-panel" data-panel="strategy">
+                <div class="band-alloc" id="strategyBands"></div>
+                <div class="strategy-note">Allocation blends <b>exploit</b> (focus scan time on high-confidence bands) with <b>explore</b> (spread scan time evenly to catch new activity). Adjust the balance on the <b>Strategy Engine</b> page — currently <b id="strategyRatioNote">50% explore / 50% exploit</b>.</div>
+              </div>
+
+              <div class="tab-panel" data-panel="heatmap">
+                <div style="padding:10px 12px 0;">
+                  <canvas id="heatmapCanvas" width="1000" height="260"></canvas>
+                  <div class="xaxis-label">Frequency (MHz) — accumulated occupancy over time</div>
+                </div>
+              </div>
+
+              <div class="tab-panel" data-panel="learning">
+                <div style="padding:10px 12px 0;">
+                  <canvas id="learningCanvas" width="1000" height="260"></canvas>
+                  <div class="xaxis-label">Simulation ticks — mean tracking confidence trending as the model accumulates hits</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="reasoning-panel" id="reasoningPanel">
+              <div class="reasoning-empty">Select an active signal track to view ML reasoning.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= DETECTIONS ================= -->
+    <section class="page" id="page-detections">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">DETECTIONS</h1>
+          <p class="page-sub">Full event log of signals crossing the detection threshold.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="filter-row">
+          <input type="text" id="detSearch" placeholder="Search by ID or frequency…">
+          <select id="detTypeFilter">
+            <option value="">All signal types</option>
+            <option>Multi-Tone</option>
+            <option>Chirp</option>
+            <option>FM Burst</option>
+            <option>Pulsed</option>
+            <option>Spread Spectrum</option>
+          </select>
+        </div>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead><tr><th>Tick</th><th>ID</th><th>Frequency (MHz)</th><th>Power (dBm)</th><th>Signal Type</th><th>Threshold @ (dBm)</th></tr></thead>
+            <tbody id="detectionsBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="detectionsEmpty">No detections logged yet. Start the engine on Spectrum Monitor.</div>
+      </div>
+    </section>
+
+    <!-- ================= ANOMALIES ================= -->
+    <section class="page" id="page-anomalies">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">ANOMALIES</h1>
+          <p class="page-sub">Wideband bursts and irregular occupancy patterns flagged by the anomaly detector.</p>
+        </div>
+      </div>
+      <div class="panel" id="anomaliesList">
+        <div class="empty-state" id="anomaliesEmpty">No anomalies flagged yet. Try the "Anomalous Activity" scenario preset.</div>
+      </div>
+    </section>
+
+    <!-- ================= STRATEGY ENGINE ================= -->
+    <section class="page" id="page-strategy">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">STRATEGY ENGINE</h1>
+          <p class="page-sub">Tune how scan time is allocated across the band.</p>
+        </div>
+      </div>
+
+      <div class="strategy-grid">
+        <div class="panel">
+          <div class="panel-title">BAND ALLOCATION</div>
+          <div class="band-alloc" id="strategyBandsBig"></div>
+          <div class="strategy-note">Recomputed every tick from live confidence &amp; recency across the <span id="bandCountNote">8</span> sub-bands.</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">CONFIGURATION</div>
+          <div class="config-row">
+            <p class="field-label">Explore ⟷ Exploit</p>
+            <input type="range" id="exploreSlider" min="0" max="100" value="50" step="1">
+            <div class="range-readout"><span>Exploit (focus)</span><span id="exploreValue">50 / 50</span><span>Explore (spread)</span></div>
+          </div>
+          <div class="config-row">
+            <p class="field-label">Rescan Interval (ticks)</p>
+            <div class="stepper">
+              <input type="text" id="rescanDisplay" value="5">
+              <div class="stepper-btns">
+                <button data-target="rescan" data-dir="1">▲</button>
+                <button data-target="rescan" data-dir="-1">▼</button>
+              </div>
+            </div>
+          </div>
+          <div class="config-row" style="color:var(--text-dim); font-size:12px; line-height:1.6;">
+            A lower rescan interval keeps the priority queue fresher at the cost of dwell time on any single emitter. Currently full-band rescans occur every <b id="rescanNote" style="color:var(--text);">5</b> ticks.
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ===================== CONFIG ===================== */
+const CFG = {
+  gridPoints: 260,
+  waterfallRows: 110,
+  heatmapRows: 170,
+  learningMax: 220,
+  maxDetections: 200,
+  maxAnomalies: 80,
+  bandCount: 8,
+  tickBaseMs: 450,
+};
+const SIGNAL_TYPES = ['Multi-Tone','Chirp','FM Burst','Pulsed','Spread Spectrum'];
+const RATIONALE_POOL = [
+  'New activity (high confidence)',
+  'Recurring emitter — reinforce track',
+  'Signal drift detected — refine scan',
+  'Low SNR — needs coarse rescan',
+  'Stable carrier — maintain lock',
+  'Possible harmonic — verify bandwidth',
+];
+const SCENARIOS = {
+  quiet:      {label:'Quiet Spectrum',    caption:'Quiet spectrum — a handful of stable carriers, low noise floor.', count:[3,5],   noiseFloor:-97, noiseVar:2.0, mode:'stable',  anomalyChance:0},
+  busy:       {label:'Busy Spectrum',     caption:'Busy spectrum — many overlapping emitters near the noise floor.', count:[12,16], noiseFloor:-90, noiseVar:3.0, mode:'stable',  anomalyChance:0.01},
+  sudden:     {label:'Sudden Activity',   caption:'Sudden activity — a quiet band erupts into a burst of new emitters.', count:[2,4], noiseFloor:-93, noiseVar:2.2, mode:'burst',   anomalyChance:0.02},
+  dynamic:    {label:'Dynamic Spectrum',  caption:'Dynamic spectrum — emitters activate and fade unpredictably across the band.', count:[6,10], noiseFloor:-90, noiseVar:3.0, mode:'toggle', anomalyChance:0.015},
+  highnoise:  {label:'High Noise',        caption:'High noise — elevated noise floor makes weak carriers hard to separate.', count:[6,9], noiseFloor:-68, noiseVar:6.0, mode:'stable', anomalyChance:0.01},
+  anomalous:  {label:'Anomalous Activity',caption:'Anomalous activity — expect wideband bursts flagged by the anomaly detector.', count:[5,9], noiseFloor:-90, noiseVar:3.2, mode:'toggle', anomalyChance:0.11},
+};
+
+/* ===================== PRNG (seeded) ===================== */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=(Math.imul(31,h)+s.charCodeAt(i))|0; } return h; }
+function gaussian(rng){
+  let u=0,v=0;
+  while(u===0) u = rng();
+  while(v===0) v = rng();
+  return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+
+/* ===================== STATE ===================== */
+const S = {
+  page:'spectrum',
+  engine:'stopped', // running | paused | stopped
+  scenarioKey:'dynamic',
+  simSpeed:1,
+  speedSteps:[0.25,0.5,1,1.5,2,3,4],
+  startFreq:100, stopFreq:1000,
+  threshold:-77,
+  powerMin:-120, powerMax:-20,
+  vizPaused:false,
+  tick:0,
+  startedAt:null,
+  intervalHandle:null,
+  emitterPool:[],
+  registry:new Map(),   // id -> registry entry
+  detections:[],
+  anomalies:[],
+  learningCurve:[],
+  selected:null,        // {type:'emitter'|'task', id}
+  nextId:1,
+  demoAutoplay:false,
+  demoHandle:null,
+  demoOrder:['quiet','busy','sudden','dynamic','highnoise','anomalous'],
+  demoIdx:3,
+  exploreExploit:50,
+  rescanInterval:5,
+  waterfallBuf:null, waterfallCtx:null,
+  heatmapBuf:null, heatmapCtx:null,
+  lastSpectrum:null,
+  bandAlloc:null,
+};
+
+/* ===================== DOM refs ===================== */
+const $ = (id)=>document.getElementById(id);
+const specCanvas = $('spectrumCanvas'); const specCtx = specCanvas.getContext('2d');
+const wfCanvas = $('waterfallCanvas'); const wfCtx = wfCanvas.getContext('2d');
+const hmCanvas = $('heatmapCanvas'); const hmCtx = hmCanvas.getContext('2d');
+const lcCanvas = $('learningCanvas'); const lcCtx = lcCanvas.getContext('2d');
+const dashCanvas = $('dashMiniCanvas'); const dashCtx = dashCanvas.getContext('2d');
+
+/* ===================== Emitter pool generation ===================== */
+function genEmitterPool(scenarioKey){
+  const sc = SCENARIOS[scenarioKey];
+  const rng = mulberry32((42 ^ hashStr(scenarioKey)) >>> 0);
+  const countMin = sc.count[0], countMax = sc.count[1];
+  const n = Math.floor(countMin + rng()*(countMax-countMin+1));
+  const pool = [];
+  const span = S.stopFreq - S.startFreq;
+  for(let i=0;i<n;i++){
+    const freq = S.startFreq + span*(0.06 + 0.88*rng());
+    const bw = 2000 + rng()*4200;
+    const basePower = -76 + rng()*24; // -76..-52
+    const type = SIGNAL_TYPES[Math.floor(rng()*SIGNAL_TYPES.length)];
+    const duty = sc.mode==='stable' ? (0.72+rng()*0.26) : (0.35+rng()*0.5);
+    pool.push({
+      poolId:i+1,
+      freq, bw, basePower, type,
+      duty,
+      active:sc.mode==='stable',
+      driftStd: 0.15+rng()*0.6,
+      nextToggleTick: Math.floor(rng()*10)+4,
+      regId:null, // assigned once first detected
+    });
+  }
+  return pool;
+}
+
+function freqIndex(freq){
+  const t = (freq - S.startFreq) / (S.stopFreq - S.startFreq);
+  return Math.max(0, Math.min(CFG.gridPoints-1, Math.round(t*(CFG.gridPoints-1))));
+}
+
+/* ===================== Simulation core ===================== */
+let noiseState = null;
+function initNoise(){
+  noiseState = new Float32Array(CFG.gridPoints).fill(0);
+}
+
+function updateEmitterActivity(rngTick){
+  const sc = SCENARIOS[S.scenarioKey];
+  for(const e of S.emitterPool){
+    // frequency drift (random walk)
+    e.freq += gaussian(Math.random) * e.driftStd * 0.15;
+    if(e.freq < S.startFreq+2) e.freq = S.startFreq+2;
+    if(e.freq > S.stopFreq-2) e.freq = S.stopFreq-2;
+
+    if(sc.mode==='stable'){
+      e.active = Math.random() < e.duty;
+    } else if(sc.mode==='toggle'){
+      e.nextToggleTick--;
+      if(e.nextToggleTick<=0){
+        e.active = Math.random() < e.duty;
+        e.nextToggleTick = 3 + Math.floor(Math.random()*8);
+      }
+    } else if(sc.mode==='burst'){
+      // mostly quiet, periodic bursts turning many on together
+      const burstPhase = (S.tick % 26);
+      if(burstPhase < 9){ e.active = Math.random() < 0.85; }
+      else { e.active = Math.random() < 0.12; }
+    }
+  }
+  // occasional anomaly burst: spawn a temporary wideband emitter
+  if(Math.random() < sc.anomalyChance && S.engine==='running'){
+    spawnAnomaly();
+  }
+}
+
+function spawnAnomaly(){
+  const span = S.stopFreq - S.startFreq;
+  const freq = S.startFreq + span*(0.08+Math.random()*0.84);
+  const bw = 15000 + Math.random()*35000;
+  const power = -55 + Math.random()*15;
+  const sevRoll = Math.random();
+  const sev = sevRoll>0.82 ? 'high' : (sevRoll>0.5 ? 'med' : 'low');
+  const record = {
+    id:'AX-'+(S.anomalies.length+1),
+    tick:S.tick,
+    freq, bw, power, sev,
+    desc:`Wideband occupancy spike (${bw.toFixed(0)} kHz) detected near ${freq.toFixed(1)} MHz — ${power.toFixed(1)} dBm peak.`,
+    ack:false,
+    t:Date.now(),
+  };
+  S.anomalies.unshift(record);
+  if(S.anomalies.length>CFG.maxAnomalies) S.anomalies.pop();
+  // inject temporary emitter representing the anomaly so it shows on the chart briefly
+  S.emitterPool.push({
+    poolId:'anom-'+record.id, freq, bw, basePower:power, type:'Anomaly',
+    duty:1, active:true, driftStd:0.4, nextToggleTick:4, regId:null, anomalyLife:5,
+  });
+  renderAnomaliesIfVisible();
+  updateStatCards();
+}
+
+function computeSpectrum(){
+  const sc = SCENARIOS[S.scenarioKey];
+  if(!noiseState) initNoise();
+  const n = CFG.gridPoints;
+  const out = new Float32Array(n);
+  const span = S.stopFreq - S.startFreq;
+
+  // smooth flicker noise: blend previous with new random walk
+  for(let i=0;i<n;i++){
+    const drift = (Math.random()-0.5) * sc.noiseVar;
+    noiseState[i] = noiseState[i]*0.75 + drift*0.9;
+    out[i] = sc.noiseFloor + noiseState[i];
+  }
+
+  // add emitter contributions (max-combine, dB domain approximation)
+  for(const e of S.emitterPool){
+    if(!e.active) continue;
+    const sigmaFreq = Math.max(0.6, (e.bw/1000)/2.2); // MHz
+    const centerIdx = freqIndex(e.freq);
+    const spanIdx = Math.max(2, Math.round((sigmaFreq*4 / span) * (n-1)));
+    const lo = Math.max(0, centerIdx-spanIdx), hi = Math.min(n-1, centerIdx+spanIdx);
+    for(let i=lo;i<=hi;i++){
+      const fMHz = S.startFreq + (i/(n-1))*span;
+      const d = (fMHz - e.freq);
+      const shape = Math.exp(-(d*d)/(2*sigmaFreq*sigmaFreq));
+      const val = e.basePower + 20*Math.log10(Math.max(shape,0.0008));
+      if(val > out[i]) out[i] = val;
+    }
+  }
+  // clamp
+  for(let i=0;i<n;i++){ if(out[i] < -130) out[i] = -130 + Math.random()*2; }
+  return out;
+}
+
+/* ===================== Registry / detections ===================== */
+function processDetections(spectrum){
+  const activeDetected = [];
+  // cleanup expired anomaly pseudo-emitters
+  S.emitterPool = S.emitterPool.filter(e=>{
+    if(e.anomalyLife!==undefined){ e.anomalyLife--; return e.anomalyLife>0; }
+    return true;
+  });
+
+  for(const e of S.emitterPool){
+    const idx = freqIndex(e.freq);
+    const val = spectrum[idx];
+    const detected = e.active && val >= S.threshold && e.freq>S.startFreq && e.freq<S.stopFreq;
+
+    if(e.regId===null && detected){
+      e.regId = S.nextId++;
+      S.registry.set(e.regId, {
+        id:e.regId, freq:e.freq, bw:e.bw, power:val, type:e.type,
+        hits:0, misses:0, confidence:0, status:'ACTIVE',
+        bornTick:S.tick, lastSeenTick:S.tick, ref:e,
+      });
+    }
+    if(e.regId!==null){
+      const r = S.registry.get(e.regId);
+      if(!r) continue;
+      r.freq = e.freq; r.bw = e.bw; r.type = e.type; r.ref = e;
+      if(detected){
+        r.hits++; r.power = val; r.status='ACTIVE'; r.lastSeenTick = S.tick;
+        activeDetected.push(r);
+        S.detections.push({tick:S.tick, id:r.id, freq:e.freq, power:val, type:e.type, threshold:S.threshold});
+        if(S.detections.length>CFG.maxDetections) S.detections.shift();
+      } else {
+        r.misses++; r.status='INACTIVE';
+      }
+      const total = r.hits+r.misses;
+      r.confidence = total>0 ? Math.round(Math.min(96, (r.hits/total)*100 * (0.55+0.45*Math.min(1,r.hits/30)))) : 0;
+    }
+  }
+  return activeDetected;
+}
+
+function computePriority(){
+  const rows = [];
+  S.registry.forEach(r=>{
+    const recency = S.tick - r.lastSeenTick;
+    const recencyScore = Math.max(0, 100 - recency*8);
+    const powerNorm = Math.max(0, Math.min(100, (r.power - S.powerMin) / (S.powerMax - S.powerMin) * 100));
+    const score = Math.round(r.confidence*0.45 + recencyScore*0.3 + powerNorm*0.25);
+    rows.push({
+      id:r.id, freq:r.freq, score, type:r.type,
+      action: score>=48 ? 'FINE SCAN' : 'COARSE',
+      rationale: RATIONALE_POOL[Math.abs(hashStr('r'+r.id+S.tick))%RATIONALE_POOL.length + (score>=48?0:0)] ,
+    });
+  });
+  rows.sort((a,b)=>b.score-a.score);
+  return rows.slice(0,10);
+}
+
+/* ===================== Band allocation (Adaptive Scan Strategy) ===================== */
+function computeBandAllocation(){
+  const n = CFG.bandCount;
+  const span = S.stopFreq - S.startFreq;
+  const bandScore = new Array(n).fill(0.0001);
+  S.registry.forEach(r=>{
+    if(r.status!=='ACTIVE') return;
+    let b = Math.floor(((r.freq-S.startFreq)/span) * n);
+    b = Math.max(0, Math.min(n-1, b));
+    bandScore[b] += (r.confidence+5);
+  });
+  const totalScore = bandScore.reduce((a,b)=>a+b,0);
+  const exploit = bandScore.map(v=>v/totalScore);
+  const explore = new Array(n).fill(1/n);
+  const w = S.exploreExploit/100; // 0 = pure exploit, 100 = pure explore
+  const blended = exploit.map((v,i)=> v*(1-w) + explore[i]*w);
+  const bs = blended.reduce((a,b)=>a+b,0);
+  return blended.map(v=> (v/bs)*100);
+}
+
+function renderBandAllocation(container){
+  const alloc = computeBandAllocation();
+  const n = CFG.bandCount;
+  const span = S.stopFreq - S.startFreq;
+  let html='';
+  for(let i=0;i<n;i++){
+    const lo = S.startFreq + span*(i/n);
+    const hi = S.startFreq + span*((i+1)/n);
+    const pct = alloc[i];
+    html += `<div class="band-row">
+      <div class="band-name">${lo.toFixed(0)}–${hi.toFixed(0)} MHz</div>
+      <div class="band-track"><div class="band-fill" style="width:${pct.toFixed(1)}%;"></div></div>
+      <div class="band-pct">${pct.toFixed(1)}%</div>
+    </div>`;
+  }
+  container.innerHTML = html;
+}
+
+/* ===================== Canvas: spectrum ===================== */
+function drawSpectrum(spectrum){
+  const w = specCanvas.width, h = specCanvas.height;
+  const ctx = specCtx;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#050c13';
+  ctx.fillRect(0,0,w,h);
+
+  const padL=34, padR=8, padT=6, padB=6;
+  const plotW = w-padL-padR, plotH = h-padT-padB;
+  const yFor = (dbm)=> padT + (1-( (dbm-S.powerMin)/(S.powerMax-S.powerMin) ))*plotH;
+  const xFor = (i)=> padL + (i/(CFG.gridPoints-1))*plotW;
+
+  // grid
+  ctx.strokeStyle = 'rgba(63,232,239,0.08)';
+  ctx.lineWidth=1;
+  ctx.font = '9px IBM Plex Mono, monospace';
+  ctx.fillStyle = '#6d93a0';
+  const ySteps=6;
+  for(let s=0;s<=ySteps;s++){
+    const dbm = S.powerMin + (S.powerMax-S.powerMin)*(s/ySteps);
+    const y = yFor(dbm);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.fillText(dbm.toFixed(0), 2, y+3);
+  }
+  const xSteps=8;
+  for(let s=0;s<=xSteps;s++){
+    const f = S.startFreq + (S.stopFreq-S.startFreq)*(s/xSteps);
+    const x = padL + plotW*(s/xSteps);
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,h-padB); ctx.stroke();
+    ctx.fillText(f.toFixed(0), x-10, h-1);
+  }
+
+  // threshold line
+  const ty = yFor(S.threshold);
+  ctx.strokeStyle = '#ff5577';
+  ctx.setLineDash([5,4]);
+  ctx.beginPath(); ctx.moveTo(padL,ty); ctx.lineTo(w-padR,ty); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // spectrum line
+  ctx.strokeStyle = '#3fe8ef';
+  ctx.lineWidth = 1.4;
+  ctx.shadowColor = 'rgba(63,232,239,0.5)';
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  for(let i=0;i<CFG.gridPoints;i++){
+    const x = xFor(i), y = yFor(Math.max(S.powerMin,Math.min(S.powerMax,spectrum[i])));
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // peak markers + labels for active tracked emitters above threshold
+  ctx.font = '9.5px IBM Plex Mono, monospace';
+  const seen = new Set();
+  S.registry.forEach(r=>{
+    if(r.status!=='ACTIVE') return;
+    if(r.freq<S.startFreq || r.freq>S.stopFreq) return;
+    const idx = freqIndex(r.freq);
+    const x = xFor(idx);
+    const y = yFor(Math.max(S.powerMin,Math.min(S.powerMax,r.power)));
+    if(x<padL || x>w-padR) return;
+    ctx.strokeStyle='rgba(255,85,119,0.55)';
+    ctx.setLineDash([2,3]);
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,h-padB); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#3fe8ef';
+    ctx.beginPath(); ctx.arc(x,y,2.4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#cfeaf0';
+    const label = `ID ${r.id}`;
+    const label2 = r.type;
+    if(x>padL+2 && x<w-padR-40){
+      ctx.fillText(label, x+4, y-14);
+      ctx.fillStyle='#6d93a0';
+      ctx.fillText(label2, x+4, y-4);
+    }
+  });
+}
+
+/* ===================== Canvas: waterfall ===================== */
+function powerToColor(dbm){
+  const t = Math.max(0, Math.min(1, (dbm - S.powerMin) / (S.powerMax - S.powerMin)));
+  // stops: black -> deep blue -> blue -> cyan -> near-white cyan
+  const stops = [
+    {p:0.00, c:[2,7,11]},
+    {p:0.32, c:[8,24,58]},
+    {p:0.55, c:[16,58,140]},
+    {p:0.78, c:[41,140,196]},
+    {p:1.00, c:[196,255,250]},
+  ];
+  let a=stops[0], b=stops[stops.length-1];
+  for(let i=0;i<stops.length-1;i++){
+    if(t>=stops[i].p && t<=stops[i+1].p){ a=stops[i]; b=stops[i+1]; break; }
+  }
+  const span = (b.p-a.p)||1;
+  const lt = (t-a.p)/span;
+  const r = Math.round(a.c[0]+(b.c[0]-a.c[0])*lt);
+  const g = Math.round(a.c[1]+(b.c[1]-a.c[1])*lt);
+  const bl = Math.round(a.c[2]+(b.c[2]-a.c[2])*lt);
+  return [r,g,bl];
+}
+
+function initHistoryBuffers(){
+  S.waterfallBuf = document.createElement('canvas');
+  S.waterfallBuf.width = CFG.gridPoints; S.waterfallBuf.height = CFG.waterfallRows;
+  S.waterfallCtx = S.waterfallBuf.getContext('2d');
+  S.waterfallCtx.fillStyle='#02070b'; S.waterfallCtx.fillRect(0,0,CFG.gridPoints,CFG.waterfallRows);
+
+  S.heatmapBuf = document.createElement('canvas');
+  S.heatmapBuf.width = CFG.gridPoints; S.heatmapBuf.height = CFG.heatmapRows;
+  S.heatmapCtx = S.heatmapBuf.getContext('2d');
+  S.heatmapCtx.fillStyle='#02070b'; S.heatmapCtx.fillRect(0,0,CFG.gridPoints,CFG.heatmapRows);
+}
+
+function pushHistoryRow(buf, ctx, rows, spectrum){
+  // shift existing content up by 1px, draw new row at bottom
+  const w = buf.width, h = buf.height;
+  const img = ctx.getImageData(0,1,w,h-1);
+  ctx.putImageData(img,0,0);
+  const rowData = ctx.createImageData(w,1);
+  for(let i=0;i<w;i++){
+    const [r,g,b] = powerToColor(spectrum[i]);
+    rowData.data[i*4+0]=r; rowData.data[i*4+1]=g; rowData.data[i*4+2]=b; rowData.data[i*4+3]=255;
+  }
+  ctx.putImageData(rowData,0,h-1);
+}
+
+function blitHistory(buf, targetCanvas){
+  const tctx = targetCanvas.getContext('2d');
+  tctx.imageSmoothingEnabled = false;
+  tctx.clearRect(0,0,targetCanvas.width, targetCanvas.height);
+  tctx.drawImage(buf, 0,0, buf.width, buf.height, 0,0, targetCanvas.width, targetCanvas.height);
+}
+
+/* ===================== Canvas: learning curve ===================== */
+function drawLearningCurve(){
+  const w=lcCanvas.width, h=lcCanvas.height;
+  const ctx=lcCtx;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#050c13'; ctx.fillRect(0,0,w,h);
+  const padL=34,padR=10,padT=10,padB=20;
+  const plotW=w-padL-padR, plotH=h-padT-padB;
+
+  ctx.strokeStyle='rgba(63,232,239,0.08)';
+  ctx.fillStyle='#6d93a0'; ctx.font='9px IBM Plex Mono, monospace';
+  for(let s=0;s<=5;s++){
+    const y = padT + plotH*(1-s/5);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.fillText((s*20)+'%', 2, y+3);
+  }
+
+  const data = S.learningCurve;
+  if(data.length<2){
+    ctx.fillStyle='#3f5c66'; ctx.font='11px IBM Plex Sans, sans-serif';
+    ctx.fillText('Collecting samples…', padL+10, padT+plotH/2);
+    return;
+  }
+  ctx.strokeStyle='#3fe8ef'; ctx.lineWidth=1.6;
+  ctx.shadowColor='rgba(63,232,239,0.45)'; ctx.shadowBlur=4;
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    const x = padL + plotW*(i/(CFG.learningMax-1));
+    const y = padT + plotH*(1-Math.max(0,Math.min(100,v))/100);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  ctx.shadowBlur=0;
+}
+
+/* ===================== Mini dashboard chart ===================== */
+function drawDashMini(spectrum){
+  const w=dashCanvas.width, h=dashCanvas.height, ctx=dashCtx;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#050c13'; ctx.fillRect(0,0,w,h);
+  if(!spectrum){
+    ctx.fillStyle='#3f5c66'; ctx.font='12px IBM Plex Sans, sans-serif';
+    ctx.fillText('Start the engine to see live telemetry here.', 16, h/2);
+    return;
+  }
+  const padL=8,padR=8,padT=8,padB=8;
+  const plotW=w-padL-padR, plotH=h-padT-padB;
+  ctx.strokeStyle='#3fe8ef'; ctx.lineWidth=1.3;
+  ctx.beginPath();
+  for(let i=0;i<CFG.gridPoints;i++){
+    const x = padL+plotW*(i/(CFG.gridPoints-1));
+    const t = Math.max(0,Math.min(1,(spectrum[i]-S.powerMin)/(S.powerMax-S.powerMin)));
+    const y = padT+plotH*(1-t);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+/* ===================== Rendering: tables ===================== */
+function renderRegistry(){
+  const tbody = $('registryBody');
+  const rows = Array.from(S.registry.values()).sort((a,b)=>b.lastSeenTick-a.lastSeenTick || a.id-b.id);
+  $('registryEmpty').style.display = rows.length? 'none':'block';
+  tbody.innerHTML = rows.map(r=>{
+    const sel = S.selected && S.selected.type==='emitter' && S.selected.id===r.id ? ' selected-row':'';
+    return `<tr class="reg-row${sel}" data-id="${r.id}">
+      <td>${r.id}</td>
+      <td>${r.freq.toFixed(4)}</td>
+      <td>${r.bw.toFixed(1)}</td>
+      <td>${r.power.toFixed(1)}</td>
+      <td>${r.type}</td>
+      <td>${r.confidence.toFixed(1)}%</td>
+      <td><span class="status-badge ${r.status==='ACTIVE'?'active':'inactive'}">${r.status}</span></td>
+      <td><span class="hits">${r.hits}</span> / <span class="misses">${r.misses}</span></td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('.reg-row').forEach(tr=>{
+    tr.addEventListener('click', ()=>{
+      const id = parseInt(tr.getAttribute('data-id'),10);
+      selectEmitter(id);
+    });
+  });
+}
+
+function renderScheduler(){
+  const rows = computePriority();
+  const tbody = $('schedulerBody');
+  $('schedulerEmpty').style.display = rows.length? 'none':'block';
+  tbody.innerHTML = rows.map((r,i)=>{
+    const sel = S.selected && S.selected.type==='task' && S.selected.id===r.id ? ' selected-row':'';
+    return `<tr class="sched-row${sel}" data-id="${r.id}">
+      <td>${i+1}</td>
+      <td>${r.freq.toFixed(4)}</td>
+      <td>${r.score}</td>
+      <td><span class="scan-action ${r.action==='FINE SCAN'?'fine':'coarse'}">${r.action}</span></td>
+      <td>${r.type}</td>
+      <td>${r.rationale}</td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('.sched-row').forEach(tr=>{
+    tr.addEventListener('click', ()=>{
+      const id = parseInt(tr.getAttribute('data-id'),10);
+      selectTask(id, rows.find(r=>r.id===id));
+    });
+  });
+}
+
+/* ===================== Reasoning panel ===================== */
+function selectEmitter(id){
+  S.selected = {type:'emitter', id};
+  renderReasoning();
+  renderRegistry();
+}
+function selectTask(id, row){
+  S.selected = {type:'task', id, row};
+  renderReasoning();
+  renderScheduler();
+}
+function clearSelection(){
+  S.selected = null;
+  renderReasoning();
+  renderRegistry();
+  renderScheduler();
+}
+
+function renderReasoning(){
+  const panel = $('reasoningPanel');
+  if(!S.selected){
+    panel.innerHTML = `<div class="reasoning-empty">Select an active signal track to view ML reasoning.</div>`;
+    return;
+  }
+  if(S.selected.type==='emitter'){
+    const r = S.registry.get(S.selected.id);
+    if(!r){ panel.innerHTML = `<div class="reasoning-empty">Track no longer available.</div>`; return; }
+    const durationTicks = S.tick - r.bornTick;
+    const durationSec = (durationTicks * (CFG.tickBaseMs/1000) / S.simSpeed).toFixed(1);
+    const dutyPct = r.hits+r.misses>0 ? ((r.hits/(r.hits+r.misses))*100).toFixed(1) : '0.0';
+    const driftKhz = (r.ref ? r.ref.driftStd*1000 : 0).toFixed(0);
+    const bullets = [
+      `${r.type==='Anomaly' ? 'Wideband anomalous' : 'Multiple distinct'} carrier ${r.type==='Multi-Tone'?'sub-peaks':'features'} detected (bw ${r.bw.toFixed(0)} kHz).`,
+      r.confidence>60 ? 'High temporal consistency across observed samples.' : 'Temporal consistency still building — confidence rising with hits.',
+      r.misses>r.hits*0.4 ? 'Intermittent fades observed — duty cycle below stable threshold.' : 'Stable duty cycle — signal reacquired each scan window.',
+    ];
+    panel.innerHTML = `
+      <div class="reasoning-title">TRACK ID ${r.id} — ${r.type}</div>
+      <div class="reasoning-stats">
+        <div>Duration<b>${durationSec}s</b></div>
+        <div>Peaks<b>1</b></div>
+        <div>Duty Cycle<b>${dutyPct}%</b></div>
+        <div>Drift Std<b>${driftKhz} kHz</b></div>
+      </div>
+      <div class="reasoning-title">REASONING</div>
+      <ul class="reasoning-bullets">${bullets.map(b=>`<li>${b}</li>`).join('')}</ul>
+      <div class="reasoning-title">HITS / MISSES LEGEND</div>
+      <ul class="legend-list">
+        <li><span class="legend-dot" style="background:#3ee9a6;"></span>0 misses — signal locked</li>
+        <li><span class="legend-dot" style="background:#ffcf6b;"></span>1–2 misses — signal fading</li>
+        <li><span class="legend-dot" style="background:#ff5577;"></span>3+ misses — signal likely lost</li>
+      </ul>
+      <button class="close-selection" id="closeSel">Clear selection</button>
+    `;
+  } else {
+    const row = S.selected.row;
+    if(!row){ panel.innerHTML = `<div class="reasoning-empty">Task no longer queued.</div>`; return; }
+    panel.innerHTML = `
+      <div class="reasoning-title">SCAN TASK — ${row.freq.toFixed(4)} MHz</div>
+      <div class="reasoning-stats">
+        <div>Priority Score<b>${row.score}</b></div>
+        <div>Scan Action<b>${row.action}</b></div>
+      </div>
+      <div class="reasoning-title">PRIORITY REASONING</div>
+      <ul class="reasoning-bullets">
+        <li>${row.rationale}.</li>
+        <li>Signal type classified as ${row.type}.</li>
+        <li>Score blends confidence, recency and peak power against current explore/exploit ratio.</li>
+      </ul>
+      <button class="close-selection" id="closeSel">Clear selection</button>
+    `;
+  }
+  const closeBtn = $('closeSel');
+  if(closeBtn) closeBtn.addEventListener('click', clearSelection);
+}
+
+/* ===================== Detections / Anomalies pages ===================== */
+function renderDetections(){
+  const q = ($('detSearch').value||'').trim().toLowerCase();
+  const typeFilter = $('detTypeFilter').value;
+  const rows = S.detections.slice().reverse().filter(d=>{
+    if(typeFilter && d.type!==typeFilter) return false;
+    if(q && !(('id'+d.id).includes(q) || d.freq.toFixed(4).includes(q))) return false;
+    return true;
+  }).slice(0,150);
+  $('detectionsEmpty').style.display = rows.length? 'none':'block';
+  $('detectionsBody').innerHTML = rows.map(d=>`
+    <tr><td>${d.tick}</td><td>ID ${d.id}</td><td>${d.freq.toFixed(4)}</td><td>${d.power.toFixed(1)}</td><td>${d.type}</td><td>${d.threshold.toFixed(1)}</td></tr>
+  `).join('');
+}
+
+function renderAnomaliesIfVisible(){
+  if(S.page==='anomalies') renderAnomalies();
+}
+function renderAnomalies(){
+  const list = $('anomaliesList');
+  if(!S.anomalies.length){
+    list.innerHTML = `<div class="empty-state" id="anomaliesEmpty">No anomalies flagged yet. Try the "Anomalous Activity" scenario preset.</div>`;
+    return;
+  }
+  list.innerHTML = S.anomalies.map(a=>`
+    <div class="anomaly-card ${a.ack?'ack':''}" data-id="${a.id}">
+      <div class="anomaly-main">
+        <span class="sev sev-${a.sev}">${a.sev.toUpperCase()}</span>
+        <span class="t">${a.id} — ${a.freq.toFixed(1)} MHz</span>
+        <div class="d">${a.desc}</div>
+        <div class="ts">tick ${a.tick}</div>
+      </div>
+      <button class="btn" data-ack="${a.id}" style="height:fit-content;">${a.ack?'ACKNOWLEDGED':'ACKNOWLEDGE'}</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-ack]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-ack');
+      const a = S.anomalies.find(x=>x.id===id);
+      if(a){ a.ack = !a.ack; renderAnomalies(); updateStatCards(); }
+    });
+  });
+}
+
+/* ===================== Dashboard stats ===================== */
+function updateStatCards(){
+  $('statTracked').textContent = S.registry.size;
+  let active=0; S.registry.forEach(r=>{ if(r.status==='ACTIVE') active++; });
+  $('statActive').textContent = active;
+  $('statDetections').textContent = S.detections.length;
+  $('statAnomalies').textContent = S.anomalies.length;
+  $('statAnomaliesUnack').textContent = S.anomalies.filter(a=>!a.ack).length;
+}
+
+function renderActivityFeed(){
+  const feed = $('activityFeed');
+  const items = [];
+  S.detections.slice(-30).reverse().slice(0,4).forEach(d=>{
+    items.push({tick:d.tick, html:`<span>ID <b>${d.id}</b> detected @ ${d.freq.toFixed(1)} MHz</span><span class="tag tag-det">DET</span>`});
+  });
+  S.anomalies.slice(0,4).forEach(a=>{
+    items.push({tick:a.tick, html:`<span><b>${a.id}</b> ${a.sev} severity anomaly</span><span class="tag tag-anom">ANOM</span>`});
+  });
+  items.sort((a,b)=>b.tick-a.tick);
+  if(!items.length){
+    feed.innerHTML = `<li style="color:var(--text-faint);">No activity yet — start the engine on Spectrum Monitor.</li>`;
+    return;
+  }
+  feed.innerHTML = items.slice(0,8).map(i=>`<li>${i.html}</li>`).join('');
+}
+
+/* ===================== Diagnostics ===================== */
+function updateDiagnostics(){
+  const running = S.engine==='running';
+  $('diagCpu').textContent = running ? (8+Math.round(Math.random()*14))+'%' : '2%';
+  $('diagBuffer').textContent = Math.min(100, Math.round((S.tick%40)/40*100))+'%';
+  const upSec = S.startedAt ? Math.floor((Date.now()-S.startedAt)/1000) : 0;
+  $('diagUptime').textContent = upSec+'s';
+  $('diagTicks').textContent = S.tick;
+}
+
+/* ===================== Tick loop ===================== */
+function tick(){
+  S.tick++;
+  updateEmitterActivity();
+  const spectrum = computeSpectrum();
+  S.lastSpectrum = spectrum;
+
+  if(!S.vizPaused){
+    drawSpectrum(spectrum);
+    pushHistoryRow(S.waterfallBuf, S.waterfallCtx, CFG.waterfallRows, spectrum);
+    pushHistoryRow(S.heatmapBuf, S.heatmapCtx, CFG.heatmapRows, spectrum);
+    blitHistory(S.waterfallBuf, wfCanvas);
+    const heatmapTabActive = document.querySelector('.tab-panel[data-panel="heatmap"]').classList.contains('active');
+    if(heatmapTabActive) blitHistory(S.heatmapBuf, hmCanvas);
+  }
+
+  processDetections(spectrum);
+  renderRegistry();
+  renderScheduler();
+  if(S.selected) renderReasoning();
+
+  // adaptive strategy panel(s) if visible
+  const stratTabActive = document.querySelector('.tab-panel[data-panel="strategy"]').classList.contains('active');
+  if(stratTabActive) renderBandAllocation($('strategyBands'));
+  if(S.page==='strategy') renderBandAllocation($('strategyBandsBig'));
+
+  // learning curve: mean confidence trend
+  let sum=0,count=0;
+  S.registry.forEach(r=>{ sum+=r.confidence; count++; });
+  const meanConf = count? sum/count : 0;
+  S.learningCurve.push(meanConf);
+  if(S.learningCurve.length>CFG.learningMax) S.learningCurve.shift();
+  const learningTabActive = document.querySelector('.tab-panel[data-panel="learning"]').classList.contains('active');
+  if(learningTabActive) drawLearningCurve();
+
+  updateDiagnostics();
+  updateStatCards();
+  if(S.page==='dashboard'){ drawDashMini(spectrum); renderActivityFeed(); $('dashClock').textContent = 't+'+S.tick+'t'; }
+  if(S.page==='detections') renderDetections();
+
+  $('sideTick').textContent = S.tick;
+}
+
+/* ===================== Engine control ===================== */
+function intervalMs(){ return Math.round(CFG.tickBaseMs / S.simSpeed); }
+
+function setEngineState(newState){
+  S.engine = newState;
+  const pillClass = newState==='running'?'running':(newState==='paused'?'paused':'stopped');
+  const label = newState==='running'?'ENGINE RUNNING':(newState==='paused'?'ENGINE PAUSED':'ENGINE STOPPED');
+  [$('mainStatus'), $('sideStatus'), $('dashBadge')].forEach(el=>{
+    el.className = 'status-pill '+pillClass;
+    el.innerHTML = '<span class="dot"></span>'+label;
+  });
+  $('btnStart').classList.toggle('btn-primary-active', newState!=='running');
+  $('btnPause').classList.toggle('btn-primary-active', newState==='running');
+  $('btnStart').textContent = (newState==='paused') ? 'RESUME' : 'START';
+}
+
+function startEngine(){
+  if(S.engine==='running') return;
+  if(S.engine==='stopped' && !S.startedAt) S.startedAt = Date.now();
+  if(!S.startedAt) S.startedAt = Date.now();
+  setEngineState('running');
+  clearInterval(S.intervalHandle);
+  S.intervalHandle = setInterval(tick, intervalMs());
+}
+function pauseEngine(){
+  if(S.engine!=='running') { startEngine(); return; }
+  setEngineState('paused');
+  clearInterval(S.intervalHandle);
+}
+function stopEngine(){
+  setEngineState('stopped');
+  clearInterval(S.intervalHandle);
+  S.startedAt = null;
+}
+function resetEngine(){
+  clearInterval(S.intervalHandle);
+  S.tick=0; S.registry.clear(); S.detections=[]; S.anomalies=[]; S.learningCurve=[];
+  S.nextId=1; S.selected=null; S.startedAt=null;
+  initNoise();
+  S.emitterPool = genEmitterPool(S.scenarioKey);
+  initHistoryBuffers();
+  setEngineState('stopped');
+  renderAll();
+}
+
+/* ===================== Scenario switching ===================== */
+function applyScenario(key, opts){
+  opts = opts||{};
+  S.scenarioKey = key;
+  const sc = SCENARIOS[key];
+  $('scenarioSelect').value = key;
+  $('sideScenario').textContent = sc.label.toUpperCase();
+  S.emitterPool = genEmitterPool(key);
+  $('infoEmitterCount').textContent = S.emitterPool.length + ' emitters';
+  if(!opts.silent) showCaption(sc.caption);
+  updateScenarioJumpCards();
+  $('demoCaption').textContent = sc.caption;
+}
+
+let captionTimer=null;
+function showCaption(text){
+  const el = $('chartCaption');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(()=>el.classList.remove('show'), 3200);
+}
+
+/* ===================== UI: tabs ===================== */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.setAttribute('aria-selected','false'));
+    btn.setAttribute('aria-selected','true');
+    const tab = btn.getAttribute('data-tab');
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active', p.getAttribute('data-panel')===tab));
+    if(tab==='heatmap') blitHistory(S.heatmapBuf, hmCanvas);
+    if(tab==='learning') drawLearningCurve();
+    if(tab==='strategy') renderBandAllocation($('strategyBands'));
+  });
+});
+
+/* ===================== UI: nav / pages ===================== */
+function goToPage(page){
+  S.page = page;
+  document.querySelectorAll('.nav-item').forEach(b=>{
+    const active = b.getAttribute('data-page')===page;
+    b.toggleAttribute('aria-current', active);
+    if(active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.id==='page-'+page));
+  if(page==='detections') renderDetections();
+  if(page==='anomalies') renderAnomalies();
+  if(page==='dashboard'){ drawDashMini(S.lastSpectrum); renderActivityFeed(); }
+  if(page==='strategy') renderBandAllocation($('strategyBandsBig'));
+}
+document.querySelectorAll('.nav-item').forEach(btn=>{
+  btn.addEventListener('click', ()=> goToPage(btn.getAttribute('data-page')));
+});
+
+/* ===================== UI: engine buttons ===================== */
+$('btnStart').addEventListener('click', ()=>{
+  if(S.engine==='paused'){ startEngine(); return; }
+  if(S.engine==='stopped' && S.registry.size===0 && S.tick===0){ /* fresh start fine */ }
+  startEngine();
+});
+$('btnPause').addEventListener('click', pauseEngine);
+$('btnStop').addEventListener('click', stopEngine);
+$('btnReset').addEventListener('click', resetEngine);
+
+$('btnPauseViz').addEventListener('click', ()=>{
+  S.vizPaused = !S.vizPaused;
+  $('btnPauseViz').textContent = S.vizPaused ? 'RESUME VISUALIZATION' : 'PAUSE VISUALIZATION';
+});
+$('btnResetView').addEventListener('click', ()=>{
+  initHistoryBuffers();
+  blitHistory(S.waterfallBuf, wfCanvas);
+});
+
+/* ===================== UI: scenario select ===================== */
+$('scenarioSelect').addEventListener('change', (e)=> applyScenario(e.target.value));
+
+/* ===================== UI: simulation speed ===================== */
+function setSpeed(v){
+  S.simSpeed = v;
+  $('speedDisplay').value = v.toFixed(2)+'x';
+  if(S.engine==='running'){ clearInterval(S.intervalHandle); S.intervalHandle = setInterval(tick, intervalMs()); }
+}
+$('speedUp').addEventListener('click', ()=>{
+  const i = S.speedSteps.indexOf(S.simSpeed);
+  const next = S.speedSteps[Math.min(S.speedSteps.length-1, (i<0?2:i+1))];
+  setSpeed(next);
+});
+$('speedDown').addEventListener('click', ()=>{
+  const i = S.speedSteps.indexOf(S.simSpeed);
+  const next = S.speedSteps[Math.max(0, (i<0?2:i-1))];
+  setSpeed(next);
+});
+
+/* ===================== UI: generic steppers ===================== */
+function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
+
+document.querySelectorAll('.stepper-btns button[data-target]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const target = btn.getAttribute('data-target');
+    const dir = parseInt(btn.getAttribute('data-dir'),10);
+    handleStep(target, dir);
+  });
+});
+
+function handleStep(target, dir){
+  if(target==='startFreq'){
+    let v = S.startFreq + dir*10;
+    v = clamp(v, 10, S.stopFreq-40);
+    S.startFreq = v;
+    $('startFreqDisplay').value = v.toFixed(2);
+    afterFreqRangeChange();
+  } else if(target==='stopFreq'){
+    let v = S.stopFreq + dir*10;
+    v = clamp(v, S.startFreq+40, 3000);
+    S.stopFreq = v;
+    $('stopFreqDisplay').value = v.toFixed(2);
+    afterFreqRangeChange();
+  } else if(target==='powerMin'){
+    let v = S.powerMin + dir*5;
+    v = clamp(v, -140, S.powerMax-20);
+    S.powerMin = v;
+    $('powerMinDisplay').value = v.toFixed(2);
+    $('thresholdSlider').min = v;
+  } else if(target==='powerMax'){
+    let v = S.powerMax + dir*5;
+    v = clamp(v, S.powerMin+20, 0);
+    S.powerMax = v;
+    $('powerMaxDisplay').value = v.toFixed(2);
+    $('thresholdSlider').max = v;
+  } else if(target==='rescan'){
+    let v = clamp(S.rescanInterval + dir, 1, 20);
+    S.rescanInterval = v;
+    $('rescanDisplay').value = v;
+    $('rescanNote').textContent = v;
+  }
+}
+function afterFreqRangeChange(){
+  $('infoFreqRange').textContent = S.startFreq.toFixed(1)+' – '+S.stopFreq.toFixed(1)+' MHz';
+}
+
+/* free-typed frequency inputs */
+$('startFreqDisplay').addEventListener('change', (e)=>{
+  let v = parseFloat(e.target.value); if(isNaN(v)) v=S.startFreq;
+  v = clamp(v, 10, S.stopFreq-40);
+  S.startFreq=v; e.target.value=v.toFixed(2); afterFreqRangeChange();
+});
+$('stopFreqDisplay').addEventListener('change', (e)=>{
+  let v = parseFloat(e.target.value); if(isNaN(v)) v=S.stopFreq;
+  v = clamp(v, S.startFreq+40, 3000);
+  S.stopFreq=v; e.target.value=v.toFixed(2); afterFreqRangeChange();
+});
+$('powerMinDisplay').addEventListener('change',(e)=>{
+  let v=parseFloat(e.target.value); if(isNaN(v)) v=S.powerMin;
+  v=clamp(v,-140,S.powerMax-20); S.powerMin=v; e.target.value=v.toFixed(2); $('thresholdSlider').min=v;
+});
+$('powerMaxDisplay').addEventListener('change',(e)=>{
+  let v=parseFloat(e.target.value); if(isNaN(v)) v=S.powerMax;
+  v=clamp(v,S.powerMin+20,0); S.powerMax=v; e.target.value=v.toFixed(2); $('thresholdSlider').max=v;
+});
+$('rescanDisplay').addEventListener('change',(e)=>{
+  let v=parseInt(e.target.value,10); if(isNaN(v)) v=S.rescanInterval;
+  v=clamp(v,1,20); S.rescanInterval=v; e.target.value=v; $('rescanNote').textContent=v;
+});
+
+/* ===================== UI: threshold slider ===================== */
+$('thresholdSlider').addEventListener('input', (e)=>{
+  S.threshold = parseFloat(e.target.value);
+  $('thresholdValue').textContent = S.threshold.toFixed(1)+' dBm';
+});
+
+/* ===================== UI: diagnostics collapse ===================== */
+$('diagToggle').addEventListener('click', ()=>{
+  const body = $('diagBody');
+  const open = body.classList.toggle('open');
+  $('diagChevron').textContent = open ? '▴' : '▾';
+});
+
+/* ===================== UI: detections filters ===================== */
+$('detSearch').addEventListener('input', renderDetections);
+$('detTypeFilter').addEventListener('change', renderDetections);
+
+/* ===================== UI: strategy engine controls ===================== */
+$('exploreSlider').addEventListener('input', (e)=>{
+  S.exploreExploit = parseInt(e.target.value,10);
+  $('exploreValue').textContent = (100-S.exploreExploit)+' / '+S.exploreExploit;
+  $('strategyRatioNote').textContent = S.exploreExploit+'% explore / '+(100-S.exploreExploit)+'% exploit';
+  renderBandAllocation($('strategyBandsBig'));
+  const stratTabActive = document.querySelector('.tab-panel[data-panel="strategy"]').classList.contains('active');
+  if(stratTabActive) renderBandAllocation($('strategyBands'));
+});
+
+/* ===================== SIH Demo Mode ===================== */
+function updateScenarioJumpCards(){
+  document.querySelectorAll('.scenario-card').forEach(c=>{
+    c.classList.toggle('active', c.getAttribute('data-key')===S.scenarioKey);
+  });
+}
+function buildScenarioJumpGrid(){
+  const grid = $('scenarioJumpGrid');
+  grid.innerHTML = Object.keys(SCENARIOS).map(k=>{
+    const sc = SCENARIOS[k];
+    return `<button class="scenario-card" data-key="${k}">
+      <div class="t">${sc.label}</div>
+      <div class="d">${sc.caption}</div>
+    </button>`;
+  }).join('');
+  grid.querySelectorAll('.scenario-card').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      const key = card.getAttribute('data-key');
+      applyScenario(key);
+      if(S.engine!=='running') startEngine();
+      goToPage('sih');
+    });
+  });
+  updateScenarioJumpCards();
+}
+
+$('demoAutoplayToggle').addEventListener('change', (e)=>{
+  S.demoAutoplay = e.target.checked;
+  if(S.demoAutoplay){
+    if(S.engine!=='running') startEngine();
+    S.demoHandle = setInterval(()=>{
+      S.demoIdx = (S.demoIdx+1) % S.demoOrder.length;
+      applyScenario(S.demoOrder[S.demoIdx]);
+    }, 12000);
+  } else {
+    clearInterval(S.demoHandle);
+  }
+});
+
+/* ===================== Responsive canvas fitting ===================== */
+function fitCanvas(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const cssH = canvas.clientHeight || parseInt(getComputedStyle(canvas).height,10) || canvas.height;
+  const cssW = canvas.clientWidth || canvas.width;
+  const w = Math.max(1, Math.round(cssW*dpr));
+  const h = Math.max(1, Math.round(cssH*dpr));
+  if(canvas.width!==w) canvas.width = w;
+  if(canvas.height!==h) canvas.height = h;
+}
+function fitAllCanvases(){
+  [specCanvas, wfCanvas, hmCanvas, lcCanvas, dashCanvas].forEach(fitCanvas);
+  if(S.lastSpectrum) drawSpectrum(S.lastSpectrum);
+  blitHistory(S.waterfallBuf, wfCanvas);
+  const heatmapTabActive = document.querySelector('.tab-panel[data-panel="heatmap"]').classList.contains('active');
+  if(heatmapTabActive) blitHistory(S.heatmapBuf, hmCanvas);
+  drawLearningCurve();
+  drawDashMini(S.lastSpectrum);
+}
+let resizeTimer=null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(fitAllCanvases, 120);
+});
+
+/* ===================== Initial boot ===================== */
+function renderAll(){
+  renderRegistry();
+  renderScheduler();
+  renderReasoning();
+  updateStatCards();
+  renderActivityFeed();
+  blitHistory(S.waterfallBuf, wfCanvas);
+  drawDashMini(null);
+  drawLearningCurve();
+  renderBandAllocation($('strategyBands'));
+  renderBandAllocation($('strategyBandsBig'));
+  if(S.lastSpectrum) drawSpectrum(S.lastSpectrum); else {
+    const flat = new Float32Array(CFG.gridPoints).fill(SCENARIOS[S.scenarioKey].noiseFloor);
+    drawSpectrum(flat);
+  }
+}
+
+function boot(){
+  initNoise();
+  S.emitterPool = genEmitterPool(S.scenarioKey);
+  $('infoEmitterCount').textContent = S.emitterPool.length + ' emitters';
+  initHistoryBuffers();
+  buildScenarioJumpGrid();
+  afterFreqRangeChange();
+  setEngineState('stopped');
+  fitAllCanvases();
+  renderAll();
+  goToPage('spectrum');
+}
+boot();
+
+})();
+</script>
+</body>
+</html>

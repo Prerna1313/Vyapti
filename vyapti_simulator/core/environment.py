@@ -40,7 +40,7 @@ insulated from emitter count.
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Union, List, Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -707,7 +707,7 @@ class PS26055Environment:
             miss *= (1.0 - pd_e)
         return float(1.0 - miss)
 
-    def step(self, selected_band: int) -> Tuple[Dict, bool]:
+    def step(self, selected_band: Union[int, List[int]]) -> Union[Tuple[Dict, bool], List[Tuple[Dict, bool]]]:
         """
         Execute one scheduling step: observe selected band, return observation.
         Per frozen protocol: scheduler only sees observation; truth stays hidden.
@@ -719,10 +719,14 @@ class PS26055Environment:
         """
         if self._hidden_truth is None:
             raise RuntimeError("Environment.step() called before reset(); no truth grid exists.")
-        if not (0 <= selected_band < self.config.band_count):
-            raise ValueError(
-                f"Invalid band selection: {selected_band} (valid: 0..{self.config.band_count - 1})"
-            )
+        is_multi = isinstance(selected_band, (list, tuple)) or (hasattr(selected_band, 'ndim') and selected_band.ndim > 0)
+        bands_to_scan = list(selected_band) if is_multi else [int(selected_band)]
+        
+        for b in bands_to_scan:
+            if not (0 <= b < self.config.band_count):
+                raise ValueError(
+                    f"Invalid band selection: {b} (valid: 0..{self.config.band_count - 1})"
+                )
         if self.done:
             raise RuntimeError(
                 f"Episode already finished at slot {self.current_time_slot} "

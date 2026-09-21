@@ -22,10 +22,18 @@ export default function Sidebar() {
 
   return (
     <nav className="w-[196px] shrink-0 bg-[#071019] border-r border-[#1B324A] flex flex-col">
-      <div className="px-3.5 pt-4 pb-3 border-b border-[#1B324A]">
-        <div className="font-mono text-[15px] font-bold text-[#4DD8E8] tracking-wide">VYAPTI</div>
-        <div className="text-[10px] text-[#5E7B96] mt-1 leading-relaxed">
-          Cognitive Smart Scan<br />for Electronic Support (ES)
+      <div className="px-3.5 pt-4 pb-3 border-b border-[#1B324A] flex items-center gap-2.5">
+        <img
+          src="/logo.png"
+          alt="Team Anuman - Vyapti Logo"
+          className="w-10 h-10 rounded-full border border-[#4DD8E8] shadow-[0_0_10px_rgba(77,216,232,0.35)] bg-white object-cover flex-shrink-0"
+        />
+        <div>
+          <div className="font-mono text-[14px] font-bold text-[#4DD8E8] tracking-wide leading-tight">VYAPTI</div>
+          <div className="text-[10px] font-semibold text-[#E8B84D] tracking-wide">व्याप्ति</div>
+          <div className="text-[8.5px] text-[#5E7B96] leading-tight">
+            Inference Across The Spectrum
+          </div>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto py-2">
