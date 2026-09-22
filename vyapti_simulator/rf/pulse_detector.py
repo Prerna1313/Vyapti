@@ -451,6 +451,15 @@ class CFARMatchedFilterDetector(BaseDetector):
             # AoA and emitter ID: ground-truth lookup
             aoa_deg, emitter_id = self._lookup_emitter(rf_hz)
 
+            # CRLB-inspired stochastic AoA error model
+            # Error std scales as k / sqrt(SNR_linear). Model is approximate
+            # near 10 dB where the true CRLB itself becomes less reliable.
+            if emitter_id >= 0:
+                k_deg = 5.0
+                sigma_deg = k_deg / np.sqrt(max(snr_linear, 1.0))
+                aoa_deg += float(self.rng.normal(0.0, sigma_deg))
+                aoa_deg = aoa_deg % 360.0
+
             pulses.append(DetectedPulse(
                 toa_sec=toa_sec,
                 freq_hz=rf_hz,
