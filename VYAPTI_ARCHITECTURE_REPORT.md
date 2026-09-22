@@ -61,62 +61,39 @@ It does this by:
 
 ## 2. Architecture Overview
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                              SCHEDULER (your algorithm)                          │
-│                                                                                  │
-│  select_action(observation_history, current_time_slot) → band_index              │
-│  update(action, observation)                                                     │
-│  predict(current_time_slot) → optional band forecast                             │
-│                                                                                  │
-│  ONLY sees: hit / miss / snr_db / pulse_count — NO ground truth                │
-└────────────────────────────────────┬─────────────────────────────────────────────┘
-                                     │ hit / miss / snr_db / pulse_count / ...
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                          SIMULATION ENVIRONMENT                                  │
-│                                                                                  │
-│  PS26055Environment          ← System A (synthetic)                             │
-│  TSRDEnvironment            ← System B (real TSRD data)                        │
-│                                                                                  │
-│  Both expose the same interface: reset(seed) → step(band) → observation dict   │
-│  Ground truth NEVER goes to the scheduler — only to the MetricsEngine           │
-└────────────────────────────────────┬─────────────────────────────────────────────┘
-                                     │ after step()
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                           METRICS ENGINE                                        │
-│                                                                                  │
-│  MetricsEngine.record(result) — computes 7 figures of merit                      │
-│  Only the MetricsEngine sees the ground truth grid                              │
-└──────────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────┐     ┌─────────────────────────────────────────────┐
-│   SYSTEM A — Synthetic      │     │   SYSTEM B — TSRD Real Data               │
-│   src/rf_pulse_simulator.py │     │   vyapti_simulator/tsrd/                  │
-│                             │     │                                             │
-│  • 13 EmitterBehaviorType   │     │  • TSRD H5 files (real PDW streams)        │
-│  • Deterministic PRI spacing│     │  • ToA, Frequency, PW, AoA, Amplitude       │
-│  • Band/slot ground truth   │     │  • Discretised to band/slot grid           │
-│  • Shared DetectionConfig   │     │  • Same DetectionConfig + AGC + CI + LNA   │
-│  • FSPL + shadowing/diffract│     │  • AoA-first deinterleaver (Option C)      │
-│  • Dynamic policies (DA,IOO,RC)    │  • Synthetic EW generator for Kaggle fallback│
-└─────────────────────────────┘     └─────────────────────────────────────────────┘
-                ┌───────────────────────────────────────────────────────────┐
-                │   SYSTEM C — RF Physics (optional stress-test layer)      │
-                │   vyapti_simulator/rf/                                   │
-                │                                                           │
-                │  • Waveform synthesis (LFM chirp, PSK, QAM)               │
-                │  • Matched filter + CFAR detection                        │
-                │  • Rayleigh/Rician fading, AWGN, FSPL                    │
-                │  • Closed-loop dwell scheduling (not band/slot)            │
-                │  • Stress-tests schedulers against realistic RF physics   │
-                │                                                           │
-                │  Optional: use it to test how schedulers perform when     │
-                │  detection is not a logistic(SNR) — it is a matched       │
-                │  filter against an actual chirp waveform through a         │
-                │  physical channel with fading.                             │
-                └───────────────────────────────────────────────────────────┘
+```text
+                ┌─────────────────────────────────────────────────────────────┐
+                │   SYSTEM A — Synthetic PDW Generator                        │
+                │   vyapti_simulator/tsrd/synthetic_pdw_generator.py          │
+                │                                                             │
+                │  • OpenAI Gymnasium Environment (VyaptiRFEnv)               │
+                │  • Extensible EmitterBehaviorType classes                   │
+                │  • Generates TSRD-like logic grids mathematically           │
+                │  • Extremely fast (Millions of steps/sec) for RL Training   │
+                └─────────────────────────────────────────────────────────────┘
+                                             │
+                                             │
+                ┌─────────────────────────────────────────────────────────────┐
+                │   SYSTEM B — TSRD Data Pipeline                             │
+                │   vyapti_simulator/tsrd/                                    │
+                │                                                             │
+                │  • TSRD H5 files (Turing Synthetic Radar Dataset)           │
+                │  • Discretised to band/slot logic grid                      │
+                │  • Same logic rules as System A, but driven by dataset      │
+                │  • Used for validating against established dataset norms    │
+                └─────────────────────────────────────────────────────────────┘
+                                             │
+                                             │
+                ┌─────────────────────────────────────────────────────────────┐
+                │   SYSTEM C — RF Physics & Closed-Loop Engine                │
+                │   src/ (Analog I/Q) + vyapti_simulator/rf/ (Closed Loop)    │
+                │                                                             │
+                │  • Waveform synthesis (LFM chirp, PSK, QAM) in src/         │
+                │  • Hardware bridge / scheduler in vyapti_simulator/rf/      │
+                │  • Matched filter + CFAR detection                          │
+                │  • Phase Noise, ADC Clipping, Rayleigh fading               │
+                │  • Stress-tests ML models against continuous analog physics │
+                └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Package Structure
@@ -183,16 +160,13 @@ vyapti_simulator/
 ---
 
 ## 3. Three Systems — A, B, and C
+| System | Code Location | What it does | When to use |
+|---|---|---|---|
+| **A — Synthetic** | `vyapti_simulator/tsrd/` | Extensible emitter classes -> band/slot logic grid -> Gym Interface -> logistic(SNR) | Fast Gym RL training |
+| **B — TSRD Data** | `vyapti_simulator/tsrd/` | H5 PDWStream -> discretise -> band/slot logic grid -> AGC+CI+LNA | Eval against Turing dataset |
+| **C — RF Physics** | `src/` & `vyapti_simulator/rf/` | I/Q Waveform synthesis -> Phase Noise/ADC Dirt -> CFAR -> closed-loop scheduling | Adversarial physical test |
 
-Vyapti supports three systems. **Systems A and B are the protocol-gated primary paths** for band/slot scheduler experiments — every scheduler must pass conformance on A or B before its results are admissible. **System C is an optional, additive stress-test layer** on top of A and B that swaps the abstract hit/miss detector for a realistic RF physics pipeline.
-
-| System | What it does | When to use |
-|---|---|---|
-| **A — Synthetic** (`src/`) | 13 emitter behavior classes → band/slot grid → logistic(SNR) → hit/miss | Fast statistical experiments, thousands of seeds |
-| **B — TSRD Real Data** (`vyapti_simulator/tsrd/`) | H5 PDWStream → discretise / deinterleave → band/slot grid → AGC+CI+LNA → hit/miss | Evaluation against realistic recorded RF |
-| **C — RF Physics** (`vyapti_simulator/rf/`) | Emitter specs → kinematic propagation → waveform synthesis → matched filter + CFAR → PDW stream → threat-scored scheduling | **Adversarial test**: how do my schedulers hold up when detection is not a logistic(SNR)? |
-
-The protocol-gated scheduler interface is the **band/slot interface** (`step(band) → {hit, miss}`) shared by A and B. System C uses a different interface — the **closed-loop dwell interface** (`decide(state) → (freq, aoa, dwell_ms)`) — because it needs the scheduler to pick an actual frequency band, AoA window, and dwell duration. Both interfaces are valid; A/B is the canonical PS26055 interface, C is the stress-test interface. A scheduler that wins on A or B but loses on C has learned to exploit the abstract detection model rather than the underlying RF physics.
+The protocol-gated scheduler interface is the **band/slot interface** (`step(band) -> {hit, miss}`) shared by A and B. System C uses a different interface — the **closed-loop dwell interface** (`decide(state) -> (freq, aoa, dwell_ms)`) — because it needs the scheduler to pick an actual frequency band, AoA window, and dwell duration to command the physical hardware engine. Both interfaces are valid; A/B is for rapid RL training, C is for Sim2Real stress-testing. A scheduler that wins on A but loses on C has learned to exploit the abstract detection model rather than surviving real physical signals.
 
 ### When to use each system
 
