@@ -1,4 +1,4 @@
-"""PS26055 Experiments — paired-trial execution and the statistical protocol."""
+"""Vyapti Experiments — paired-trial execution and the statistical protocol."""
 
 from .experiment_runner import (
     ExperimentConfig,

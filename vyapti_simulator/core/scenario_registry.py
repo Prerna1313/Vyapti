@@ -2,7 +2,7 @@
 vyapti_simulator.core.scenario_registry
 =======================================
 
-PS26055 Scenario Registry — Canonical scenario definitions for experiment
+Vyapti Scenario Registry — Canonical scenario definitions for experiment
 reproducibility and benchmark integrity.
 
 The registry provides:
@@ -16,7 +16,7 @@ splits and records the version tag used in each experiment run.
 
 References
 ----------
-PS26055 Common Simulation and Evaluation Protocol v1.0 FROZEN.md §6.
+Vyapti Common Simulation and Evaluation Protocol v1.0 FROZEN.md §6.
 """
 
 from __future__ import annotations
@@ -211,28 +211,28 @@ class ScenarioConfig:
 
 SCENARIOS: Dict[str, ScenarioConfig] = {
     # =====================================================================
-    # PS26055 Standard Benchmark Scenarios
+    # Vyapti Standard Benchmark Scenarios
     # =====================================================================
 
-    "ps26055_standard_low": ScenarioConfig(
-        name="ps26055_standard_low",
+    "vyapti_standard_low": ScenarioConfig(
+        name="vyapti_standard_low",
         emitter_density=5,
         description="Low-density scenario: 5 emitters (2 periodic, 2 agile, 1 intermittent)",
-        provenance="PS26055 Frozen Protocol §6",
+        provenance="Vyapti Frozen Protocol §6",
     ),
 
-    "ps26055_standard_medium": ScenarioConfig(
-        name="ps26055_standard_medium",
+    "vyapti_standard_medium": ScenarioConfig(
+        name="vyapti_standard_medium",
         emitter_density=10,
         description="Medium-density scenario: 10 emitters (5 periodic, 3 agile, 2 intermittent)",
-        provenance="PS26055 Frozen Protocol §6",
+        provenance="Vyapti Frozen Protocol §6",
     ),
 
-    "ps26055_standard_high": ScenarioConfig(
-        name="ps26055_standard_high",
+    "vyapti_standard_high": ScenarioConfig(
+        name="vyapti_standard_high",
         emitter_density=20,
         description="High-density scenario: 20 emitters (10 periodic, 6 agile, 4 intermittent)",
-        provenance="PS26055 Frozen Protocol §6",
+        provenance="Vyapti Frozen Protocol §6",
     ),
 
     # =====================================================================

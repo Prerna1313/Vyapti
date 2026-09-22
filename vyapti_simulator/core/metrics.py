@@ -1,5 +1,5 @@
 """
-PS26055 Metrics Engine — Experimental Methodology Reviewer
+Vyapti Metrics Engine — Experimental Methodology Reviewer
 
 PURPOSE: Compute all seven DRDO-named figures of merit from frozen protocol:
   1. Probability of Detection (Pd)        [PS-DEFINED]

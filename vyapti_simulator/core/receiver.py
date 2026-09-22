@@ -1,5 +1,5 @@
 """
-PS26055 Receiver Model — RF/EW Systems Engineer
+Vyapti Receiver Model — RF/EW Systems Engineer
 
 PURPOSE: Model the physical receiver with IBW, dwell, retune overhead,
 detection probability curve (not binary threshold only), and sensitivity.

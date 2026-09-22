@@ -20,7 +20,7 @@ This is the Stage-5 deliverable for Gap 6 in the frozen protocol.
 
 References
 ----------
-PS26055 Frozen Protocol — Stare Mode Oracle (Gap 6).
+Vyapti Frozen Protocol — Stare Mode Oracle (Gap 6).
 """
 
 from __future__ import annotations

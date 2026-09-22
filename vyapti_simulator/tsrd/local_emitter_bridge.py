@@ -57,7 +57,7 @@ What the bridge does NOT do
 
 Author
 ------
-Senior RF/EW Signal Simulation Engineer — PS26055 System A/B
+Senior RF/EW Signal Simulation Engineer — Vyapti System A/B
 unification deliverable.
 """
 

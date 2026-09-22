@@ -3,9 +3,9 @@ vyapti_simulator.tsrd.tsrd_adapter
 ==================================
 
 Adapter that reads a single TSRD H5 file via raw `h5py` and
-exposes its 5-field PDW stream to the PS26055 simulator. This
+exposes its 5-field PDW stream to the Vyapti simulator. This
 is the file-level bridge between the canonical TSRD corpus
-(Kaggle-gated) and the two PS26055 use cases:
+(Kaggle-gated) and the two Vyapti use cases:
 
   - **Scheduler experiments** (Scan Mode -> discretised band/slot
     observed occupancy).

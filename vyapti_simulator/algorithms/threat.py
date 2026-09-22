@@ -22,7 +22,7 @@ deinterleaver (when available) or from the raw observation statistics.
 
 References
 ----------
-DRDO PS26055 Frozen Protocol — Sub-problem F: Threat Prioritisation.
+DRDO Vyapti Frozen Protocol — Sub-problem F: Threat Prioritisation.
 Threat model based on:
 - Apfeld & Charlish 2021: Threat prioritisation in ESM
 - Perini 2025 SmartScan: Threat-weighted MAB
@@ -47,7 +47,7 @@ class EmitterBehaviorClass(str, Enum):
     """
     Classification of emitter behaviors by threat level.
 
-    Based on PS26055 Sub-problem F requirements:
+    Based on Vyapti Sub-problem F requirements:
     - Agile emitters (PSEUDO_RANDOM_AGILE, MARKOV_HOPPER) = priority 9-10
     - Periodic emitters (PERIODIC_SPATIAL_SCAN) = priority 7
     - Fixed emitters (CONTINUOUS_FIXED) = priority 3
@@ -208,7 +208,7 @@ class ThreatScoreConfig:
         The threat scoring model to use.
         - SIMPLE: hit rate and recency only
         - STANDARD: SNR + hit rate + recency
-        - BEHAVIOR_BASED: emitter class-based threat scores (per PS26055 Sub-problem F)
+        - BEHAVIOR_BASED: emitter class-based threat scores (per Vyapti Sub-problem F)
         - ADVANCED: STANDARD + agility + PRI stability
         - FULL: all features including emitter classification
     weight_snr_db : float
@@ -251,7 +251,7 @@ class ThreatScoreConfig:
     snr_low_threshold_db: float = 5.0
     recency_window_slots: int = 50
     agility_window_slots: int = 100
-    memo_reference: str = "PS26055-SubProb-F-IMPLEMENTED"
+    memo_reference: str = "Vyapti-SubProb-F-IMPLEMENTED"
 
     def __post_init__(self) -> None:
         """Normalise weights to sum to 1.0."""
@@ -314,7 +314,7 @@ class BandThreatState:
     pri_jitter: float = 0.0  # coefficient of variation
     # Emitter classification (from deinterleaver)
     estimated_emitter_types: Dict[str, int] = field(default_factory=dict)
-    # Behavior-based classification (per PS26055 Sub-problem F)
+    # Behavior-based classification (per Vyapti Sub-problem F)
     emitter_class_name: Optional[str] = None  # From deinterleaver or TSRD metadata
     behavior_class: EmitterBehaviorClass = EmitterBehaviorClass.UNKNOWN
     behavior_threat_score: float = 5.0  # Inherent threat from behavior type [0-10]
@@ -407,7 +407,7 @@ class ThreatScorer:
                 # This is a heuristic for agility estimation
                 pass
 
-        # Behavior classification update (per PS26055 Sub-problem F)
+        # Behavior classification update (per Vyapti Sub-problem F)
         # Try to get emitter class from deinterleaver or observation
         emitter_class = observation.get("emitter_class_name")
         if emitter_class is not None:
@@ -498,7 +498,7 @@ class ThreatScorer:
                 )
             components["snr"] = snr_score
 
-        # 3. Behavior-based threat (per PS26055 Sub-problem F)
+        # 3. Behavior-based threat (per Vyapti Sub-problem F)
         if "behavior" in cfg.active_features():
             # Normalize behavior threat score from [0-10] to [0-1]
             # Agile (9-10) -> 0.9-1.0, Periodic (7) -> 0.7, Fixed (3) -> 0.3
@@ -584,7 +584,7 @@ class ThreatScorer:
                 self.current_slot - state.last_hit_slot
                 if state.last_hit_slot >= 0 else None
             ),
-            # Behavior-based classification (per PS26055 Sub-problem F)
+            # Behavior-based classification (per Vyapti Sub-problem F)
             "emitter_class_name": state.emitter_class_name,
             "behavior_class": state.behavior_class.value if state.behavior_class else None,
             "behavior_threat_score": state.behavior_threat_score,
@@ -774,7 +774,7 @@ class ThreatAwareUCB1(ThreatScoreMixin):
 # =====================================================================
 
 __all__ = [
-    # Behavior classification (PS26055 Sub-problem F)
+    # Behavior classification (Vyapti Sub-problem F)
     "EmitterBehaviorClass",
     "BEHAVIOR_THREAT_SCORES",
     "EMITTER_CLASS_TO_BEHAVIOR",

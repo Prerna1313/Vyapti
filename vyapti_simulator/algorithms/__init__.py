@@ -1,5 +1,5 @@
 """
-PS26055 Algorithms — scheduler policies.
+Vyapti Algorithms — scheduler policies.
 
 Import convention: import concrete schedulers from their submodules, e.g.
     from vyapti_simulator.algorithms.bandit.ucb import UCB1Scheduler

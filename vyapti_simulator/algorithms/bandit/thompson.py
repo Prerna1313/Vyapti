@@ -1,5 +1,5 @@
 """
-PS26055 Thompson-sampling bandit schedulers for non-stationary, restless arms.
+Vyapti Thompson-sampling bandit schedulers for non-stationary, restless arms.
 
 [BANDIT] [LITERATURE-GROUNDED]
   - Thompson (1933); Agrawal & Goyal (2012) — Beta-Bernoulli Thompson sampling.

@@ -1,5 +1,5 @@
 """
-PS26055 mandatory figures — frozen protocol line 181-182.
+Vyapti mandatory figures — frozen protocol line 181-182.
 
 =======================================================================
 The 12 figures

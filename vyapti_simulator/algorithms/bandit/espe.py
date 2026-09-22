@@ -1,5 +1,5 @@
 """
-PS26055 ESPE family — Emitter Scan-Period Estimation schedulers.
+Vyapti ESPE family — Emitter Scan-Period Estimation schedulers.
 
 [BANDIT] [LITERATURE-GROUNDED] Teissier et al. (2024) — multi-armed-bandit
 search for radar emitters with scan-period estimation, and its frequency-agile

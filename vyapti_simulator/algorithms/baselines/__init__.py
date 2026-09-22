@@ -1,5 +1,5 @@
 """
-Baseline (non-learning) schedulers for PS26055.
+Baseline (non-learning) schedulers for Vyapti.
 
 The Round-Robin and Random-Markov baselines previously lived here
 in `baselines/fixed.py`. They have been moved to

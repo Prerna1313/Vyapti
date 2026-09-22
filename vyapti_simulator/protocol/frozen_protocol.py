@@ -123,9 +123,9 @@ class FrozenProtocolEnforcer:
                                    "detection=0.6, intercept_speed=0.3, efficiency=0.1. "
                                    "Formula: reward = 0.6*(threat_score*detection) + 0.3*(1/intercept_time) - 0.1*(dwell_cost). "
                                    "See vyapti_simulator/core/multi_objective_reward.py:RewardConfig.",
-                audit_trail_ref=["Sub-problem G: Multi-objective reconciliation (PS26055 Frozen Protocol line 120-123)",
+                audit_trail_ref=["Sub-problem G: Multi-objective reconciliation (Vyapti Frozen Protocol line 120-123)",
                                    "vyapti_simulator/core/multi_objective_reward.py:RewardConfig",
-                                   "PS26055 Frozen Protocol Deconstruction line 200-204"],
+                                   "Vyapti Frozen Protocol Deconstruction line 200-204"],
                 negative_result_reported=False,
             ),
             "Subproblem_F_Threat_Prioritization_Resolved": GateStatus(
@@ -137,7 +137,7 @@ class FrozenProtocolEnforcer:
                                    "Periodic emitters (PERIODIC_SPATIAL_SCAN) = priority 7, "
                                    "Fixed emitters (CONTINUOUS_FIXED) = priority 3. "
                                    "See vyapti_simulator/algorithms/threat.py:EmitterBehaviorClass.",
-                audit_trail_ref=["Sub-problem F: Threat prioritization (PS26055 Frozen Protocol line 128-130)",
+                audit_trail_ref=["Sub-problem F: Threat prioritization (Vyapti Frozen Protocol line 128-130)",
                                    "vyapti_simulator/algorithms/threat.py:EmitterBehaviorClass",
                                    "vyapti_simulator/algorithms/threat.py:BEHAVIOR_THREAT_SCORES"],
                 negative_result_reported=False,

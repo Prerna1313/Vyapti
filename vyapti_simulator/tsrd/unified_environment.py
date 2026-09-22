@@ -2,7 +2,7 @@
 vyapti_simulator.tsrd.unified_environment
 ========================================
 
-Unified simulation environment for the PS26055 scheduler experiment.
+Unified simulation environment for the Vyapti scheduler experiment.
 
 This is Task #4 of the System A/B unification: a single entry point that
 produces a scheduler-compatible environment from EITHER:
@@ -64,7 +64,7 @@ Synthetic dynamics::
 
 Author
 ------
-Senior RF/EW Signal Simulation Engineer — PS26055 System A/B
+Senior RF/EW Signal Simulation Engineer — Vyapti System A/B
 unification deliverable.
 """
 

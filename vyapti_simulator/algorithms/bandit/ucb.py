@@ -1,5 +1,5 @@
 """
-PS26055 UCB-family bandit schedulers.
+Vyapti UCB-family bandit schedulers.
 
 [BANDIT] [LITERATURE-GROUNDED] Auer, Cesa-Bianchi & Fischer (2002), "Finite-time
 analysis of the multiarmed bandit problem" — UCB1.
@@ -8,7 +8,7 @@ analysis of the multiarmed bandit problem" — UCB1.
 Why UCB1 is included even though it is expected to underperform
 -----------------------------------------------------------------------
 UCB1 assumes each arm's reward is drawn i.i.d. from a FIXED distribution. The
-PS26055 problem violates that assumption in two ways at once:
+Vyapti problem violates that assumption in two ways at once:
 
   - Rewards are non-stationary. A periodic emitter makes a band rewarding at
     t = 0..3 and barren at t = 4..9. There is no fixed mean to converge on.

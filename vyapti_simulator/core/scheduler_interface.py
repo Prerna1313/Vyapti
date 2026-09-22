@@ -1,5 +1,5 @@
 """
-PS26055 Scheduler Interface — Principal ML Scientist / RL Scientist
+Vyapti Scheduler Interface — Principal ML Scientist / RL Scientist
 
 PURPOSE: Algorithm-agnostic interface. Every scheduling algorithm —
 fixed round-robin, random Markov, tabular restless-bandit (UCB/Thompson),

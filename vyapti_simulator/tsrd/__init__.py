@@ -1,4 +1,4 @@
-"""PS26055 TSRD package.
+"""Vyapti TSRD package.
 
 Public surfaces:
 
@@ -49,7 +49,7 @@ NEW: TSRD environment (Options B + C wired for the scheduler):
   * `DetectionConfig` -- amplitude → SNR → Pd mapping.
   * `TSRDEnvironment` -- the scheduler-facing environment
     that uses the discretised grid and the deinterleaver.
-    Drop-in replacement for `PS26055Environment` on real
+    Drop-in replacement for `VyaptiEnv` on real
     TSRD data.
   * `build_tsrd_environment` -- factory helper for the
     Kaggle runner.

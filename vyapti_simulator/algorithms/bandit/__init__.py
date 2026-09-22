@@ -1,4 +1,4 @@
-"""Bandit, periodicity-aware and restless-index schedulers for PS26055."""
+"""Bandit, periodicity-aware and restless-index schedulers for Vyapti."""
 
 from .periodicity import PeriodicityEstimator, PeriodicModel
 from .ucb import UCB1Scheduler, SlidingWindowUCBScheduler

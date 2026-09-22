@@ -5,7 +5,7 @@ vyapti_simulator.tsrd.tsrd_environment
 TSRD-driven simulation environment — Options B and C wired together.
 
 This module provides ``TSRDEnvironment``, the environment class that
-replaces ``PS26055Environment`` when running on real TSRD data.
+replaces ``VyaptiEnv`` when running on real TSRD data.
 It exposes the **same scheduler interface** (``step()``, ``reset()``,
 ``done``) so that every existing scheduler (UCB, Thompson Sampling,
 Round Robin, etc.) runs unchanged on real TSRD PDW streams.
@@ -65,7 +65,7 @@ compliance.
 
 Integration with the experiment runner
 -------------------------------------
-``TSRDEnvironment`` is a drop-in replacement for ``PS26055Environment``
+``TSRDEnvironment`` is a drop-in replacement for ``VyaptiEnv``
 in the experiment runner. The episode loop in ``core.episode``
 does not know whether it is driving a synthetic or TSRD environment;
 the environment interface is identical.
@@ -110,7 +110,7 @@ Usage (Kaggle)
 
 Author
 ------
-Senior RF/EW Signal Simulation Engineer — PS26055 Options B+C integration.
+Senior RF/EW Signal Simulation Engineer — Vyapti Options B+C integration.
 """
 
 from __future__ import annotations
@@ -482,7 +482,7 @@ class TSRDEnvironment:
     """
     TSRD-driven simulation environment for Options B and C.
 
-    Provides the same interface as ``PS26055Environment`` so that
+    Provides the same interface as ``VyaptiEnv`` so that
     the experiment runner and all existing schedulers operate
     unchanged. The key internal differences:
 
@@ -526,7 +526,7 @@ class TSRDEnvironment:
     observation dict contains only ``hit`` (bool). The full
     pulse data (including ``emitter_id``) is held inside the
     environment for evaluation-only access. The observation
-    contract is identical to ``PS26055Environment`` and
+    contract is identical to ``VyaptiEnv`` and
     conforms to ``PERMITTED_OBSERVATION_KEYS``.
     """
 
@@ -604,7 +604,7 @@ class TSRDEnvironment:
         self._audit_trail: List[str] = []
 
     # =================================================================
-    # Public interface (same as PS26055Environment)
+    # Public interface (same as VyaptiEnv)
     # =================================================================
 
     @property
@@ -626,11 +626,11 @@ class TSRDEnvironment:
     ) -> None:
         """
         Reset the environment. Identical interface to
-        ``PS26055Environment.reset()`` — the experiment runner
+        ``VyaptiEnv.reset()`` — the experiment runner
         calls this between episodes.
 
         The ``emitter_family_config`` argument is accepted for
-        interface compatibility with ``PS26055Environment`` and
+        interface compatibility with ``VyaptiEnv`` and
         the canonical ``run_episode`` loop, but is **ignored**
         because the TSRD environment does not regenerate its
         ground truth from emitter configs; the ground truth
@@ -1216,7 +1216,7 @@ __all__ = [
 class TSRDStareEnvironment:
     """
     Lightweight environment for TRUE Pd/Pfa computation using TSRD Stare Mode.
-    Follows PS26055 interface.
+    Follows Vyapti interface.
     """
     def __init__(self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config):
         self.n_bands = n_bands

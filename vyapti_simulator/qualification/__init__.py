@@ -1,5 +1,5 @@
 """
-PS26055 Gate 0 qualification — instrument calibration and admissibility.
+Vyapti Gate 0 qualification — instrument calibration and admissibility.
 
 This package qualifies the SIMULATOR and certifies SCHEDULERS. It contains no
 research algorithms; see `algorithms/README.md` for the ownership boundary.

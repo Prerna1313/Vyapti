@@ -12,7 +12,7 @@ onto the simulation's discrete ``(band, slot)`` grid, aggregating all
 pulses that fall into the same cell into statistical summaries.
 
 This is the bridge between the raw pulse-level data that TSRD records
-and the band/slot observation space that the PS26055 scheduler interface
+and the band/slot observation space that the Vyapti scheduler interface
 operates in. It is a pure transform: no truth is created, no emitter
 identity is assumed, and the output is deterministic (same PDW stream +
 same config → same grid).
@@ -72,7 +72,7 @@ local formula is used.
 
 Author
 ------
-Senior RF/EW Signal Simulation Engineer — PS26055 Option B integration.
+Senior RF/EW Signal Simulation Engineer — Vyapti Option B integration.
 """
 
 from __future__ import annotations

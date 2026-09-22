@@ -1,5 +1,5 @@
 """
-PS26055 Gate 0 qualification probes — INSTRUMENT CALIBRATION, NOT RESEARCH.
+Vyapti Gate 0 qualification probes — INSTRUMENT CALIBRATION, NOT RESEARCH.
 
 =======================================================================
 What these are, and why they are not baselines

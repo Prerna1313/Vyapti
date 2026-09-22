@@ -1,5 +1,5 @@
 """
-PS26055 PRIMARY CONTRIBUTION — Coverage-Constrained Periodicity-Aware Bandit.
+Vyapti PRIMARY CONTRIBUTION — Coverage-Constrained Periodicity-Aware Bandit.
 
 [CONTRIBUTION] Our formulation. Not from any single published source; it
 composes four established ingredients under one novel hard constraint.

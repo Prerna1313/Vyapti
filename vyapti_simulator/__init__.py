@@ -1,5 +1,5 @@
 """
-PS26055 Simulation Platform — Package Root
+Vyapti Simulation Platform — Package Root
 
 Algorithm-agnostic Electronic Support (ES) receiver scheduling simulator built
 to the Common Simulation and Evaluation Protocol v1.0 (FROZEN).

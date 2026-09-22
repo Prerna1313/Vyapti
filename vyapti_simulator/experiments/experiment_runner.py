@@ -1,5 +1,5 @@
 """
-PS26055 Experiment Runner — Paired comparison + statistical protocol.
+Vyapti Experiment Runner — Paired comparison + statistical protocol.
 
 =======================================================================
 What this implements
@@ -45,7 +45,7 @@ except ImportError:
     SCIPY_AVAILABLE = False
     stats = None  # type: ignore
 
-from ..core.environment import PS26055Environment, EmitterConfig, SimulationConfig
+from ..core.environment import VyaptiEnv, EmitterConfig, SimulationConfig
 from ..core.episode import run_paired_episodes
 from ..core.metrics import MetricsEngine, MetricsConfig
 from ..core.scheduler_interface import BaseScheduler
@@ -620,7 +620,7 @@ class ExperimentRunner:
             env = TSRDStareEnvironment.from_stare_mode(stare_file, scan_file, sim_config)
             emitters = [] # Not used in TSRD
         else:
-            env = PS26055Environment(sim_config, emitters)
+            env = VyaptiEnv(sim_config, emitters)
 
         # Stash the antenna gain on the env for any downstream that
         # wants to read it (e.g. the report) without going through
@@ -791,7 +791,7 @@ class ExperimentRunner:
                 "train_overlaps_test":  bool(set(self.config.train_seeds) & set(self.config.test_seeds)),
                 "eval_overlaps_test":   bool(set(self.config.eval_seeds)  & set(self.config.test_seeds)),
                 "protocol_reference":   (
-                    "PS26055_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md §6 line 180: "
+                    "Vyapti_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md §6 line 180: "
                     "10 training seeds × 100 evaluation scenario seeds per benchmark cell, "
                     "confidence intervals reported, no cherry-picked best run."
                 ),
@@ -834,7 +834,7 @@ class ExperimentRunner:
                 "is not rejected; that outcome is recorded here and is not a failure."
             ),
             "protocol_reference": (
-                "PS26055_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md "
+                "Vyapti_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md "
                 "(line 10-16 paired design, line 34-41 variance reporting, "
                 "line 181-183 negative results, line 151-165 result tagging)."
             ),

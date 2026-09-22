@@ -1,4 +1,4 @@
-"""vyapti RF Pulse Simulator — PS26055 Electronic Warfare Smart Scan Scheduler"""
+"""vyapti RF Pulse Simulator — Vyapti Electronic Warfare Smart Scan Scheduler"""
 __version__ = "1.0.0"
 
 from .observation_interface import (

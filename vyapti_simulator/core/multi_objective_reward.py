@@ -2,7 +2,7 @@
 vyapti_simulator.core.multi_objective_reward
 ==========================================
 
-Sub-problem G: Multi-objective reconciliation for PS26055 reward functions.
+Sub-problem G: Multi-objective reconciliation for Vyapti reward functions.
 
 This module implements configurable multi-objective reward optimisation with
 Pareto-front analysis. The key insight is that discovery and monitoring
@@ -20,7 +20,7 @@ References
 ----------
 - Deb 2014: Multi-objective optimisation and evolutionary algorithms
 - Ziomek 2021: Multi-objective MAB for ESM
-- PS26055 Frozen Protocol §6: Multi-objective Reconciliation
+- Vyapti Frozen Protocol §6: Multi-objective Reconciliation
 """
 
 from __future__ import annotations
@@ -52,13 +52,13 @@ class ObjectiveType(str, Enum):
 
 
 # =====================================================================
-# PS26055 Sub-problem G: Configured Reward Formula
+# Vyapti Sub-problem G: Configured Reward Formula
 # =====================================================================
 
 @dataclass
 class RewardConfig:
     """
-    Configuration for the multi-objective reward function (PS26055 Sub-problem G).
+    Configuration for the multi-objective reward function (Vyapti Sub-problem G).
 
     Implements the weighted multi-objective reward formula:
         reward = w_detection * (threat_score * detection)
@@ -90,7 +90,7 @@ class RewardConfig:
     weight_cost: float = 0.1
     use_threat_weighting: bool = True
     intercept_time_max: float = 500.0
-    memo_reference: str = "PS26055-SubProb-G-IMPLEMENTED"
+    memo_reference: str = "Vyapti-SubProb-G-IMPLEMENTED"
 
     def __post_init__(self) -> None:
         """Validate and normalise weights."""
@@ -109,7 +109,7 @@ class RewardConfig:
         dwell_cost: float,
     ) -> float:
         """
-        Compute the multi-objective reward using the PS26055 Sub-problem G formula.
+        Compute the multi-objective reward using the Vyapti Sub-problem G formula.
 
         reward = w_detection * (threat_score * detection)
                + w_speed * (1 / intercept_time)

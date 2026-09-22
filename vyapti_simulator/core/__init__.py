@@ -1,4 +1,4 @@
-"""PS26055 Core — environment, receiver, scheduler contract, metrics, episode runner."""
+"""Vyapti Core — environment, receiver, scheduler contract, metrics, episode runner."""
 
 from .environment import (
     ProvenanceTag,
@@ -8,7 +8,7 @@ from .environment import (
     EmitterConfig,
     HiddenTruthGrid,
     SimulationConfig,
-    PS26055Environment,
+    VyaptiEnv,
 )
 from .mapping import (
     frequency_to_band,
@@ -61,7 +61,7 @@ __all__ = [
     "EmitterConfig",
     "HiddenTruthGrid",
     "SimulationConfig",
-    "PS26055Environment",
+    "VyaptiEnv",
     # band/time mapping (Invariant 2)
     "frequency_to_band",
     "seconds_to_slot",

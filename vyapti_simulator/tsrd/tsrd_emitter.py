@@ -4,7 +4,7 @@ vyapti_simulator.tsrd.tsrd_emitter
 
 `TSRDEmitterSampler` — turns the aggregate TSRD statistics JSON into a
 list of `EmitterConfig` objects that the existing
-`PS26055Environment.reset(seed, configs)` path can consume unchanged.
+`VyaptiEnv.reset(seed, configs)` path can consume unchanged.
 
 This is the TSRD Option-A integration point: the simulator regenerates
 truth from distributions on every run using the existing 13-member

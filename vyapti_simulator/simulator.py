@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PS26055 simulator CLI — executable entry point.
+Vyapti simulator CLI — executable entry point.
 
 Supersedes the prior hardcoded loop. The canonical episode runner is now
 `core.episode.run_episode`, which the conformance suite, the experiments package,
@@ -30,7 +30,7 @@ import time
 from typing import Any, Dict
 
 from .core.environment import (
-    PS26055Environment, SimulationConfig, EmitterConfig, EmitterBehaviorType,
+    VyaptiEnv, SimulationConfig, EmitterConfig, EmitterBehaviorType,
 )
 from .core.episode import run_paired_episodes
 from .core.metrics import MetricsEngine, MetricsConfig
@@ -158,7 +158,7 @@ def run_comparison(
             "tsrd_statistics_path": None,
         }
 
-    env = PS26055Environment(config, emitters)
+    env = VyaptiEnv(config, emitters)
 
     schedulers = {
         "method": MethodClass(config.band_count, **method_kwargs),
@@ -231,7 +231,7 @@ def run_comparison(
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m vyapti_simulator.simulator",
-        description="PS26055 simulator CLI. Runs one paired comparison.",
+        description="Vyapti simulator CLI. Runs one paired comparison.",
     )
     ap.add_argument("--method", required=True, metavar="module:Class",
                     help="Scheduler under test, e.g. ...algorithms.bandit.ucb:UCB1Scheduler")

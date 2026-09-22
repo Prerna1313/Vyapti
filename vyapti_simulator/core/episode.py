@@ -1,5 +1,5 @@
 """
-PS26055 canonical episode runner — the ONE loop.
+Vyapti canonical episode runner — the ONE loop.
 
 =======================================================================
 Why this file exists at all
@@ -72,7 +72,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
-from .environment import PS26055Environment, EmitterConfig
+from .environment import VyaptiEnv, EmitterConfig
 from .scheduler_interface import BaseScheduler, BandPrediction
 from .metrics import TrajectoryStep
 
@@ -89,7 +89,7 @@ PERMITTED_SCENARIO_KEYS = frozenset({
 })
 
 
-def scenario_descriptor(env: PS26055Environment) -> Dict[str, Any]:
+def scenario_descriptor(env: VyaptiEnv) -> Dict[str, Any]:
     """
     Build the reset payload for a scheduler: receiver facts only, no truth.
 
@@ -157,7 +157,7 @@ class EpisodeResult:
 # =====================================================================
 
 def run_episode(
-    env: PS26055Environment,
+    env: VyaptiEnv,
     scheduler: BaseScheduler,
     seed: int,
     emitter_family_config: Optional[Sequence[EmitterConfig]] = None,
@@ -281,7 +281,7 @@ def run_episode(
 
 
 def run_paired_episodes(
-    env: PS26055Environment,
+    env: VyaptiEnv,
     schedulers: Dict[str, BaseScheduler],
     seed: int,
     emitter_family_config: Optional[Sequence[EmitterConfig]] = None,
@@ -372,7 +372,7 @@ class ReplayResult:
 
 
 def replay_episode(
-    env: PS26055Environment,
+    env: VyaptiEnv,
     saved: EpisodeResult,
     *,
     emitter_family_config: Optional[Sequence[EmitterConfig]] = None,
@@ -388,7 +388,7 @@ def replay_episode(
 
     Parameters
     ----------
-    env : PS26055Environment
+    env : VyaptiEnv
         A freshly constructed environment. ``env.reset()`` will be called
         with the same seed as the saved episode.
     saved : EpisodeResult
@@ -412,7 +412,7 @@ def replay_episode(
         result = run_episode(env, scheduler, seed=42)
 
         # Later: replay to check determinism or debug a failure
-        fresh_env = PS26055Environment(config=my_config)
+        fresh_env = VyaptiEnv(config=my_config)
         replay = replay_episode(fresh_env, result)
         print(replay.summary())
         if not replay.is_deterministic:

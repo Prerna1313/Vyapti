@@ -1,5 +1,5 @@
 """
-PS26055 Gate 0 scheduler conformance suite.
+Vyapti Gate 0 scheduler conformance suite.
 
 =======================================================================
 What passing this means, and what it does not
@@ -73,7 +73,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import numpy as np
 
 from ..core.environment import (
-    PS26055Environment, SimulationConfig, EmitterConfig, EmitterBehaviorType,
+    VyaptiEnv, SimulationConfig, EmitterConfig, EmitterBehaviorType,
 )
 from ..core.scheduler_interface import (
     BaseScheduler, BandPrediction, PERMITTED_OBSERVATION_KEYS,
@@ -188,9 +188,9 @@ def default_conformance_scenario(band_count: int = 8,
     ]
 
 
-def _make_env(band_count: int, time_slots: int) -> PS26055Environment:
+def _make_env(band_count: int, time_slots: int) -> VyaptiEnv:
     cfg = SimulationConfig(band_count=band_count, time_slots=time_slots)
-    return PS26055Environment(cfg, default_conformance_scenario(band_count, time_slots))
+    return VyaptiEnv(cfg, default_conformance_scenario(band_count, time_slots))
 
 
 def _valid_observation(band_count: int, t: int = 0) -> Dict[str, Any]:

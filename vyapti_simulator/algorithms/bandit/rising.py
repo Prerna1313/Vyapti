@@ -1,5 +1,5 @@
 """
-PS26055 Rising / restless-index bandit scheduler.
+Vyapti Rising / restless-index bandit scheduler.
 
 [BANDIT] [LITERATURE-GROUNDED]
   - Whittle (1988) — restless bandits and the Whittle index.

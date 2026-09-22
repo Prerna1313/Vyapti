@@ -1,4 +1,4 @@
-"""PS26055 Config — single provenance-tracked parameter source."""
+"""Vyapti Config — single provenance-tracked parameter source."""
 
 from .master_config import MasterSimulationConfig
 

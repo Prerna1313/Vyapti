@@ -1,5 +1,5 @@
 """
-PS26055 Simulation Environment — Core Truth Layer
+Vyapti Simulation Environment — Core Truth Layer
 Scientific Simulation Architect | Senior RF/ES Engineer
 
 PURPOSE: Own the hidden ground-truth emitter activity grid.
@@ -351,7 +351,7 @@ class SimulationConfig:
         return self.dwell_time_ms / 1000.0
 
 
-class PS26055Environment:
+class VyaptiEnv:
     """
     The single interactive environment for ALL scheduling algorithms.
     Per frozen protocol (line 30-38): same simulator, same observation contract,

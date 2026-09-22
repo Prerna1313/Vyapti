@@ -63,7 +63,7 @@ synthetic-truth simulator cannot.
 
 Author
 ------
-Senior RF/EW Signal Simulation Engineer — PS26055 Option C integration.
+Senior RF/EW Signal Simulation Engineer — Vyapti Option C integration.
 """
 
 from __future__ import annotations

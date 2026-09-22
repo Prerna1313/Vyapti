@@ -1,5 +1,5 @@
 """
-Real RF pulse simulator for PS26055 Electronic Warfare smart scan scheduler.
+Real RF pulse simulator for Vyapti Electronic Warfare smart scan scheduler.
 
 Generates realistic radar pulse trains from multiple emitter types, applies
 detection probability and false alarm model, and presents a clean

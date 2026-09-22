@@ -1,5 +1,5 @@
 """
-PS26055 Periodicity estimation from sparse, unevenly-sampled ES observations.
+Vyapti Periodicity estimation from sparse, unevenly-sampled ES observations.
 
 Shared by ESPE, Gaussian ESPE and the coverage-constrained scheduler.
 
