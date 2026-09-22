@@ -353,12 +353,15 @@ class RoundRobinScheduler(BaseScheduler):
     ):
         if not bands_hz:
             raise ValueError("bands_hz must be non-empty")
+        if dwell_ms <= 0:
+            raise ValueError("dwell_ms must be > 0")
         self.bands = bands_hz
         self.dwell_ms = float(dwell_ms)
         self._idx = 0
 
     def decide(self, state: MissionState) -> Dwell:
-        band = self.bands[self._idx % len(self.bands)]
+        idx = self._idx % len(self.bands)
+        band = self.bands[idx]
         self._idx += 1
         return Dwell(
             freq_start_hz=float(band[0]),
@@ -367,7 +370,7 @@ class RoundRobinScheduler(BaseScheduler):
             aoa_window_deg=None,
             dwell_ms=self.dwell_ms,
             priority=0.0,
-            reason=f"round_robin band {self._idx % len(self.bands)}",
+            reason=f"round_robin band {idx}",
         )
 
     def reset(self) -> None:
