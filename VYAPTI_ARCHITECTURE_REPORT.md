@@ -1,10 +1,10 @@
-# Vyapti — PS26055 Electronic Warfare Scheduler Simulator
+# Vyapti — Vyapti Electronic Warfare Scheduler Simulator
 ## Architecture & Usage Guide
 
 **Version:** 1.2.0
 **Python:** 3.10+
 **GitHub:** `https://github.com/Prerna1313/Vyapti.git`
-**Protocol:** PS26055 Frozen Protocol v1.0 (Gates 0–7 ✓)
+**Protocol:** Vyapti Frozen Protocol v1.0 (Gates 0–7 ✓)
 
 ---
 
@@ -55,7 +55,7 @@ It does this by:
 
 - **TSRD is a synthetic dataset** — physics-based simulation, not measured RF data from live emitters
 - **AGC margin (0 dB) is an engineering choice**, not literature-grounded — see §6 Shnidman Parameters for the detection threshold defaults; the AGC SNR margin was set to 0 dB to align System B with System A behavior, noting that 5 dB was a prior value that may over-suppress multipath
-- **Band/slot defaults (36 × 600) are PS26055 research defaults** — configurable per scenario via `SimulationConfig` and the scenario registry
+- **Band/slot defaults (36 × 600) are Vyapti research defaults** — configurable per scenario via `SimulationConfig` and the scenario registry
 
 ---
 
@@ -101,7 +101,7 @@ It does this by:
 ```
 vyapti_simulator/
 ├── core/                          # Core simulator infrastructure
-│   ├── environment.py              # HiddenTruthGrid, PS26055Environment
+│   ├── environment.py              # HiddenTruthGrid, VyaptiEnvironment
 │   ├── receiver.py                # ReceiverPhysicsConfig, ReceiverModel
 │   ├── mapping.py                 # frequency_to_band(), seconds_to_slot()
 │   ├── scheduler_interface.py      # BaseScheduler, PERMITTED_OBSERVATION_KEYS
@@ -186,7 +186,7 @@ Stare mode (System B's counterfactual oracle, §14) is **a special case** of clo
 
 | System | Path |
 |---|---|
-| A | EmitterConfig → HiddenTruthGrid → PS26055Environment → step() → observation |
+| A | EmitterConfig → HiddenTruthGrid → VyaptiEnvironment → step() → observation |
 | B (Option B) | H5 → TSRDAdapter → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment → step() → observation |
 | B (Option C) | H5 → TSRDAdapter → PDWStream → FeatureBasedDeinterleaver → tracks → TSRDEnvironment |
 | B (synthetic fallback) | SyntheticEWPDWGenerator → PDWStream → discretise_pdw_to_grid() → TSRDEnvironment |
@@ -236,7 +236,7 @@ class YourScheduler(BaseScheduler):
 
 ### The Observation Contract
 
-Every environment (`PS26055Environment` and `TSRDEnvironment`) returns the same observation dict. Only these fields are permitted:
+Every environment (`VyaptiEnvironment` and `TSRDEnvironment`) returns the same observation dict. Only these fields are permitted:
 
 ```
 time_slot                    — slot just dwelled
@@ -273,7 +273,7 @@ The conformance suite (Gate 0) verifies these fields never appear: `true_activit
 
 ### HiddenTruthGrid
 
-Ground truth is a 3D boolean array `X[emitter, band, slot]` built by `PS26055Environment.reset()`:
+Ground truth is a 3D boolean array `X[emitter, band, slot]` built by `VyaptiEnvironment.reset()`:
 
 ```python
 @dataclass
@@ -612,11 +612,11 @@ from vyapti_simulator.core import get_scenario, list_scenarios, ScenarioConfig
 # List available scenarios
 scenarios = list_scenarios()
 # ['dynamic_delayed_arrival', 'dynamic_on_off', 'dynamic_regime_change',
-#  'ps26055_standard_high', 'ps26055_standard_low', 'ps26055_standard_medium',
+#  'Vyapti_standard_high', 'Vyapti_standard_low', 'Vyapti_standard_medium',
 #  'tsrd_dense', 'tsrd_sparse']
 
 # Get a scenario
-scenario = get_scenario("ps26055_standard_medium")
+scenario = get_scenario("Vyapti_standard_medium")
 print(f"Density: {scenario.emitter_density}")
 print(f"Train seeds: {len(scenario.train_seed_list())}")
 

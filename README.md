@@ -1,4 +1,4 @@
-# Vyapti — PS26055 Electronic Warfare Scheduler Simulator
+# Vyapti — Vyapti Electronic Warfare Scheduler Simulator
 
 A pulse-level RF simulator for evaluating multi-armed bandit scheduling algorithms against
 realistic electronic warfare (EW) emitter scenarios, calibrated against the
@@ -18,7 +18,7 @@ Vyapti is a **research-grade EW scheduler comparison platform** that:
 3. **Shares a detection model** between synthetic (System A) and TSRD-driven (System B) paths —
    the same logistic SNR→Pd curve is applied on both, so synthetic and real-TSRD experiments
    are directly comparable.
-4. **Enforces the PS26055 Frozen Protocol v1.0** — 8 gate checkpoints, mandatory result-tagging
+4. **Enforces the Vyapti Frozen Protocol v1.0** — 8 gate checkpoints, mandatory result-tagging
    (7 fields per result row), oracle-free scheduler observation contract, and negative-result
    reporting discipline.
 5. **Computes 7 DRDO-named figures of merit** with proper unavailable/None semantics and
@@ -102,7 +102,7 @@ for rec in loader.iterate():
 vyapti_simulator/
 ├── algorithms/        Bandit and reference schedulers
 ├── config/            Master config with provenance labels
-├── core/              PS26055Environment, metrics engine, mapping
+├── core/              VyaptiEnvironment, metrics engine, mapping
 ├── experiments/       ExperimentConfig, ExperimentRunner, statistics
 ├── protocol/          FrozenProtocolEnforcer (Gates 0–7, F, G)
 ├── qualification/     Conformance checks (C0–C11), probe schedulers
@@ -140,7 +140,7 @@ Both are valid per the frozen protocol's research-platform extension clause.
 
 ## References
 
-- **Frozen Protocol:** `PS26055_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md`
+- **Frozen Protocol:** `Vyapti_Common_Simulation_and_Evaluation_Protocol_v1.0_FROZEN.md`
 - **TSRD:** arXiv:2602.03856, Apache-2.0
 - **Wilcoxon / Cliff's delta:** scipy.stats, Romano et al. (2006)
 - **Kaplan-Meier:** Kaplan & Meier (1958)
