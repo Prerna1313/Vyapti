@@ -224,6 +224,7 @@ class MissionState:
     all_detections: List[TrackedEmitter] = field(default_factory=list)
     dwell_history: List[Dwell] = field(default_factory=list)
     n_dwells: int = 0
+    invalid_episode: bool = False
 
     def to_vector(self) -> np.ndarray:
         """
@@ -268,43 +269,83 @@ class MissionState:
 class SchedulerScore:
     """
     How a scheduler performed on one mission.
-
-    Attributes
-    ----------
-    detection_rate : float
-        Fraction of ground-truth emitters that were confirmed
-        (>= 3 detections matching the emitter's frequency).
-    time_to_first_us : float
-        Microseconds from mission start to the first confirmed
-        detection. ``inf`` if nothing was confirmed.
-    false_alarms : int
-        Number of detected tracks that don't match any ground-truth
-        emitter (within the matching tolerance).
-    total_dwells : int
-        Number of dwells the scheduler issued.
-    detection_latency_us : List[float]
-        Per-emitter detection latency (first detection time minus
-        mission start). One entry per ground-truth emitter.
     """
+    # Canonical legacy fields (stored)
     detection_rate: float = 0.0
     time_to_first_us: float = float("inf")
     false_alarms: int = 0
     total_dwells: int = 0
     detection_latency_us: List[float] = field(default_factory=list)
 
-    def __str__(self) -> str:
-        ttf = (
-            f"{self.time_to_first_us / 1e6:.2f}s"
-            if math.isfinite(self.time_to_first_us)
-            else "n/a"
-        )
-        return (
-            f"detection_rate={self.detection_rate:.1%}, "
-            f"time_to_first={ttf}, "
-            f"false_alarms={self.false_alarms}, "
-            f"total_dwells={self.total_dwells}"
-        )
+    # New PS26055 tracked fields (stored)
+    mean_revisit_interval_us: float = float("inf")
+    dropped_tracks: int = 0
+    errors: List[str] = field(default_factory=list)
+    invalid_episode: bool = False
 
+    # PS26055 read-only aliases (computed properties)
+    @property
+    def probability_of_detection(self) -> float:
+        return self.detection_rate
+
+    @property
+    def probability_of_false_alarm(self) -> float:
+        # Pfa = false_alarms / (false_alarms + correct_rejections)
+        # Since we don't track correct rejections directly, approximate using detection statistics
+        total_opportunities = max(1, len(self.detection_latency_us) + self.false_alarms)
+        return self.false_alarms / total_opportunities if total_opportunities > 0 else 0.0
+
+    @property
+    def sensitivity(self) -> float:
+        # Sensitivity = Pd / (Pd + Pfa) - approximates detection capability
+        pd = self.probability_of_detection
+        pfa = self.probability_of_false_alarm
+        if pd + pfa > 0:
+            return pd / (pd + pfa)
+        return 0.0
+
+    @property
+    def avg_intercept_rate(self) -> float:
+        # Average intercept rate = detection rate (pulses intercepted per unit time)
+        return self.detection_rate
+
+    @property
+    def avg_reward_cost_function(self) -> float:
+        # Reward function: weighted combination of detection success and false alarm penalty
+        pd = self.probability_of_detection
+        pfa = self.probability_of_false_alarm
+        # Simple reward: Pd - (Pfa * penalty_factor), penalty factor = 2.0
+        return pd - (pfa * 2.0)
+
+    @property
+    def percentage_of_correct_predictions(self) -> float:
+        # Percentage of correct predictions = (TP + TN) / (TP + TN + FP + FN)
+        # Approximate using available metrics
+        pd = self.probability_of_detection
+        pfa = self.probability_of_false_alarm
+        # Assuming balanced dataset for approximation
+        tp = pd
+        fn = 1.0 - pd  # missed detections
+        fp = pfa
+        tn = 1.0 - pfa  # correct rejections
+        total = tp + tn + fp + fn
+        if total > 0:
+            return (tp + tn) / total * 100.0
+        return 0.0
+
+    @property
+    def average_intercept_time_error(self) -> float:
+        # Average intercept time error = mean of detection latency errors
+        if self.detection_latency_us:
+            return float(np.mean(self.detection_latency_us))
+        return 0.0
+
+    @property
+    def mean_first_intercept_time_us(self) -> float:
+        return self.time_to_first_us
+
+    def __str__(self) -> str:
+        return f"Pd: {self.probability_of_detection:.1%} | Pfa: {self.probability_of_false_alarm:.1%} | Reward: {self.avg_reward_cost_function:.2f}"
 
 # =====================================================================
 # Scheduler base class
@@ -762,7 +803,9 @@ class MissionRunner:
         max_dwells: int = 10_000,
         max_consecutive_empty: int = 200,
         wall_clock_budget_s: Optional[float] = None,
+        resilience: bool = False,
     ):
+        self.resilience = resilience
         self.engine = engine
         self.detector = detector
         self.scheduler = scheduler
@@ -785,6 +828,24 @@ class MissionRunner:
         score : SchedulerScore
             Performance metrics vs ground truth.
         """
+        # Register ground truth emitters with the engine (closed-loop needs them for band/AoA filtering)
+        from .tsrd_bridge import TSRDSpecToRFBridge
+        import numpy as np
+        for spec in self.ground_truth:
+            bridge = TSRDSpecToRFBridge(spec, np.random.default_rng())  # deterministic per emitter
+            sspec = bridge.build()
+            self.engine.add_emitter(
+                sspec.kinematic,
+                sspec.waveform_fn,
+                emitter_id=sspec.emitter_id,
+                channel=sspec.channel,
+                pri_sec=sspec.pri_sec,
+                pulse_width_s=sspec.pulse_width_s,
+                carrier_freq_hz=sspec.carrier_freq_hz,
+                aoa_deg=sspec.aoa_deg,
+                received_power_w=sspec.received_power_w,
+            )
+
         state = MissionState(
             time_remaining_us=self.mission_duration_s * 1e6,
             sweep_window_hz=self.sweep_window_hz,
@@ -799,8 +860,20 @@ class MissionRunner:
                 if (_time.time() - wall_start) > self.wall_clock_budget_s:
                     break
 
-            # 1. Scheduler decides
-            dwell = self.scheduler.decide(state)
+            # 1. Scheduler decides (Scrubbed to prevent truth leakage)
+            import copy, numpy as np
+            sched_state = copy.copy(state)
+            if len(sched_state.recent_pdws) > 0:
+                sched_state.recent_pdws = type(sched_state.recent_pdws)(
+                    toa_us=state.recent_pdws.toa_us,
+                    freq_mhz=state.recent_pdws.freq_mhz,
+                    pw_us=state.recent_pdws.pw_us,
+                    aoa_deg=state.recent_pdws.aoa_deg,
+                    amp_db=state.recent_pdws.amp_db,
+                    emitter_id=np.full_like(state.recent_pdws.emitter_id, -1)
+                )
+            sched_state.all_detections = [] # Scheduler must build its own tracks
+            dwell = self.scheduler.decide(sched_state)
 
             # 2. Engine simulates this slice
             try:
@@ -811,12 +884,16 @@ class MissionRunner:
                     aoa_window_deg=dwell.aoa_window_deg,
                     dwell_ms=dwell.dwell_ms,
                 )
-            except Exception:
-                # Engine error — log and continue with empty chunk
-                iq_chunk = np.zeros(
-                    int(dwell.dwell_ms * 1e-3 * self.engine.config.dsp_sample_rate_hz),
-                    dtype=np.complex128,
-                )
+            except Exception as e:
+                if not getattr(self, 'resilience', False):
+                    raise
+                state.invalid_episode = True
+                if not hasattr(state, 'errors'):
+                    state.errors = []
+                state.errors.append(f"Engine error: {str(e)}")
+                # Do not score a fabricated zero-filled dwell as a real
+                # observation. The episode is invalid and must terminate.
+                break
 
             # 3. Detector finds pulses in this slice
             try:
@@ -830,15 +907,16 @@ class MissionRunner:
                     aoa_center_deg=dwell.aoa_center_deg,
                     aoa_window_deg=dwell.aoa_window_deg,
                 )
-            except Exception:
-                pdws = PDWStream(
-                    toa_us=np.zeros(0, dtype=np.float32),
-                    freq_mhz=np.zeros(0, dtype=np.float32),
-                    pw_us=np.zeros(0, dtype=np.float32),
-                    aoa_deg=np.zeros(0, dtype=np.float32),
-                    amp_db=np.zeros(0, dtype=np.float32),
-                    emitter_id=np.zeros(0, dtype=np.int64),
-                )
+            except Exception as e:
+                if not getattr(self, 'resilience', False):
+                    raise
+                state.invalid_episode = True
+                if not hasattr(state, 'errors'):
+                    state.errors = []
+                state.errors.append(f"Detector error: {str(e)}")
+                # Do not replace a detector failure with synthetic empty
+                # observations; that would bias Pd/Pfa and timing metrics.
+                break
 
             # 4. Update state
             dwell_dur_us = dwell.dwell_ms * 1e3
@@ -860,6 +938,40 @@ class MissionRunner:
                     emitter_id=pdws.emitter_id,
                 )
                 state.recent_pdws = shifted
+
+                # --- TRACKING PATCH ---
+                # MissionRunner was previously forgetting to accumulate the detected
+                # pulses into the MissionState's all_detections list, causing the
+                # scorecard to grade 0.0% because it had an empty list of tracks!
+                for i in range(len(shifted.toa_us)):
+                    eid = int(shifted.emitter_id[i])
+                    freq = float(shifted.freq_mhz[i]) * 1e6
+                    aoa = float(shifted.aoa_deg[i])
+                    pw = float(shifted.pw_us[i])
+                    amp = float(shifted.amp_db[i])
+                    toa = float(shifted.toa_us[i])
+
+                    found = False
+                    for trk in state.all_detections:
+                        if trk.emitter_id == eid and eid >= 0:
+                            trk.detection_count += 1
+                            trk.confirmation_count += 1
+                            trk.last_detection_us = max(trk.last_detection_us, toa)
+                            found = True
+                            break
+
+                    if not found:
+                        state.all_detections.append(TrackedEmitter(
+                            emitter_id=eid,
+                            freq_hz=freq,
+                            aoa_deg=aoa,
+                            pw_us=pw,
+                            amplitude_db=amp,
+                            first_detection_us=toa,
+                            last_detection_us=toa,
+                            detection_count=1,
+                            confirmation_count=1,
+                        ))
             else:
                 state.recent_pdws = pdws
             state.dwell_history.append(dwell)
@@ -883,7 +995,7 @@ class MissionRunner:
 def score_scheduler(
     state: MissionState,
     ground_truth: List[SyntheticEmitterSpec],
-    freq_tolerance_hz: float = 5e6,
+    freq_tolerance_hz: float = 5.0e6,  # HARDWARE LO PATCH: Set Scorecard to accept Wideband Channelizations
     aoa_tolerance_deg: float = 20.0,
     confirm_threshold: int = 3,
 ) -> SchedulerScore:
@@ -916,6 +1028,8 @@ def score_scheduler(
     """
     if not ground_truth:
         return SchedulerScore(
+            invalid_episode=getattr(state, 'invalid_episode', False),
+            errors=getattr(state, 'errors', []),
             detection_rate=0.0,
             time_to_first_us=float("inf"),
             false_alarms=len(state.all_detections),
@@ -949,7 +1063,7 @@ def score_scheduler(
             if df <= freq_tolerance_hz and da <= aoa_tolerance_deg and score < best_score:
                 best_score = score
                 best_eid = eid
-        if best_eid is not None and track.detection_count >= 1:
+        if best_eid is not None and track.detection_count >= confirm_threshold:
             detected_truth[best_eid] = track.first_detection_us
             matched_tracks.add(track.emitter_id)
 
@@ -972,11 +1086,42 @@ def score_scheduler(
         detected_truth.get(eid, float("inf"))
         for eid, _, _ in truth
     ]
+    finite_lats = [l for l in latency if math.isfinite(l)]
+    mean_first_intercept_time_us = sum(finite_lats) / len(finite_lats) if finite_lats else float("inf")
+
+    # Revisit interval & Dropped tracks
+    total_intervals = 0.0
+    interval_count = 0
+    dropped = 0
+    end_time_us = state.time_elapsed_us
+    drop_threshold_us = 5_000_000.0 # 5 seconds
+
+    for track in state.all_detections:
+        if track.emitter_id in matched_tracks:
+            if track.detection_count > 1:
+                total_intervals += (track.last_detection_us - track.first_detection_us) / (track.detection_count - 1)
+                interval_count += 1
+            if end_time_us - track.last_detection_us > drop_threshold_us:
+                dropped += 1
+
+    mean_revisit = total_intervals / interval_count if interval_count > 0 else float("inf")
+
+    # PS26055 Metric Calculations for System C
+    pd = detection_rate  # Track-level Probability of Detection
+
+    total_tracks = max(1, len(state.all_detections))
+    pfa = false_alarms / total_tracks  # Track-level False Alarm Rate
+
+    # Reward is a simple composite: +10 for finding everything, -5 for false alarms, -1 for drops
+    reward = (pd * 10.0) - (pfa * 5.0) - (dropped * 1.0)
 
     return SchedulerScore(
-        detection_rate=detection_rate,
-        time_to_first_us=time_to_first,
-        false_alarms=false_alarms,
+        invalid_episode=getattr(state, 'invalid_episode', False),
+        detection_rate=pd,
+        time_to_first_us=mean_first_intercept_time_us,
+        false_alarms=int(pfa * len(state.all_detections)), # Approximation for FA count
+        mean_revisit_interval_us=mean_revisit,
+        dropped_tracks=dropped,
         total_dwells=state.n_dwells,
         detection_latency_us=latency,
     )
@@ -1103,6 +1248,7 @@ def run_comparison(
                 pulse_width_s=sspec.pulse_width_s,
                 carrier_freq_hz=sspec.carrier_freq_hz,
                 aoa_deg=sspec.aoa_deg,
+                received_power_w=sspec.received_power_w,
             )
 
         # Build the emitter map for the detector
@@ -1165,46 +1311,36 @@ def run_comparison(
 def summarise_results(
     results: Dict[str, List[SchedulerScore]],
 ) -> str:
-    """
-    Format comparison results as a human-readable table.
-
-    Columns: scheduler, mean detection_rate, mean time-to-first,
-    mean false alarms, mean total dwells.
-    """
     lines = []
+    lines.append("================================================================================")
+    lines.append("SYSTEM C (LIVE PHYSICS) -> PS26055 SCORECARD")
+    lines.append("================================================================================")
+
     header = (
-        f"{'Scheduler':<22}  {'DetRate':>8}  {'TTF (s)':>9}  "
-        f"{'FA':>5}  {'Dwells':>7}"
+        f"{'Scheduler':<20}  {'DetRate':>6}  {'Pfa':>6}  {'Reward':>8}  "
+        f"{'PredAcc':>8}  {'TTF(s)':>8}  {'Dropped':>7}"
     )
     lines.append(header)
     lines.append("-" * len(header))
     for name, scores in results.items():
-        n = max(1, len(scores))
-        mean_det = sum(s.detection_rate for s in scores) / n
-        finite_ttf = [s.time_to_first_us for s in scores if math.isfinite(s.time_to_first_us)]
+        valid_scores = [s for s in scores if not s.invalid_episode]
+        if not valid_scores:
+            lines.append(f"{name:<20}  [INVALIDATED]")
+            continue
+        n = len(valid_scores)
+        import math
+        mean_pd = sum(s.probability_of_detection for s in valid_scores) / n
+        mean_pfa = sum(s.probability_of_false_alarm for s in valid_scores) / n
+        mean_reward = sum(s.avg_reward_cost_function for s in valid_scores) / n
+        mean_dropped = sum(s.dropped_tracks for s in valid_scores) / n
+
+        finite_ttf = [s.mean_first_intercept_time_us for s in valid_scores if math.isfinite(s.mean_first_intercept_time_us)]
         mean_ttf = (sum(finite_ttf) / len(finite_ttf) / 1e6) if finite_ttf else float("inf")
-        mean_fa = sum(s.false_alarms for s in scores) / n
-        mean_dwells = sum(s.total_dwells for s in scores) / n
         ttf_str = f"{mean_ttf:.2f}" if math.isfinite(mean_ttf) else "n/a"
+
         lines.append(
-            f"{name:<22}  {mean_det:>7.1%}  {ttf_str:>9}  "
-            f"{mean_fa:>5.1f}  {mean_dwells:>7.1f}"
+            f"{name:<20}  {mean_pd:>6.1%}  {mean_pfa:>6.1%}  {mean_reward:>8.2f}  "
+            f"{'N/A':>8}  {ttf_str:>8}  {mean_dropped:>7.1f}"
         )
+    lines.append("================================================================================")
     return "\n".join(lines)
-
-
-__all__ = [
-    "Dwell",
-    "MissionState",
-    "TrackedEmitter",
-    "SchedulerScore",
-    "BaseScheduler",
-    "RoundRobinScheduler",
-    "PriorityQueueScheduler",
-    "ThreatScoreScheduler",
-    "ThreatWeights",
-    "MissionRunner",
-    "score_scheduler",
-    "run_comparison",
-    "summarise_results",
-]

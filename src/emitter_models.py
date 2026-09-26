@@ -24,6 +24,12 @@ from typing import List, Optional, Tuple, Dict, Any
 from abc import ABC, abstractmethod
 
 
+def _require_valid(condition: bool, message: str) -> None:
+    """Validate constructor input even when Python assertions are disabled."""
+    if not condition:
+        raise ValueError(message)
+
+
 # =====================================================================
 # Channel model: path loss, fading, atmospheric attenuation
 # =====================================================================
@@ -274,14 +280,14 @@ class FixedContinuousEmitter(Emitter):
         self.range_km = float(range_km)
 
         # Validate
-        assert 500e6 <= self.center_freq_hz <= 18e9, \
-            f"Frequency must be 500 MHz – 18 GHz, got {self.center_freq_hz/1e9:.2f} GHz"
-        assert 50e-6 <= self.pri_sec <= 10e-3, \
-            f"PRI must be 50 μs – 10 ms, got {self.pri_sec*1e6:.1f} μs"
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6, \
-            f"PW must be 0.2 μs – 10 μs, got {self.pulse_width_sec*1e6:.2f} μs"
-        assert -100.0 <= self.power_dbm <= -30.0, \
-            f"Power must be -100 dBm to -30 dBm, got {self.power_dbm:.1f} dBm"
+        _require_valid(500e6 <= self.center_freq_hz <= 18e9,
+                       f"Frequency must be 500 MHz – 18 GHz, got {self.center_freq_hz/1e9:.2f} GHz")
+        _require_valid(50e-6 <= self.pri_sec <= 10e-3,
+                       f"PRI must be 50 μs – 10 ms, got {self.pri_sec*1e6:.1f} μs")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6,
+                       f"PW must be 0.2 μs – 10 μs, got {self.pulse_width_sec*1e6:.2f} μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0,
+                       f"Power must be -100 dBm to -30 dBm, got {self.power_dbm:.1f} dBm")
 
     def emitter_type(self) -> str:
         return "FixedContinuous"
@@ -377,14 +383,14 @@ class FixedIntermittentEmitter(Emitter):
 
         self.cycle_sec = self.on_sec + self.off_sec
 
-        assert self.cycle_sec > 0, "Duty cycle period must be positive"
+        _require_valid(self.cycle_sec > 0, "Duty cycle period must be positive")
         self.duty_cycle = self.on_sec / self.cycle_sec
 
         # Validate RF params
-        assert 500e6 <= self.center_freq_hz <= 18e9
-        assert 50e-6 <= self.pri_sec <= 10e-3
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6
-        assert -100.0 <= self.power_dbm <= -30.0
+        _require_valid(500e6 <= self.center_freq_hz <= 18e9, "center_freq_hz must be 500 MHz to 18 GHz")
+        _require_valid(50e-6 <= self.pri_sec <= 10e-3, "pri_sec must be 50 μs to 10 ms")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6, "pulse_width_sec must be 0.2 μs to 10 μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0, "power_dbm must be -100 to -30 dBm")
 
     def emitter_type(self) -> str:
         return "FixedIntermittent"
@@ -523,12 +529,12 @@ class ScanningEmitter(Emitter):
         # PRI phase offset
         self.pri_offset = 0.0  # pulse phase within scan
 
-        assert 500e6 <= self.center_freq_hz <= 18e9
-        assert 50e-6 <= self.pri_sec <= 10e-3
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6
-        assert -100.0 <= self.power_dbm <= -30.0
-        assert 0.5 <= self.scan_period_sec <= 30.0, "Scan period should be 0.5–30 seconds"
-        assert 0.1 <= self.beam_width_deg <= 30.0, "Beam width should be 0.1–30 degrees"
+        _require_valid(500e6 <= self.center_freq_hz <= 18e9, "center_freq_hz must be 500 MHz to 18 GHz")
+        _require_valid(50e-6 <= self.pri_sec <= 10e-3, "pri_sec must be 50 μs to 10 ms")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6, "pulse_width_sec must be 0.2 μs to 10 μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0, "power_dbm must be -100 to -30 dBm")
+        _require_valid(0.5 <= self.scan_period_sec <= 30.0, "Scan period should be 0.5–30 seconds")
+        _require_valid(0.1 <= self.beam_width_deg <= 30.0, "Beam width should be 0.1–30 degrees")
 
     def emitter_type(self) -> str:
         return "PeriodicSpatialScan"
@@ -655,17 +661,17 @@ class FrequencyAgileEmitter(Emitter):
             if dwell_schedule_sec is not None else None
         )
 
-        assert len(self.freq_list_hz) > 0, "freq_list_hz must not be empty"
+        _require_valid(len(self.freq_list_hz) > 0, "freq_list_hz must not be empty")
         for f in self.freq_list_hz:
-            assert 500e6 <= f <= 18e9, f"Frequency {f/1e9:.2f} GHz out of range"
-        assert 50e-6 <= self.pri_sec <= 10e-3
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6
-        assert -100.0 <= self.power_dbm <= -30.0
-        assert 1e-3 <= self.dwell_sec <= 1.0, "Dwell time should be 1 ms to 1 s"
+            _require_valid(500e6 <= f <= 18e9, f"Frequency {f/1e9:.2f} GHz out of range")
+        _require_valid(50e-6 <= self.pri_sec <= 10e-3, "pri_sec must be 50 μs to 10 ms")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6, "pulse_width_sec must be 0.2 μs to 10 μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0, "power_dbm must be -100 to -30 dBm")
+        _require_valid(1e-3 <= self.dwell_sec <= 1.0, "Dwell time should be 1 ms to 1 s")
         if self.dwell_schedule_sec is not None:
-            assert len(self.dwell_schedule_sec) > 0
+            _require_valid(len(self.dwell_schedule_sec) > 0, "dwell_schedule_sec must not be empty")
             for d in self.dwell_schedule_sec:
-                assert 1e-3 <= d <= 1.0, "Dwell entries must be 1 ms to 1 s"
+                _require_valid(1e-3 <= d <= 1.0, "Dwell entries must be 1 ms to 1 s")
 
         self.n_freqs = len(self.freq_list_hz)
 
@@ -830,17 +836,17 @@ class FrequencyAgileScanningEmitter(Emitter):
         self.visibility_fraction = self.beam_width_deg / 360.0
         self.visible_duration_sec = self.scan_period_sec * self.visibility_fraction
 
-        assert len(self.freq_list_hz) > 0
+        _require_valid(len(self.freq_list_hz) > 0, "freq_list_hz must not be empty")
         for f in self.freq_list_hz:
-            assert 500e6 <= f <= 18e9
-        assert 50e-6 <= self.pri_sec <= 10e-3
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6
-        assert -100.0 <= self.power_dbm <= -30.0
-        assert 1e-3 <= self.dwell_sec <= 1.0
-        assert 0.5 <= self.scan_period_sec <= 30.0
+            _require_valid(500e6 <= f <= 18e9, "frequency must be 500 MHz to 18 GHz")
+        _require_valid(50e-6 <= self.pri_sec <= 10e-3, "pri_sec must be 50 μs to 10 ms")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6, "pulse_width_sec must be 0.2 μs to 10 μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0, "power_dbm must be -100 to -30 dBm")
+        _require_valid(1e-3 <= self.dwell_sec <= 1.0, "dwell_sec must be 1 ms to 1 s")
+        _require_valid(0.5 <= self.scan_period_sec <= 30.0, "scan_period_sec must be 0.5 to 30 s")
         if self.dwell_schedule_sec is not None:
             for d in self.dwell_schedule_sec:
-                assert 1e-3 <= d <= 1.0
+                _require_valid(1e-3 <= d <= 1.0, "dwell entries must be 1 ms to 1 s")
 
     def emitter_type(self) -> str:
         return "FrequencyAgileScanning"
@@ -993,11 +999,11 @@ class PriJitterEmitter(Emitter):
         self.stop_time_sec = stop_time_sec
         self.range_km = float(range_km)
 
-        assert 500e6 <= self.center_freq_hz <= 18e9
-        assert 50e-6 <= self.nominal_pri_sec <= 10e-3
-        assert 0.2e-6 <= self.pulse_width_sec <= 10e-6
-        assert -100.0 <= self.power_dbm <= -30.0
-        assert 0.0 < self.jitter_fraction <= 0.5, "Jitter fraction should be 0–50%"
+        _require_valid(500e6 <= self.center_freq_hz <= 18e9, "center_freq_hz must be 500 MHz to 18 GHz")
+        _require_valid(50e-6 <= self.nominal_pri_sec <= 10e-3, "nominal_pri_sec must be 50 μs to 10 ms")
+        _require_valid(0.2e-6 <= self.pulse_width_sec <= 10e-6, "pulse_width_sec must be 0.2 μs to 10 μs")
+        _require_valid(-100.0 <= self.power_dbm <= -30.0, "power_dbm must be -100 to -30 dBm")
+        _require_valid(0.0 < self.jitter_fraction <= 0.5, "Jitter fraction should be 0–50%")
 
     def emitter_type(self) -> str:
         return "PriJitter"
@@ -1130,7 +1136,7 @@ class IntervalOnOffPolicy(LifecyclePolicy):
         mean_off_sec: float = 10.0,
         seed: Optional[int] = None,
     ):
-        assert mean_on_sec > 0 and mean_off_sec > 0
+        _require_valid(mean_on_sec > 0 and mean_off_sec > 0, "mean_on_sec and mean_off_sec must be positive")
         self.mean_on_sec = float(mean_on_sec)
         self.mean_off_sec = float(mean_off_sec)
         self._seed = seed

@@ -1,10 +1,13 @@
 # Vyapti — Vyapti Electronic Warfare Scheduler Simulator
+
+> Historical architecture analysis. See [REPOSITORY_STATUS.md](REPOSITORY_STATUS.md)
+> for current repository status; implementation details below may have changed.
 ## Architecture & Usage Guide
 
 **Version:** 1.2.0
 **Python:** 3.10+
 **GitHub:** `https://github.com/Prerna1313/Vyapti.git`
-**Protocol:** Vyapti Frozen Protocol v1.0 (Gates 0–7 ✓)
+**Protocol:** Vyapti Frozen Protocol v1.0 (historical project claim; not revalidated here)
 
 ---
 

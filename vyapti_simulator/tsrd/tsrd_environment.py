@@ -134,7 +134,7 @@ from .pdw_discretiser import (
 from .deinterleaver import (
     DeinterleaverConfig,
     DeinterleaverResult,
-    PRIBasedDeinterleaver,
+    FeatureBasedDeinterleaver,
     EmitterTrack,
 )
 from ..core.environment import SimulationConfig
@@ -966,8 +966,8 @@ class TSRDEnvironment:
         )
 
     def _run_deinterleaver(self, pdw: PDWStream) -> None:
-        """Option C: run the PRI-based deinterleaver and index tracks by cell."""
-        deinterleaver = PRIBasedDeinterleaver(self._deint_config)
+        """Option C: run the feature-based deinterleaver and index tracks by cell."""
+        deinterleaver = FeatureBasedDeinterleaver(self._deint_config)
         self._deinterleaver_result = deinterleaver.deinterleave(pdw)
 
         # Index tracks by (band, slot) for fast per-cell lookup
@@ -1218,7 +1218,7 @@ class TSRDStareEnvironment:
     Lightweight environment for TRUE Pd/Pfa computation using TSRD Stare Mode.
     Follows Vyapti interface.
     """
-    def __init__(self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config):
+    def __init__(self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config, stare_data=None, stare_labels=None):
         self.n_bands = n_bands
         self.n_slots = n_slots
         self._occupancy_grid = occupancy_grid
@@ -1227,22 +1227,32 @@ class TSRDStareEnvironment:
         self._current_slot = 0
         self._observation_history = []
         self._deinterleaver_result = None
+        self._rng = np.random.default_rng()
+        self._stare_data = stare_data
+        self._stare_labels = stare_labels
 
     @classmethod
     def from_stare_mode(cls, stare_file: str, scan_file: str, sim_config):
         import h5py
         import numpy as np
-        
+
         n_bands = sim_config.band_count
         n_slots = sim_config.time_slots
-        
-        def build_grid(filepath):
+
+        stare_data = None
+        stare_labels = None
+        def build_grid(filepath, retain=False):
+            nonlocal stare_data, stare_labels
             grid = np.zeros((n_bands, n_slots), dtype=bool)
             dwell_us = sim_config.dwell_time_ms * 1000.0
             try:
                 with h5py.File(filepath, 'r') as f:
                     if 'data' in f:
                         data = f['data'][:]
+                        if retain:
+                            stare_data = data
+                            if 'labels' in f and len(f['labels']) == len(data):
+                                stare_labels = np.asarray(f['labels'][:]).reshape(-1)
                         for row in data:
                             toa_us, freq_mhz = row[0], row[1]
                             slot = int(toa_us / dwell_us)
@@ -1250,33 +1260,103 @@ class TSRDStareEnvironment:
                             if 0 <= slot < n_slots and 0 <= band < n_bands:
                                 grid[band, slot] = True
             except Exception as e:
-                pass
+                import logging
+                logging.warning(f"Failed to build grid from {stare_file if 'stare' in str(e) else scan_file}: {e}")
+                raise
             return grid
-            
-        occupancy_grid = build_grid(stare_file)
+
+        occupancy_grid = build_grid(stare_file, retain=True)
         scan_grid = build_grid(scan_file)
-        return cls(n_bands, n_slots, occupancy_grid, scan_grid, sim_config)
+        return cls(n_bands, n_slots, occupancy_grid, scan_grid, sim_config,
+                   stare_data=stare_data, stare_labels=stare_labels)
 
     @property
     def hidden_truth(self):
         from vyapti_simulator.core.environment import HiddenTruthGrid
         import numpy as np
-        mask_3d = self._occupancy_grid[np.newaxis, :, :]
         from vyapti_simulator.core.environment import EmitterConfig, EmitterBehaviorType
-        dummy_ec = EmitterConfig(emitter_id=0, behavior=EmitterBehaviorType.CONTINUOUS_FIXED, active_bands=[])
-        return HiddenTruthGrid(grid=mask_3d, emitter_configs=[dummy_ec], band_count=self.n_bands, time_slots=self.n_slots)
+        if self._stare_data is None or self._stare_labels is None:
+            mask_3d = self._occupancy_grid[np.newaxis, :, :]
+            configs = [EmitterConfig(emitter_id=0, behavior=EmitterBehaviorType.CONTINUOUS_FIXED, active_bands=[])]
+            return HiddenTruthGrid(grid=mask_3d, emitter_configs=configs,
+                                  band_count=self.n_bands, time_slots=self.n_slots)
+
+        labels = np.unique(self._stare_labels)
+        labels = [x for x in labels if np.isfinite(x)]
+        grid = np.zeros((len(labels), self.n_bands, self.n_slots), dtype=bool)
+        dwell_us = self._config.dwell_time_ms * 1000.0
+        band_width = self._config.band_width_mhz()
+        configs = []
+        for emitter_index, label in enumerate(labels):
+            rows = self._stare_data[self._stare_labels == label]
+            bands = set()
+            for row in rows:
+                slot = int(row[0] / dwell_us)
+                band = int((row[1] - 2000.0) / band_width)
+                if 0 <= slot < self.n_slots and 0 <= band < self.n_bands:
+                    grid[emitter_index, band, slot] = True
+                    bands.add(band)
+            configs.append(EmitterConfig(emitter_id=int(label),
+                                         behavior=EmitterBehaviorType.CONTINUOUS_FIXED,
+                                         active_bands=sorted(bands)))
+        return HiddenTruthGrid(grid=grid, emitter_configs=configs,
+                              band_count=self.n_bands, time_slots=self.n_slots)
 
     @property
     def config(self):
         return self._config
-        
+
     def reset(self, seed=None, emitter_family_config=None):
         self._current_slot = 0
         self._observation_history.clear()
+        self._rng = np.random.default_rng(seed)
 
     def step(self, band: int):
-        hit = bool(self._scan_grid[band, self._current_slot])
-        obs = {"hit": hit}
+        if self.done:
+            raise RuntimeError("Episode finished; call reset() before stepping again.")
+        band = int(band)
+        if not (0 <= band < self.n_bands):
+            raise ValueError(f"Invalid band {band}; expected 0..{self.n_bands - 1}")
+        occupied = bool(self._occupancy_grid[band, self._current_slot])
+        cell = None
+        if self._stare_data is not None:
+            dwell_us = self._config.dwell_time_ms * 1000.0
+            rows = self._stare_data[
+                (self._stare_data[:, 0] >= self._current_slot * dwell_us)
+                & (self._stare_data[:, 0] < (self._current_slot + 1) * dwell_us)
+                & (self._stare_data[:, 1] >= 2000.0 + band * self._config.band_width_mhz())
+                & (self._stare_data[:, 1] < 2000.0 + (band + 1) * self._config.band_width_mhz())
+            ]
+            if rows.size:
+                cell = rows
+                occupied = True
+        if occupied:
+            hit = bool(self._rng.random() < float(self._config.detection_probability))
+        else:
+            hit = bool(self._rng.random() < float(self._config.false_alarm_probability))
+        previous = self._observation_history[-1] if self._observation_history else None
+        retune = (self._config.retune_time_ms / 1000.0
+                  if previous is not None and previous["selected_band"] != band else 0.0)
+        obs = {
+            "time_slot": self._current_slot,
+            "selected_band": band,
+            "hit": hit,
+            "retune_cost_s": retune,
+            "dwell_elapsed_s": max(0.0, self._config.slot_duration_s() - retune),
+            "receiver_metadata": {"dwell_time_ms": self._config.dwell_time_ms,
+                                   "retune_time_ms": self._config.retune_time_ms},
+            "truth_excluded": True,
+            "emitter_identity_excluded": True,
+            "future_state_excluded": True,
+            "pulse_count": int(occupied),
+            "energy_db": float(10.0 * np.log10(np.sum(10.0 ** (cell[:, 4] / 10.0)))) if cell is not None else float("nan"),
+            "max_amplitude_db": float(np.max(cell[:, 4])) if cell is not None else float("nan"),
+            "mean_pulse_width_us": float(np.mean(cell[:, 2])) if cell is not None else float("nan"),
+            "mean_aoa_deg": float(np.mean(cell[:, 3])) if cell is not None else float("nan"),
+            "snr_db_estimate": float(np.max(cell[:, 4]) - (-130.0)) if cell is not None else float("nan"),
+            "coherent_integration_gain_db": 0.0,
+            "n_pulses_dominant_emitter": 0,
+        }
         self._observation_history.append(obs)
         self._current_slot += 1
         return obs, False

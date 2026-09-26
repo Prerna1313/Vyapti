@@ -69,182 +69,98 @@ from .scheduler_interface import BandPrediction
 from collections import Counter
 
 
+@dataclass
+class MetricsConfig:
+    """Configuration for the MetricsEngine."""
+    # Mission parameters
+    mission_deadline_slots: int = 1000
+    # Provenance notes for metadata
+    provenance_notes: Dict[str, Any] = field(default_factory=lambda: {
+        "pd_definition": "PS-Defined",
+        "pfa_definition": "PS-Defined",
+        "sensitivity_definition": "target_detection_rate",
+        "reward_definition": "PS-Defined Composite",
+        "coverage_definition": "Fraction of spectrum observed over time",
+        "prediction_definition": "Band prediction accuracy",
+        "reward_weights": "default"
+    })
+    # Sensitivity metrics
+    sensitivity_min_samples: int = 10
+    sensitivity_target_detection_rate: float = 0.8
+    sensitivity_pfa_operating_point: float = 1e-6
+    # Prediction metrics
+    prediction_decision_threshold: float = 0.5
+    # Coverage metrics
+    coverage_window_slots: int = 100
+    # TSRD Stare Mode
+    use_tsr_stare_mode: bool = False
+    compute_emitter_population_metrics: bool = False
+    compute_comprehensive_metrics: bool = False
+    compute_emitter_population_metrics: bool = False
+    compute_per_band_metrics: bool = True
+    compute_temporal_metrics: bool = True
+    tsrd_stare_file: Optional[str] = None
+    # Reward weights (PS-Defined)
+    reward_weight_intercept_time: float = 0.4
+    reward_weight_interception_rate: float = 0.3
+    reward_weight_false_alarm_cost: float = 0.2
+    reward_weight_switch_cost: float = 0.1
+    # Calibration
+    calibration_bin_count: int = 10
+
+
+@dataclass
+class TrajectoryStep:
+    """Single step in the agent-environment interaction loop."""
+    action: int
+    observation: Dict[str, Any]
+    time_slot: int
+    decision_latency_s: Optional[float] = None
+    prediction: Optional[BandPrediction] = None
+
+
 def compute_exploration_metrics(
     trajectory: Sequence[TrajectoryStep],
     nbands: int
 ) -> Dict[str, float]:
     """
     Compute exploration vs exploitation metrics.
-    
-    Returns:
-        - exploration_fraction: fraction of time on rarely-visited bands
-        - entropy_of_actions: normalized Shannon entropy of band selection
-        - coverage_rate: fraction of unique bands visited
     """
     actions = [step.action for step in trajectory]
-    
+
     if not actions:
         return {
             'exploration_fraction': 0.0,
-            'entropy_of_actions': 0.0,
-            'coverage_rate': 0.0,
+            'action_entropy': 0.0,
+            'normalized_action_entropy': 0.0,
+            'unique_band_coverage': 0.0,
         }
-    
+
     action_counts = Counter(actions)
-    
+
     # Exploration fraction: time on bands visited < 5 times
     exploration_threshold = 5
     exploration_slots = sum(
-        1 for a in actions 
+        1 for a in actions
         if action_counts[a] < exploration_threshold
     )
     exploration_fraction = exploration_slots / len(actions)
-    
+
     # Shannon entropy of action distribution
     probs = np.array(list(action_counts.values())) / len(actions)
     entropy = -np.sum(probs * np.log2(probs + 1e-10))
     max_entropy = np.log2(nbands)
     normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0.0
-    
+
     # Coverage rate
-    coverage_rate = len(action_counts) / nbands
-    
+    unique_band_coverage = len(action_counts) / nbands
+
     return {
         'exploration_fraction': float(exploration_fraction),
-        'entropy_of_actions': float(normalized_entropy),
-        'coverage_rate': float(coverage_rate),
+        'entropy_of_actions': float(entropy),
+        'normalized_action_entropy': float(normalized_entropy),
+        'coverage_rate': float(unique_band_coverage),
     }
-
-
-
-
-# =====================================================================
-# TRAJECTORY RECORD — what the runner hands to the metrics engine
-# =====================================================================
-
-@dataclass
-class TrajectoryStep:
-    """
-    One executed scheduling decision.
-
-    [SCIENTIFIC] The step stores no truth. Truth arrives separately, as the
-    whole HiddenTruthGrid, once per episode. Copying a truth slice into every
-    step (as an earlier design did) both duplicates the grid and creates a
-    second path by which truth could reach a scheduler that is handed a
-    trajectory — `select_action` receives observation_history, and if steps
-    carried truth the two structures would be one careless refactor apart.
-    """
-    time_slot: int
-    action: int
-    observation: Dict[str, Any]
-    prediction: Optional[BandPrediction] = None
-    decision_latency_s: float = 0.0
-
-
-# =====================================================================
-# CONFIGURATION
-# =====================================================================
-
-@dataclass
-class MetricsConfig:
-    compute_comprehensive_metrics: bool = True
-    compute_emitter_population_metrics: bool = True
-    compute_per_band_metrics: bool = True
-    compute_temporal_metrics: bool = True
-    use_tsr_stare_mode: bool = True
-    tsrd_stare_file: Optional[str] = None
-
-    # [PS-DEFINED] — Named in problem statement; must be reported
-    compute_pd_pfa: bool = True
-    compute_intercept_rate: bool = True
-    compute_intercept_time: bool = True
-    compute_prediction_accuracy: bool = True  # Requires predictor module
-    compute_reward_cost: bool = True  # Composite; must state weights explicitly
-    compute_coverage: bool = True  # Frozen protocol mandatory (line 181-182)
-    compute_robustness_variance: bool = True  # Variance across seeds
-
-    # [ENGINEERING-ASSUMPTION] — Reward weights must be explicitly stated,
-    # not arbitrary defaults. Per Deconstruction (line 200-204): "any specific
-    # form of f and any specific weights are [RESEARCH]/our formulation."
-    reward_weight_intercept_time: float = 1.0
-    reward_weight_interception_rate: float = 1.0
-    reward_weight_false_alarm_cost: float = -0.5   # Penalty term
-    reward_weight_switch_cost: float = -0.1
-
-    # [ENGINEERING-ASSUMPTION] — Pfa constraint for sensitivity: sensitivity is only well-defined at a
-    # stated Pfa operating point. This value is the episode's configured
-    # false_alarm_probability; reported explicitly so the sensitivity number
-    # is never quoted without its conditioning assumption.
-    sensitivity_pfa_operating_point: Optional[float] = None
-    sensitivity_pfa_operating_point: Optional[float] = None
-
-    # [ENGINEERING-ASSUMPTION] — Deadline for first-intercept measurement
-    mission_deadline_slots: int = 500  # Adjustable per scenario
-
-    # [ENGINEERING-ASSUMPTION] Rolling window for the coverage curve, in slots.
-    # Instantaneous coverage is meaningless (one band per slot) and whole-mission
-    # coverage saturates at 1.0 for any policy that eventually visits every
-    # band, so neither extreme discriminates. A window is required.
-    coverage_window_slots: int = 100
-
-    # [ENGINEERING-ASSUMPTION] Sensitivity is reported as the lowest emitter
-    # SNR whose post-dwell detection rate reaches this level.
-    sensitivity_target_detection_rate: float = 0.5
-    # Minimum dwell samples on an emitter before its detection rate is trusted.
-    sensitivity_min_samples: int = 20
-
-    # [ENGINEERING-ASSUMPTION] Threshold converting a forecast probability into
-    # a binary claim for PS metric 6. Brier score is reported alongside because
-    # accuracy at a fixed threshold hides calibration failures.
-    prediction_decision_threshold: float = 0.5
-    calibration_bin_count: int = 10
-
-    provenance_notes: Dict[str, str] = field(default_factory=dict, init=False)
-
-    def __post_init__(self) -> None:
-        self.provenance_notes = {
-            "reward_weights": (
-                "[ENGINEERING-ASSUMPTION] Composite utility weights are OUR formulation, "
-                "not PS-specified. Applied: "
-                f"intercept_time={self.reward_weight_intercept_time}, "
-                f"interception_rate={self.reward_weight_interception_rate}, "
-                f"false_alarm={self.reward_weight_false_alarm_cost}, "
-                f"switch_cost={self.reward_weight_switch_cost}. "
-                "Components are ALWAYS reported separately so that any reader "
-                "can re-weight; no conclusion may rest on the composite alone."
-            ),
-            "pd_definition": (
-                "[ENGINEERING-ASSUMPTION] Pd = P(hit | dwelled band was occupied). "
-                "Conditional on the scheduler's choice, so it measures the detector, "
-                "not the policy."
-            ),
-            "intercept_attribution": (
-                "[ENGINEERING-ASSUMPTION] Band-level hits credit all emitters present "
-                "in that band and slot (evaluation-time oracle). Per-emitter "
-                "attribution requires deinterleaving; deferred to TSRD Option 3."
-            ),
-            "censoring": (
-                "[LITERATURE-GROUNDED] Non-intercepted emitters are right-censored at "
-                "mission end and analysed with Kaplan-Meier, per survival-analysis "
-                "practice; the found-only mean is reported but flagged as biased."
-            ),
-            "coverage_definition": (
-                f"[ENGINEERING-ASSUMPTION] Coverage = mean over slots of "
-                f"(unique bands visited in trailing {self.coverage_window_slots}-slot window) "
-                f"/ band_count."
-            ),
-            "sensitivity_definition": (
-                "[ENGINEERING-ASSUMPTION] Sensitivity = min SNR achieving Pd_target "
-                f"({self.sensitivity_target_detection_rate}) at the stated Pfa operating "
-                f"point ({self.sensitivity_pfa_operating_point}). Both numbers must "
-                "appear in any reported sensitivity claim."
-            ),
-        }
-
-
-# =====================================================================
-# METRICS ENGINE
-# =====================================================================
 
 class MetricsEngine:
     """Computes all metrics honestly; never feeds truth back to scheduler."""
@@ -259,7 +175,7 @@ class MetricsEngine:
 
     def record_step(self, step: TrajectoryStep):
         self.trajectory.append(step)
-        
+
         # Collect latency
         if hasattr(step, 'decision_latency_s') and step.decision_latency_s is not None:
             self.latencies.append(step.decision_latency_s)
@@ -272,7 +188,7 @@ class MetricsEngine:
                 'max_latency_s': None,
                 'p95_latency_s': None,
             }
-        
+
         return {
             'mean_latency_s': float(np.mean(self.latencies)),
             'max_latency_s': float(np.max(self.latencies)),
@@ -303,7 +219,7 @@ class MetricsEngine:
                 "record_result received an empty trajectory. Metrics cannot be "
                 "computed without executed decisions; refusing to emit zeros."
             )
-            
+
         self.trajectory = []
         self.latencies = []
         for step in trajectory:
@@ -366,10 +282,10 @@ class MetricsEngine:
             'max_decision_latency_s': latency_metrics['max_latency_s'],
             'p95_decision_latency_s': latency_metrics['p95_latency_s'],
             'meets_realtime_requirement': (
-                latency_metrics['max_latency_s'] is not None 
+                latency_metrics['max_latency_s'] is not None
                 and latency_metrics['max_latency_s'] < 10.0
             ),
-            
+
             # ADD EXPLORATION METRICS
             'exploration_fraction': exploration_metrics['exploration_fraction'],
             'entropy_of_actions': exploration_metrics['entropy_of_actions'],
@@ -483,6 +399,7 @@ class MetricsEngine:
         return {
             "emitters_considered": n_existent,
             "emitters_intercepted": len(found),
+            "emitter_interception_ratio": (len(found) / n_existent) if n_existent else None,
             "interception_probability": (len(found) / n_existent) if n_existent else None,
             "first_intercept_probability_by_deadline": (
                 (by_deadline / n_existent) if n_existent else None),
@@ -578,7 +495,7 @@ class MetricsEngine:
                     wall_clock_times.append(float(s.observation["wall_clock_ms"]))
                 if "memory_delta_bytes" in s.observation:
                     memory_deltas.append(float(s.observation["memory_delta_bytes"]))
-        
+
         decision_latency = {
             "select_action_ms_mean": float(np.mean(select_times)) if select_times else None,
             "select_action_ms_max": float(np.max(select_times)) if select_times else None,
@@ -997,7 +914,7 @@ class MetricsEngine:
         paths = [
             ("detection_metrics", "probability_of_detection"),
             ("detection_metrics", "probability_of_false_alarm"),
-            ("discovery_metrics", "interception_probability"),
+            ("discovery_metrics", "emitter_interception_ratio"),
             ("discovery_metrics", "first_intercept_probability_by_deadline"),
             ("discovery_metrics", "mean_first_intercept_time_slots"),
             ("monitoring_metrics", "post_discovery_interception_ratio"),

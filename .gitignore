@@ -3,15 +3,14 @@ __pycache__/
 *.py[cod]
 *.so
 
-# Test / experiment runner scripts (not the simulator)
-scripts/
-tests/
+# Tests and reusable experiment scripts are source code and are tracked.
+# Ignore generated outputs below, and keep large/local datasets out explicitly.
 
 # All experiment outputs
 results/
 exp_results/
 vyapti_figs/
-data_provenance/
+data_provenance/*
 
 # Research documentation (not simulator docs)
 research_docs/
@@ -22,6 +21,8 @@ SIMULATOR_STATUS.md
 # Loose experiment artifacts at the repo root
 *.json
 !pyproject.toml
+!/tests/fixtures/tsrd/manifest.json
+!/data_provenance/manifest.json
 *.csv
 *.png
 *.pdf
@@ -30,6 +31,12 @@ replace_script.py
 
 # Local Kaggle mirror (keep one copy only — the repo root version)
 vyapti-simulator-kaggle/
+
+# Locally downloaded TSRD samples/corpus. Small committed fixtures under
+# tests/fixtures remain trackable.
+/3/
+/4/
+/tsrd-data/
 
 # OS
 .DS_Store

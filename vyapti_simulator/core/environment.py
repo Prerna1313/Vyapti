@@ -40,7 +40,7 @@ insulated from emitter count.
 from __future__ import annotations
 
 import numpy as np
-from typing import Union, List, Dict, List, Tuple, Optional, Any
+from typing import Union, List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -343,6 +343,32 @@ class SimulationConfig:
 
     # Provenance tracking for audit
     provenance_map: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name in ("receiver_ibw_mhz", "total_spectrum_mhz", "dwell_time_ms", "sensitivity_slope_db"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and > 0; got {value}")
+        if not isinstance(self.band_count, int) or self.band_count <= 0:
+            raise ValueError(f"band_count must be a positive integer; got {self.band_count}")
+        for name in ("max_emitters", "time_slots"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer; got {value}")
+        if not np.isfinite(self.retune_time_ms) or self.retune_time_ms < 0:
+            raise ValueError(f"retune_time_ms must be finite and >= 0; got {self.retune_time_ms}")
+        for name in ("detection_probability", "false_alarm_probability"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(f"{name} must be in [0, 1]; got {value}")
+        if not np.isfinite(self.detection_threshold_db):
+            raise ValueError("detection_threshold_db must be finite")
+        if self.dwell_centres_mhz is not None:
+            centres = np.asarray(self.dwell_centres_mhz)
+            if centres.shape != (self.band_count,):
+                raise ValueError("dwell_centres_mhz length must match band_count")
+            if not np.all(np.isfinite(centres)):
+                raise ValueError("dwell_centres_mhz must contain only finite values")
 
     def band_width_mhz(self) -> float:
         return self.total_spectrum_mhz / float(self.band_count)
@@ -721,7 +747,7 @@ class VyaptiEnv:
             raise RuntimeError("Environment.step() called before reset(); no truth grid exists.")
         is_multi = isinstance(selected_band, (list, tuple)) or (hasattr(selected_band, 'ndim') and selected_band.ndim > 0)
         bands_to_scan = list(selected_band) if is_multi else [int(selected_band)]
-        
+
         for b in bands_to_scan:
             if not (0 <= b < self.config.band_count):
                 raise ValueError(

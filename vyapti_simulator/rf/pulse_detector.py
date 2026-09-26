@@ -43,6 +43,17 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import os
+
+# --- HARDWARE AGNOSTIC TOGGLE ---
+try:
+    import cupy as xp
+    _HAS_GPU = True
+except ImportError:
+    xp = np
+    _HAS_GPU = False
+# --------------------------------
+
 
 from ..tsrd.tsrd_adapter import PDWStream
 
@@ -80,10 +91,10 @@ class PulseDetectorConfig:
     noise_floor_dbm: float = -130.0
     # CFAR
     cfar_db: float = 10.0          # threshold offset above noise estimate (dB)
-    cfar_train_cells: int = 20     # training cells per side
-    cfar_guard_cells: int = 4      # guard cells per side (excluded from avg)
+    cfar_train_cells: int = 40     # training cells per side
+    cfar_guard_cells: int = 50      # guard cells per side (excluded from avg)
     # Pulse formation
-    min_pulse_samples: int = 5     # minimum width in samples
+    min_pulse_samples: int = 3     # minimum width in samples
     max_pulses_per_tick: int = 50  # sanity cap
     # Waveform
     waveform_type: str = "lfm"     # "lfm" | "bpsk" | "qpsk" | "qam16"
@@ -157,6 +168,9 @@ class CFARMatchedFilterDetector(BaseDetector):
         self.emitter_map = dict(emitter_map)
         self.rng = rng if rng is not None else np.random.default_rng()
         self._chirp_ref: Optional[np.ndarray] = None  # stored chirp reference
+        self._debug_mf = os.environ.get("VYAPTI_DEBUG_MATCHED_FILTER", "0") == "1"
+        self._debug_cfar = os.environ.get("VYAPTI_DEBUG_CFAR", "0") == "1"
+        self._cfar_count = 0
 
         # Lazily built on first detect() call
         if config.chirp_reference is not None:
@@ -308,10 +322,12 @@ class CFARMatchedFilterDetector(BaseDetector):
         n_ref = max(2, int(round(cfg.pulse_width_s * cfg.dsp_sample_rate_hz)))
         t_ref = np.arange(n_ref, dtype=np.float64) / cfg.dsp_sample_rate_hz
         from .waveforms import generate_lfm_chirp
+        # HARDWARE LO PATCH: Align the matched filter to Baseband (0 Hz)
+        # Because the receiver's LO has mixed the RF signal down to baseband!
         chirp = generate_lfm_chirp(
             t_ref,
-            f0=center_hz - 0.5 * cfg.chirp_bandwidth_hz,
-            f1=center_hz + 0.5 * cfg.chirp_bandwidth_hz,
+            f0=0.0 - 0.5 * cfg.chirp_bandwidth_hz,
+            f1=0.0 + 0.5 * cfg.chirp_bandwidth_hz,
             peak_power_w=1.0,
         )
         self._build_fft_reference(chirp)
@@ -341,6 +357,13 @@ class CFARMatchedFilterDetector(BaseDetector):
             result = self.detect(iq_chunk)
         finally:
             self.emitter_map = original_map
+
+        # HARDWARE LO PATCH: The detector measured the Baseband frequency.
+        # We must add the receiver's Local Oscillator (LO) frequency back
+        # so the PDW reflects the true RF frequency in the sky!
+        if len(result.freq_mhz) > 0:
+            # Modify array in place to bypass frozen dataclass
+            result.freq_mhz[:] = result.freq_mhz + (center_hz * 1e-6)
 
         # Post-filter: additionally constrain by the dwell frequency
         # window (and AoA window when set) even if an emitter wasn't in
@@ -481,10 +504,11 @@ class CFARMatchedFilterDetector(BaseDetector):
         # Reference is one pulse wide (pulse_width_s)
         n_ref = max(2, int(round(cfg.pulse_width_s * cfg.dsp_sample_rate_hz)))
         t_ref = np.arange(n_ref, dtype=np.float64) / cfg.dsp_sample_rate_hz
+        # Align the detector's matched filter to Baseband (0 Hz)
         chirp = generate_lfm_chirp(
             t_ref,
-            f0=cfg.carrier_freq_hz - 0.5 * cfg.chirp_bandwidth_hz,
-            f1=cfg.carrier_freq_hz + 0.5 * cfg.chirp_bandwidth_hz,
+            f0=0.0 - 0.5 * cfg.chirp_bandwidth_hz,
+            f1=0.0 + 0.5 * cfg.chirp_bandwidth_hz,
             peak_power_w=1.0,
         )
         self._build_fft_reference(chirp)
@@ -499,24 +523,20 @@ class CFARMatchedFilterDetector(BaseDetector):
 
         Uses zero-padding to avoid circular convolution artefacts.
         Returns the compressed output of the same length as signal.
+        The output is shifted so that zero lag appears at index 0.
         """
         if self._chirp_ref is None:
             self._build_chirp_reference()
         sig = np.asarray(signal, dtype=np.complex128)
         n = sig.size
         m = self._chirp_ref.size
-        # Zero-pad both signal and reference to the same length
-        padded_len = n + m - 1
-        padded_sig = np.zeros(padded_len, dtype=np.complex128)
-        padded_sig[:n] = sig
-        padded_ref = np.zeros(padded_len, dtype=np.complex128)
-        padded_ref[:m] = self._chirp_ref
-        # FFT of both
-        sig_fft = np.fft.fft(padded_sig)
-        ref_fft = np.fft.fft(padded_ref[::-1].conj())
-        # Pointwise multiply + IFFT
-        result = np.fft.ifft(sig_fft * ref_fft)
-        return result[:n].astype(np.complex128)
+        # Use the waveform's matched_filter function for consistency and correctness
+        from .waveforms import matched_filter
+        result = matched_filter(sig, self._chirp_ref, mode="sampleless")
+        # Shift result so that zero lag appears at index 0 (compensates for
+        # the fact that peak appears at index n-1 for a pulse at start of buffer)
+        result = np.roll(result, 1)
+        return result
 
     # ------------------------------------------------------------------
     # CFAR
@@ -527,36 +547,55 @@ class CFARMatchedFilterDetector(BaseDetector):
 
         For each test cell i, the threshold is::
 
-            T[i] = alpha * (1/N) * Σ training_cells P[j]
-            alpha = cfar_offset_linear
+            T[i] = alpha * mean(training_cells)
 
-        Guard cells adjacent to the test cell are excluded.
-        Edge cells with insufficient training cells use a reduced window.
+        where alpha = cfar_offset_linear.
+
+        Returns
+        -------
+        np.ndarray
+            Threshold values for each cell (same shape as envelope).
         """
         cfg = self.config
         n = envelope.size
-        t = cfg.cfar_train_cells
-        g = cfg.cfar_guard_cells
-        alpha = cfg.cfar_offset_linear
+        n_guard = cfg.cfar_guard_cells
+        n_train = cfg.cfar_train_cells
+        half_window = n_train + n_guard
+        alpha = np.power(10.0, cfg.cfar_db / 10.0)  # dB to linear
 
         threshold = np.zeros(n, dtype=np.float64)
-        total_cells = t + g
 
         for i in range(n):
-            # Left training region: max(0, i - total_cells) to i - g - 1
-            left_start = max(0, i - total_cells)
-            left_end = max(left_start, i - g)
-            # Right training region: i + g + 1 to min(n-1, i + total_cells)
-            right_start = min(n - 1, i + g + 1)
-            right_end = min(n, i + total_cells + 1)
-            # Collect training cells
-            left_cells = envelope[left_start:left_end]
-            right_cells = envelope[right_start:right_end]
-            all_cells = np.concatenate([left_cells, right_cells])
-            if all_cells.size == 0:
-                threshold[i] = alpha * float(np.median(envelope))
+            start = i - half_window
+            end = i + half_window + 1
+
+            # Extract training and guard cells WITHOUT wrapping
+            # Guard cells: [i - n_guard, i + n_guard]
+            guard_start = max(0, i - n_guard)
+            guard_end = min(n, i + n_guard + 1)
+
+            # Training cells: [start, guard_start) and [guard_end, end)
+            # But clamp to valid array indices [0, n)
+            left_start = max(0, start)
+            left_end = max(0, guard_start)  # guard_start is already clamped
+            right_start = min(n, guard_end)  # guard_end is already clamped
+            right_end = min(n, end)
+
+            left_cells = envelope[left_start:left_end] if left_end > left_start else np.array([])
+            right_cells = envelope[right_start:right_end] if right_end > right_start else np.array([])
+            training_cells = np.concatenate([left_cells, right_cells])
+
+            if training_cells.size > 0:
+                noise_estimate = np.mean(training_cells)
             else:
-                threshold[i] = alpha * float(np.mean(all_cells))
+                # No training cells, fall back to mean of entire envelope
+                noise_estimate = np.mean(envelope)
+
+            # Avoid zero noise estimate
+            if noise_estimate < 1e-12:
+                noise_estimate = 1e-12
+
+            threshold[i] = alpha * noise_estimate
 
         return threshold
 
@@ -626,20 +665,20 @@ class CFARMatchedFilterDetector(BaseDetector):
         lo = max(0, peak_idx - half_win)
         hi = min(tick_iq.size - 1, peak_idx + half_win)
         if hi <= lo:
-            return float(cfg.carrier_freq_hz)
+            return 0.0
 
         segment = tick_iq[lo:hi + 1]
         phase = np.unwrap(np.angle(segment))
         if phase.size < 2:
-            return float(cfg.carrier_freq_hz)
+            return 0.0
 
         # Phase slope: Δφ / (2π * Δt) = frequency
         dt = 1.0 / cfg.dsp_sample_rate_hz
         dphi = float(phase[-1] - phase[0])
         freq_est = abs(dphi / (2.0 * np.pi * dt * (phase.size - 1)))
         # Sanity: if the estimate is way off, fall back to carrier
-        if abs(freq_est - cfg.carrier_freq_hz) > cfg.chirp_bandwidth_hz:
-            return float(cfg.carrier_freq_hz)
+        if abs(freq_est) > cfg.chirp_bandwidth_hz:
+            return 0.0
         return float(freq_est)
 
     # ------------------------------------------------------------------

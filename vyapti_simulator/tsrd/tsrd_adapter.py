@@ -1120,10 +1120,10 @@ def load_stare_mode_as_occupancy_grid(file_path: str, n_bands: int = 36, n_slots
     """
     import h5py
     import numpy as np
-    
+
     grid = np.zeros((n_bands, n_slots), dtype=bool)
     dwell_us = 50.0 * 1000.0  # 50ms in microseconds
-    
+
     try:
         with h5py.File(file_path, 'r') as f:
             if 'data' in f:
@@ -1136,8 +1136,10 @@ def load_stare_mode_as_occupancy_grid(file_path: str, n_bands: int = 36, n_slots
                     if 0 <= slot < n_slots and 0 <= band < n_bands:
                         grid[band, slot] = True
     except Exception as e:
-        pass
-        
+        import logging
+        logging.warning(f"Failed to load stare mode occupancy grid from {file_path}: {e}")
+        raise
+
     return grid
 
 def extract_emitter_metadata(file_path: str) -> dict:
@@ -1147,7 +1149,7 @@ def extract_emitter_metadata(file_path: str) -> dict:
     import h5py
     import numpy as np
     from collections import Counter
-    
+
     metadata = {
         'total_emitters': 0,
         'emitters': [],
@@ -1156,45 +1158,45 @@ def extract_emitter_metadata(file_path: str) -> dict:
         'pri_summary': {},
         'pw_summary': {}
     }
-    
+
     try:
         with h5py.File(file_path, 'r') as f:
             if 'metadata/transmitters' in f:
                 tx_group = f['metadata/transmitters']
                 metadata['total_emitters'] = len(tx_group.keys())
-                
+
                 all_freqs = []
                 all_pris = []
                 all_pws = []
                 types = []
-                
+
                 for tx_name in tx_group.keys():
                     tx = tx_group[tx_name]
-                    
+
                     e_type = "Unknown"
                     if 'metadata' in tx and 'emitter_type' in tx['metadata'].attrs:
                         e_type = str(tx['metadata'].attrs['emitter_type'])
                     types.append(e_type)
-                    
+
                     freqs = []
                     if 'frequency_config/freqs_mhz' in tx:
                         freqs = tx['frequency_config/freqs_mhz'][:].tolist()
                         all_freqs.extend(freqs)
-                        
+
                     pris = []
                     if 'pri_config/pris_us' in tx:
                         pris = tx['pri_config/pris_us'][:].tolist()
                         all_pris.extend(pris)
-                        
+
                     pws = []
                     if 'pulse_width_config/pws_us' in tx:
                         pws = tx['pulse_width_config/pws_us'][:].tolist()
                         all_pws.extend(pws)
-                        
+
                     pos = []
                     if 'position_config/start_position_km' in tx:
                         pos = tx['position_config/start_position_km'][:].tolist()
-                        
+
                     metadata['emitters'].append({
                         'emitter_id': tx_name,
                         'type': e_type,
@@ -1203,9 +1205,9 @@ def extract_emitter_metadata(file_path: str) -> dict:
                         'pws_us': pws,
                         'position_km': pos
                     })
-                
+
                 metadata['emitter_type_distribution'] = dict(Counter(types))
-                
+
                 if all_freqs:
                     metadata['frequency_summary'] = {
                         'min_mhz': float(np.min(all_freqs)),
@@ -1225,6 +1227,8 @@ def extract_emitter_metadata(file_path: str) -> dict:
                         'mean_us': float(np.mean(all_pws))
                     }
     except Exception as e:
-        pass
-        
+        import logging
+        logging.warning(f"Failed to extract emitter metadata from {file_path}: {e}")
+        raise
+
     return metadata

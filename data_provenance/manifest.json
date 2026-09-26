@@ -1,0 +1,11 @@
+{
+  "comment": "The tsrd_statistics SHA-256 below matches the current local statistics file. Regenerate the file with scripts/extract_tsrd_statistics.py and update this hash together whenever the source data changes; the statistics file itself is not tracked.",
+  "datasets": {
+    "tsrd_statistics": {
+      "path": "vyapti_simulator/data/tsrd_statistics.json",
+      "provenance": "TSRD config_0.h5, Scan Mode, 169617 pulses, 72 active emitters of 96 configured. Filled after running scripts/extract_tsrd_statistics.py.",
+      "sha256": "cf7bb6d840e1885aee8d296d40217ab35b8d785c938c4b9ce91ebcbd75d3f0ab"
+    }
+  },
+  "version": "1.0.0"
+}

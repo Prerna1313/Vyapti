@@ -313,6 +313,9 @@ class ExperimentConfig:
     # Centre frequency of each band (MHz). When None, defaults to a
     # uniform grid spanning 2000-18000 MHz (covering typical EW bands).
     band_centre_freqs_mhz: Optional[List[float]] = None
+    # Root containing matched `stare/` and `scan/` dataset directories.
+    # Required for TSRD runs; never rely on a developer-local cache path.
+    tsrd_dataset_root: Optional[str] = None
 
     # Per frozen protocol §5: 7 mandatory result-tagging fields. Defaults are
     # honest placeholders; production runs MUST supply them at run time so a
@@ -614,7 +617,12 @@ class ExperimentRunner:
         )
         if use_tsr and tsrd_scenario:
             from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
-            tsrd_base = '/root/.cache/huggingface/hub/datasets--alan-turing-institute--turing-synthetic-radar-dataset/snapshots/68a07b0e0189c5b4ec748c4b66dedfe26f8f1c51'
+            if not self.config.tsrd_dataset_root:
+                raise ValueError(
+                    "TSRD runs require ExperimentConfig.tsrd_dataset_root pointing "
+                    "to the dataset root containing matched stare/ and scan/ files."
+                )
+            tsrd_base = self.config.tsrd_dataset_root
             stare_file = f'{tsrd_base}/stare/{tsrd_scenario}.h5'
             scan_file = f'{tsrd_base}/scan/{tsrd_scenario.replace("stare", "scan")}.h5'
             env = TSRDStareEnvironment.from_stare_mode(stare_file, scan_file, sim_config)
@@ -630,7 +638,7 @@ class ExperimentRunner:
         env._antenna_gain_db = antenna_gain
         from vyapti_simulator.core.metrics import MetricsConfig
         metrics_config = MetricsConfig()
-        
+
         if use_tsr and tsrd_scenario:
             from vyapti_simulator.tsrd.tsrd_metrics import TSRDMetricsEngine
             metrics_config.compute_comprehensive_metrics = True
@@ -639,7 +647,7 @@ class ExperimentRunner:
             metrics_config.compute_temporal_metrics = True
             metrics_config.use_tsr_stare_mode = True
             metrics_config.tsrd_stare_file = stare_file
-            
+
             metrics_engine = TSRDMetricsEngine(
                 config=metrics_config,
                 stare_mode_file=stare_file,
@@ -690,7 +698,7 @@ class ExperimentRunner:
         # discovered), as it is the most direct measure of the scheduling objective.
         names = list(schedulers.keys())
         perf_matrix = np.array([
-            [res['discovery_metrics']['interception_probability']
+            [res['discovery_metrics']['emitter_interception_ratio']
              for res in all_results[name]]
             for name in names
         ])  # shape (n_schedulers, n_seeds)
@@ -812,16 +820,16 @@ class ExperimentRunner:
                 ),
             },
             "schedulers": names,
-            "primary_metric": "discovery_metrics.interception_probability",
+            "primary_metric": "discovery_metrics.emitter_interception_ratio",
             "result_tagging": per_scheduler_tagging,
             "statistical_test": stat_summary,
             "bootstrap_ci_on_mean": bootstrap_cis,
             "kaplan_meier_survival_curves": km_curves,
             "per_scheduler_results": {
                 name: {
-                    "mean_interception_probability": float(perf_matrix[i].mean()),
-                    "median_interception_probability": float(np.median(perf_matrix[i])),
-                    "std_interception_probability": float(perf_matrix[i].std()),
+                    "mean_emitter_interception_ratio": float(perf_matrix[i].mean()),
+                    "median_emitter_interception_ratio": float(np.median(perf_matrix[i])),
+                    "std_emitter_interception_ratio": float(perf_matrix[i].std()),
                     "all_seeds": perf_matrix[i].tolist(),
                     # Per-scheduler tagging (frozen protocol §5) for audit
                     # of the comparison table at the result-row level.

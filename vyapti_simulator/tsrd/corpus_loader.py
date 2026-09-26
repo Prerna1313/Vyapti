@@ -179,10 +179,8 @@ class CorpusSummary:
 #     ]
 #   }
 #
-# The manifest is OPTIONAL. If present, the loader uses it to (a)
-# refuse to start if the corpus is unrecognised, and (b) record
-# per-file SHA-256 chains of custody. If absent, the loader just
-# enumerates *.h5 and reports no chain-of-custody.
+# The manifest is optional unless require_manifest=True. In that mode,
+# every selected file must be listed with a matching size and SHA-256.
 CORPUS_MANIFEST_FILENAME = "corpus_manifest.json"
 
 
@@ -297,11 +295,13 @@ class TSRDCorpusLoader:
         `schema_warnings` and continue.
 
     require_manifest : bool
-        If True, the loader raises `CorpusUnavailableError`
-        if `corpus_manifest.json` is missing from the
-        corpus dir. If False (the default), the loader
-        enumerates `*.h5` directly and treats the manifest
-        as informational.
+        If True, require a corpus manifest and verify that its file
+        entries exactly match the selected files, including size and SHA-256.
+    allow_legacy_layout : bool
+        Explicitly allow recursive discovery when the requested split
+        directory is absent. Intended only for known flat/fixture layouts.
+        This is an explicit compatibility mode; normal dataset loading
+        never enters it.
     """
 
     def __init__(
@@ -315,6 +315,7 @@ class TSRDCorpusLoader:
         caller_overrides: Optional[Dict[str, Any]] = None,
         fail_fast: bool = False,
         require_manifest: bool = False,
+        allow_legacy_layout: bool = False,
     ) -> None:
         if not isinstance(corpus_dir, (str, Path)):
             raise TypeError(
@@ -334,6 +335,7 @@ class TSRDCorpusLoader:
         self._caller_overrides = dict(caller_overrides) if caller_overrides else None
         self._fail_fast = bool(fail_fast)
         self._require_manifest = bool(require_manifest)
+        self._allow_legacy_layout = bool(allow_legacy_layout)
         self._split = split
         self._target_receiver_mode = receiver_mode
         self._legacy_mode = False
@@ -354,21 +356,19 @@ class TSRDCorpusLoader:
         if target_dir.is_dir():
             self._data_dir = target_dir
         else:
-            # Check if this is a legacy fixture/flat directory
-            if list(path.glob("*.h5")) or list(path.rglob("*.h5")):
-                import warnings
-                warnings.warn(
-                    f"TSRD split directory not found at {target_dir}. "
-                    f"Falling back to legacy recursive search in {path}. "
-                    f"WARNING: This may cause data leakage if pointing to a full TSRD root.",
-                    DeprecationWarning
-                )
+            # Check if this is a legacy fixture/flat directory. This path is
+            # reachable only when the caller explicitly opted in, so do not
+            # emit a warning that would obscure the normal test signal.
+            if self._allow_legacy_layout and (
+                list(path.glob("*.h5")) or list(path.rglob("*.h5"))
+            ):
                 self._data_dir = path
                 self._legacy_mode = True
             else:
                 raise CorpusUnavailableError(
                     f"TSRD split directory not found: {target_dir}. "
-                    f"Ensure you are pointing to the proper TSRD root directory."
+                    "Pass allow_legacy_layout=True only for an intentional "
+                    "flat or mixed fixture directory."
                 )
 
     # ----------------------------------------------------------------
@@ -383,8 +383,8 @@ class TSRDCorpusLoader:
         Discover `*.h5` files.
 
         Uses `glob("*.h5")` on the specific split directory to prevent
-        data leakage across train/val/test splits. Falls back to `rglob`
-        only for legacy flat directories or tests.
+        data leakage across train/val/test splits. Uses `rglob` only when
+        the caller explicitly enables `allow_legacy_layout`.
 
         The returned list is sorted so iteration order is
         deterministic. Raises `CorpusUnavailableError` if
@@ -406,18 +406,20 @@ class TSRDCorpusLoader:
 
     def load_manifest(self) -> Optional[Dict[str, Any]]:
         """
-        Load `corpus_manifest.json` if present, else return
-        None. The manifest is informational unless
-        `require_manifest=True` was set on the loader, in
-        which case `discover_h5_files` (not this method) is
-        the one that raises.
+        Load `corpus_manifest.json` if present, else return None.
+        Validation happens in `iter_corpus` when required.
         """
         manifest_path = self._corpus_dir / CORPUS_MANIFEST_FILENAME
         if not manifest_path.is_file():
             return None
         import json
-        with manifest_path.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
+        try:
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise CorpusUnavailableError(
+                f"Cannot read corpus manifest {manifest_path}: {exc}"
+            ) from exc
 
     def iter_corpus(self) -> Iterator[CorpusFileResult]:
         """
@@ -430,6 +432,7 @@ class TSRDCorpusLoader:
         errors are recorded in `schema_warnings` and the
         disposition is one of the `SKIPPED_*` values.
         """
+        files = self.discover_h5_files()
         if self._require_manifest:
             manifest = self.load_manifest()
             if manifest is None:
@@ -439,9 +442,44 @@ class TSRDCorpusLoader:
                     f"require_manifest=True was set. Refusing to "
                     f"iterate an unrecognised corpus."
                 )
+            self._verify_manifest(manifest, files)
 
-        for h5_path in self.discover_h5_files():
+        for h5_path in files:
             yield from self._process_one(h5_path)
+
+    def _verify_manifest(self, manifest: Dict[str, Any], files: List[Path]) -> None:
+        """Fail before yielding any file if the required manifest is stale."""
+        entries = manifest.get("files") if isinstance(manifest, dict) else None
+        if not isinstance(entries, list):
+            raise CorpusUnavailableError("Corpus manifest must contain a 'files' list.")
+        root = self._corpus_dir.resolve()
+        discovered = {p.resolve().relative_to(root).as_posix(): p for p in files}
+        listed: Dict[str, Dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                raise CorpusUnavailableError("Corpus manifest has an invalid file entry.")
+            rel = entry["path"]
+            path = (root / rel).resolve()
+            if not path.is_relative_to(root) or path == root:
+                raise CorpusUnavailableError(f"Corpus manifest path escapes root: {rel!r}")
+            key = path.relative_to(root).as_posix()
+            if key in listed:
+                raise CorpusUnavailableError(f"Duplicate corpus manifest path: {key}")
+            listed[key] = entry
+        if set(listed) != set(discovered):
+            raise CorpusUnavailableError(
+                "Corpus manifest file set differs from the selected files: "
+                f"missing={sorted(set(discovered) - set(listed))}, "
+                f"extra={sorted(set(listed) - set(discovered))}"
+            )
+        for key, path in discovered.items():
+            entry = listed[key]
+            size = entry.get("size_bytes")
+            sha = entry.get("sha256")
+            if type(size) is not int or size < 0 or size != path.stat().st_size:
+                raise CorpusUnavailableError(f"Corpus manifest size mismatch: {key}")
+            if not isinstance(sha, str) or len(sha) != 64 or sha.lower() != self._sha256_of_file(path):
+                raise CorpusUnavailableError(f"Corpus manifest SHA-256 mismatch: {key}")
 
     def run(self) -> CorpusSummary:
         """
@@ -589,9 +627,8 @@ class TSRDCorpusLoader:
             adapter = TSRDAdapter(
                 h5_path,
                 data_mode=self._data_mode,
-                sha256_pin=None,  # per-file pin not used at the
-                                  # corpus layer; chain-of-custody
-                                  # lives in corpus_manifest.json.
+                sha256_pin=None,  # Required manifest hashes are verified
+                                  # before iteration in _verify_manifest().
                 simulation_config=self._simulation_config,
             )
         except DataUnavailableError as e:

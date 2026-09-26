@@ -1,0 +1,43 @@
+{
+  "version": "1.0.0",
+  "chain_of_custody": {
+    "dataset_slug": "alan-turing-institute/turing-synthetic-radar-dataset",
+    "dataset_revision": "68a07b0e0189c5b4ec748c4b66dedfe26f8f1c51",
+    "github_repo_slug": "alan-turing-institute/turing-deinterleaving-challenge",
+    "github_commit_hash": "51a69e5ec950deeda69d17f26ebf958d7e3dce3e",
+    "arxiv_paper": "arXiv:2602.03856",
+    "extraction_date_utc": "2026-09-03",
+    "extractor_version": "1.0.0",
+    "notes": "These are small, hash-pinned INTEGRATION FIXTURES only. They are not the production TSRD corpus. The canonical corpus remains the gated Hugging Face dataset accessed from Kaggle. The fixtures carry one active emitter per file and two transmitter configurations each; they are integration slices, not representative of the corpus's emitter density."
+  },
+  "fixtures": {
+    "config_0_scan.h5": {
+      "path": "tests/fixtures/tsrd/config_0_scan.h5",
+      "size_bytes": 52965,
+      "sha256": "4b0b21f1324dc09f16bcb5e1b94c6a328a716619cf16d1475f3f171519df880e",
+      "receiver_mode": "Scanning",
+      "feature_names": ["ToA", "Frequency", "PulseWidth", "AoA", "Amplitude"],
+      "n_pulses": 788,
+      "n_unique_labels": 1,
+      "n_transmitter_configs": 2,
+      "active_tx_ids": [0],
+      "silent_tx_ids": [1],
+      "freq_mode_counts": {"HoppingLinear": 2},
+      "role": "Scan-Mode integration fixture; supports observed-occupancy grids and the canonical PDW stream."
+    },
+    "config_0_stare.h5": {
+      "path": "tests/fixtures/tsrd/config_0_stare.h5",
+      "size_bytes": 259927,
+      "sha256": "da2d793dabedc6b2bd788adf340c50ca6c5ec7a396b77e9cc23c454f39e48d7d",
+      "receiver_mode": "Stare",
+      "feature_names": ["ToA", "Frequency", "PulseWidth", "AoA", "Amplitude"],
+      "n_pulses": 13929,
+      "n_unique_labels": 1,
+      "n_transmitter_configs": 2,
+      "active_tx_ids": [0],
+      "silent_tx_ids": [1],
+      "freq_mode_counts": {"HoppingLinear": 2},
+      "role": "Stare-Mode integration fixture; reserved for the deferred ScanPolicyOracle (counterfactual scan-policy evaluation)."
+    }
+  }
+}

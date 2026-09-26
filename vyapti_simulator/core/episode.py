@@ -215,7 +215,7 @@ def run_episode(
 
         action = scheduler.select_action(history, t)
         t_select = time.perf_counter()
-        
+
         try:
             action = int(action)
         except (TypeError, ValueError) as exc:
@@ -250,7 +250,7 @@ def run_episode(
                     f"return a BandPrediction or None."
                 )
         t_predict = time.perf_counter()
-        
+
         mem_end = process.memory_info().rss
 
         # Add compute profiling to observation so metrics can read it

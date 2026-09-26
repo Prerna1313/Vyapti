@@ -46,7 +46,7 @@ Usage
         KinematicEmitter, RayleighFadingChannel, compute_path_loss,
     )
     import numpy as np
-from vyapti_simulator.rf.hardware import HardwareReceiverModel
+    from vyapti_simulator.rf.hardware import HardwareReceiverModel
 
     cfg = SimulationEngineConfig(
         tick_interval_s=10e-3,  # 10 ms physics tick
@@ -213,6 +213,7 @@ class SimEmitter:
     # unaffected.
     carrier_freq_hz: float = 0.0        # 0 = unknown (band-pass matches any)
     aoa_deg: float = 0.0
+    received_power_w: Optional[float] = None
     # PRI-aware firing: absolute tick number when the next pulse fires.
     # Initialised to 0 (fires on first tick). Incremented by
     # int(pri_sec / tick_interval_s) each time a pulse is synthesised.
@@ -308,6 +309,7 @@ class RealTimeRFSimulator:
         pulse_width_s: float = 1e-6,
         carrier_freq_hz: float = 0.0,
         aoa_deg: float = 0.0,
+        received_power_w: Optional[float] = None,
     ) -> int:
         """
         Register an emitter with the engine.
@@ -353,6 +355,9 @@ class RealTimeRFSimulator:
             pulse_width_s=pulse_width_s,
             carrier_freq_hz=float(carrier_freq_hz),
             aoa_deg=float(aoa_deg),
+            received_power_w=(
+                None if received_power_w is None else float(received_power_w)
+            ),
         ))
         return emitter_id
 
@@ -464,6 +469,15 @@ class RealTimeRFSimulator:
                 initial_phase_rad=em.phase_offset_rad,
             )
 
+        # Apply per-emitter received power after waveform generation. This
+        # keeps the RF link budget attached to the emitter instead of using
+        # the engine-wide reference pulse power for every emitter.
+        if em.received_power_w is not None:
+            measured_power = float(np.mean(np.abs(chirp) ** 2))
+            if measured_power <= 0.0 or not np.isfinite(measured_power):
+                raise ValueError("Emitter waveform has no finite signal power")
+            chirp = chirp * np.sqrt(em.received_power_w / measured_power)
+
         # Apply multipath fading
         if em.channel is not None:
             chirp = em.channel.apply(chirp)
@@ -471,7 +485,7 @@ class RealTimeRFSimulator:
         # Add AWGN at the configured SNR
                 # Add AWGN at the configured SNR
         chirp = waveforms.add_awgn(chirp, snr_db=cfg.snr_db, rng=self.rng)
-        
+
         # Apply Hardware Imperfections (RF Dirt)
         chirp = HardwareReceiverModel.apply_phase_noise(chirp, cfg.phase_noise_std_deg, self.rng)
         chirp = HardwareReceiverModel.apply_iq_imbalance(chirp, cfg.iq_amplitude_imbalance_db, cfg.iq_phase_imbalance_deg)

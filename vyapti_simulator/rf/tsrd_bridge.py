@@ -97,10 +97,11 @@ class SimEmitterSpec:
     pulse_width_s : float
         Nominal pulse width in seconds.
     tx_power_w : float
-        Calibrated transmit power in watts (linear).
-        Includes the link budget so the engine emits a chirp
-        with the right per-sample voltage to hit the spec's
-        ``snr_db`` at the configured range.
+        Physical transmit power in watts (linear), derived from
+        ``tx_power_dbm``.
+    received_power_w : float
+        Friis received power in watts (linear), including both antenna
+        gains and the emitter-to-receiver range.
     carrier_freq_hz : float
         Carrier frequency in Hz. For frequency-agile emitters
         this is the *initial* frequency; the waveform function
@@ -117,6 +118,7 @@ class SimEmitterSpec:
     pri_sec: float
     pulse_width_s: float
     tx_power_w: float
+    received_power_w: float
     carrier_freq_hz: float
     chirp_bandwidth_hz: float
 
@@ -173,8 +175,9 @@ class TSRDSpecToRFBridge:
         # 4. Build waveform function
         waveform_fn, chirp_bw = self._build_waveform_fn(spec, carrier_hz, rng)
 
-        # 5. Link budget → transmit power
+        # 5. Link budget → transmit and received power
         tx_power_w = self._calibrate_tx_power(spec, carrier_hz)
+        received_power_w = self._received_power_w(spec, carrier_hz, tx_power_w)
 
         return SimEmitterSpec(
             emitter_id=int(spec.emitter_id),
@@ -185,6 +188,7 @@ class TSRDSpecToRFBridge:
             pri_sec=float(spec.pri_sec),
             pulse_width_s=float(spec.pulse_width_sec),
             tx_power_w=tx_power_w,
+            received_power_w=received_power_w,
             carrier_freq_hz=float(carrier_hz),
             chirp_bandwidth_hz=float(chirp_bw),
         )
@@ -327,10 +331,16 @@ class TSRDSpecToRFBridge:
             counter["n"] += 1
             f_c = float(freqs[idx])
             t_pulse = t[: max(2, int(round(pw_s * cfg.dsp_sample_rate_hz)))]
+
+            # THE RF MIXER PATCH:
+            # Generate the chirp at Baseband (0 Hz) instead of Absolute RF (f_c).
+            # This mathematically models the receiver's Local Oscillator (LO) mixing
+            # the signal down to baseband before the ADC digitizes it.
+            f_baseband = 0.0
             return generate_lfm_chirp(
                 t_pulse,
-                f0=f_c - 0.5 * chirp_bw,
-                f1=f_c + 0.5 * chirp_bw,
+                f0=f_baseband - 0.5 * chirp_bw,
+                f1=f_baseband + 0.5 * chirp_bw,
                 peak_power_w=cfg.pulse_power_w,
                 initial_phase_rad=float(waveform_rng.uniform(0.0, 2.0 * np.pi)),
             )
@@ -403,16 +413,39 @@ class TSRDSpecToRFBridge:
         with ``P_noise = P_signal / SNR_linear`` from the engine.
         We pick ``P_signal = pulse_power_w`` such that
         ``P_signal = N_0 * SNR_linear`` for the requested SNR.
-        The simplest convention: ``pulse_power_w = 1.0`` (the
-        engine's reference) and let the engine's snr_db do the
-        rest. We keep this method for callers that want to
-        override the engine's noise setting with a per-emitter
-        link budget.
+        The input ``tx_power_dbm`` is the emitter's actual transmit power.
+        The Friis calculation is kept separate in ``_received_power_w``;
+        it must not be applied twice and must not be confused with the
+        receiver's configured SNR/noise model.
+
+        Returns
+        -------
+        float
+            Transmit power in watts (linear scale).
         """
-        # Default: 1 W reference; the engine's `cfg.snr_db` controls
-        # the per-pulse noise. Callers wanting explicit per-emitter
-        # SNR override `cfg.snr_db` after construction.
-        return 1.0
+        tx_power_w = 10.0 ** ((float(spec.tx_power_dbm) - 30.0) / 10.0)
+        if not np.isfinite(tx_power_w) or tx_power_w <= 0.0:
+            raise ValueError(
+                f"emitter_id={spec.emitter_id}: tx_power_dbm must produce "
+                f"a finite positive power; got {spec.tx_power_dbm!r}"
+            )
+        return float(tx_power_w)
+
+    @staticmethod
+    def _received_power_w(
+        spec: SyntheticEmitterSpec,
+        carrier_hz: float,
+        tx_power_w: float,
+    ) -> float:
+        """Return Friis received power once, including both antenna gains."""
+        if carrier_hz <= 0.0:
+            raise ValueError("carrier_hz must be positive")
+        distance = max(float(np.linalg.norm(np.asarray(spec.emitter_position_m))), 1e-3)
+        wavelength = 299792458.0 / carrier_hz
+        gt = 10.0 ** (float(spec.tx_gain_dbi) / 10.0)
+        gr = 10.0 ** (float(spec.rx_gain_dbi) / 10.0)
+        friis_gain = (wavelength / (4.0 * np.pi * distance)) ** 2
+        return float(max(tx_power_w * gt * gr * friis_gain, 1e-30))
 
     # ----------------------------------------------------------------
     # Helpers

@@ -3,7 +3,7 @@ Vyapti Simulation — Main Configuration with Provenance Tracking
 Every parameter labeled per user requirements.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Dict, List
 
 # Import provenance label definitions from environment
@@ -163,5 +163,20 @@ class MasterSimulationConfig:
             "tsrd_option_1_parameter_grounding": "[DOCUMENT-REQUIRED] Option 1 adopted; memo required before any TSRD data touches script.",
             "tsrd_option_2_pdw_overlay": "[DOCUMENT-REQUIRED] Option 2 optional; must be explicitly enabled with counterfactual documentation.",
             "architecture_version": "[SCIENTIFIC] Post-audit simplified version; must reference if comparing to original 7-layer proposal.",
+            "include_periodic_synchronisation_test": "[ENGINEERING-ASSUMPTION] Optional validation scenario selected by the project.",
+            "reward_weight_intercept_time": "[EXPERIMENTAL-VARIABLE] User-selected objective weight; report the value used.",
+            "reward_weight_interception_rate": "[EXPERIMENTAL-VARIABLE] User-selected objective weight; report the value used.",
+            "reward_weight_false_alarm_penalty": "[EXPERIMENTAL-VARIABLE] User-selected penalty weight; report the value used.",
+            "reward_weight_switch_cost": "[EXPERIMENTAL-VARIABLE] User-selected cost weight; report the value used.",
+            "reward_weights_justified": "[ENGINEERING-ASSUMPTION] Records whether the selected weights have documented justification.",
+            "tsrd_corpus_dir": "[EXPERIMENTAL-VARIABLE] Dataset location supplied for the run.",
+            "tsrd_corpus_require_manifest": "[ENGINEERING-ASSUMPTION] Whether to require and verify a corpus manifest.",
+            "tsrd_option_1_memo_text": "[ENGINEERING-ASSUMPTION] Project rationale for this configuration option.",
+            "tsrd_option_3_future_coupling": "[ENGINEERING-ASSUMPTION] Deferred integration flag.",
+            "tsrd_subset_size": "[EXPERIMENTAL-VARIABLE] User-selected subset size for optional runs.",
+            "architecture_note": "[ENGINEERING-ASSUMPTION] Project rationale for the selected architecture version.",
         }
         self.provenance_map.update(provenance_entries)
+        missing = {f.name for f in fields(self) if f.name != "provenance_map"} - self.provenance_map.keys()
+        if missing:
+            raise ValueError(f"Missing provenance for configuration fields: {sorted(missing)}")

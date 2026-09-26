@@ -253,6 +253,7 @@ class RFPulsePipeline:
                 channel=sspec.channel,
                 pri_sec=sspec.pri_sec,
                 pulse_width_s=sspec.pulse_width_s,
+                received_power_w=sspec.received_power_w,
             )
 
         # 3. Run the engine and concatenate I/Q

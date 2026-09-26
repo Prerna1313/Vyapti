@@ -5,7 +5,7 @@ class HardwareReceiverModel:
     Simulates analog front-end imperfections in RF receivers.
     Applying these distortions closes the Simulation-to-Reality (Sim2Real) gap.
     """
-    
+
     @staticmethod
     def apply_phase_noise(signal: np.ndarray, phase_noise_std_deg: float, rng: np.random.Generator) -> np.ndarray:
         """
@@ -14,12 +14,12 @@ class HardwareReceiverModel:
         """
         if phase_noise_std_deg <= 0.0:
             return signal
-            
+
         std_rad = np.radians(phase_noise_std_deg)
         # Random walk phase noise (cumulative sum of Gaussian steps)
         phase_steps = rng.normal(0, std_rad, size=signal.shape)
         phase_noise = np.cumsum(phase_steps)
-        
+
         # Apply phase rotation
         return signal * np.exp(1j * phase_noise)
 
@@ -31,21 +31,21 @@ class HardwareReceiverModel:
         """
         if amplitude_imbalance_db == 0.0 and phase_imbalance_deg == 0.0:
             return signal
-            
+
         # Convert dB to linear scale (voltage ratio)
         g = 10 ** (amplitude_imbalance_db / 20.0)
         phi = np.radians(phase_imbalance_deg)
-        
+
         # Separate I and Q
         I = np.real(signal)
         Q = np.imag(signal)
-        
+
         # Apply imbalance
         # I_new = I
         # Q_new = g * (Q * np.cos(phi) - I * np.sin(phi))
         I_new = I
-        Q_new = g * (Q * np.cos(phi) + I * np.sin(phi))
-        
+        Q_new = g * (Q * np.cos(phi) - I * np.sin(phi))
+
         return I_new + 1j * Q_new
 
     @staticmethod
@@ -56,14 +56,14 @@ class HardwareReceiverModel:
         """
         if max_voltage <= 0.0:
             return signal
-            
+
         magnitude = np.abs(signal)
         # Find where magnitude exceeds max_voltage
         clip_mask = magnitude > max_voltage
-        
+
         if not np.any(clip_mask):
             return signal
-            
+
         # Clip magnitude while preserving phase
         clipped_signal = signal.copy()
         clipped_signal[clip_mask] = (signal[clip_mask] / magnitude[clip_mask]) * max_voltage
@@ -79,16 +79,16 @@ class HardwareReceiverModel:
         # (Simplified polynomial model: V_out = a1*V_in + a3*V_in^3)
         # For a 50 ohm system, power to voltage mapping applies.
         # This is a rapid prototype model of 3rd order distortion.
-        
+
         # In this simplified model, a3 is derived inversely from IIP3.
         # If IIP3 is high (e.g., 30 dBm), the distortion is very small.
         if iip3_dbm > 50.0: # Basically perfect amplifier
             return signal
-            
+
         a1 = 1.0
         # Rough empirical scaling for the cubic term based on IIP3
-        a3 = - (10 ** (-iip3_dbm / 10.0)) 
-        
+        a3 = - (10 ** (-iip3_dbm / 10.0))
+
         # V_out = V_in * (a1 + a3 * |V_in|^2)
         # This causes compression and intermodulation
         distortion = a3 * (np.abs(signal) ** 2)

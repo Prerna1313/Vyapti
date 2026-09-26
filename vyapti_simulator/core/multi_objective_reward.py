@@ -513,10 +513,10 @@ class MultiObjectiveRewardConfig:
                 self.reference_ranges[name] = range_vals
 
 
-# NOTE: This advanced Chebyshev/Pareto scalarizer is not currently wired 
-# into ExperimentRunner. The runner uses MetricsEngine._reward_composite 
-# (weighted composite) by default. To use this engine, modify 
-# experiment_runner.py to call self.reward_engine.compute_reward(...) 
+# NOTE: This advanced Chebyshev/Pareto scalarizer is not currently wired
+# into ExperimentRunner. The runner uses MetricsEngine._reward_composite
+# (weighted composite) by default. To use this engine, modify
+# experiment_runner.py to call self.reward_engine.compute_reward(...)
 # instead of metrics_engine._reward_composite(...).
 class MultiObjectiveRewardEngine:
     """
@@ -623,7 +623,7 @@ class MultiObjectiveRewardEngine:
         detection = metrics.get("detection_metrics", {})
 
         if obj_type == ObjectiveType.DISCOVERY_RATE:
-            return discovery.get("interception_probability", 0.0) or 0.0
+            return discovery.get("emitter_interception_ratio", discovery.get("interception_probability", 0.0)) or 0.0
 
         elif obj_type == ObjectiveType.DISCOVERY_SPEED:
             val = discovery.get("mean_first_intercept_time_slots")
