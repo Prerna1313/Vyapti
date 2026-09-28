@@ -31,6 +31,61 @@ def _seed_for_file(stem: str, seed: int) -> int:
     return int.from_bytes(digest[:4], "little")
 
 
+def _input_inventory(corpus_root: Path, allow_stare_only: bool) -> dict:
+    """Record a cheap file inventory, not a substitute for content hashes."""
+    splits = {}
+    for split in ("train", "val", "test"):
+        files = []
+        for stare, scan in iter_tsr_replay_pairs(
+            corpus_root, split, allow_stare_only=allow_stare_only
+        ):
+            for path in (stare, scan):
+                if path is None:
+                    continue
+                stat = path.stat()
+                files.append({
+                    "path": path.relative_to(corpus_root).as_posix(),
+                    "size_bytes": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                })
+        if not files:
+            raise ValueError(f"No TSRD {split} replay files")
+        splits[split] = sorted(files, key=lambda row: row["path"])
+    payload = json.dumps(splits, sort_keys=True, separators=(",", ":"))
+    return {
+        "basis": "relative_path_size_mtime_not_content_hash",
+        "inventory_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        "splits": splits,
+    }
+
+
+def _write_json(path: Path, data: dict) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(data, indent=2, allow_nan=False), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _assert_scorecard_consistent(score: dict, trajectory: list) -> None:
+    """Reject reports whose recorded event counts disagree with observations."""
+    positives = sum(bool(step.observation["hit"]) for step in trajectory)
+    true_hits = score["event_level"]["true_detections"]
+    false_alarms = score["event_level"]["false_alarms"]
+    cell = score["cell_level"]
+    pulse = score["pulse_level"]
+    if (
+        positives != true_hits + false_alarms
+        or true_hits != cell["detected_occupied_cell_count"]
+        or true_hits > cell["eligible_selected_cells"]
+        or false_alarms > cell["empty_selected_cells"]
+        or pulse["covered_recorded_pulses"] > pulse["recorded_pulses"]
+        or (pulse["captured_recorded_pulses"] is not None
+            and pulse["captured_recorded_pulses"] > pulse["covered_recorded_pulses"])
+        or score["reward"]["detector_positive_total"] != positives
+        or score["reward"]["false_alarm_aware_total"] != true_hits - false_alarms
+    ):
+        raise ValueError("TSRD scorecard is inconsistent with its recorded trajectory")
+
+
 def _summarize(rows: list[dict]) -> dict:
     illumination_n = sum(r["illumination"]["detected_emitter_slot_opportunity_count"] for r in rows)
     illumination_d = sum(r["illumination"]["emitter_slot_opportunity_count"] for r in rows)
@@ -238,6 +293,7 @@ class TSRDBenchmarkProtocol:
                     "unique_band_coverage": exploration["coverage_rate"],
                     "exploration_fraction": exploration["exploration_fraction"],
                 })
+            _assert_scorecard_consistent(score, trajectory)
             rows.append({
                 "config": stare_file.stem,
                 **score,
@@ -276,6 +332,49 @@ class TSRDBenchmarkProtocol:
         report_path = self.output_dir / "tsrd_benchmark_report.json"
         if report_path.exists():
             raise FileExistsError(f"Use a fresh output directory: {report_path} exists")
+        manifest_path = self.output_dir / "tsrd_run_manifest.json"
+        if manifest_path.exists():
+            raise FileExistsError(f"Use a fresh output directory: {manifest_path} exists")
+        manifest = {
+            "status": "started",
+            "corpus_root": str(self.corpus_root),
+            "metric_contract_version": (
+                "tsrd_recorded_pulse_emitter_v3"
+                if self.receiver_profile_options["receiver_profile"] == "pdw_v2"
+                else "tsrd_recorded_pulse_emitter_v2"
+            ),
+            "input_inventory": _input_inventory(
+                self.corpus_root, self.band_centres_mhz is not None
+            ),
+            "seed_scheme": {
+                "train_world": "root_seed_plus_world_index",
+                "evaluation_file": "first_32_bits_sha256(root_seed:config_stem)",
+                "receiver_noise": "replay_signature_and_receiver_seed",
+                "optimizer_seed": "trainer_callback_owned",
+            },
+            "seed": self.seed,
+            "candidate_ids": candidate_ids,
+            "worlds_per_candidate": worlds_per_candidate,
+            "emitters_per_world": emitter_count,
+            "reward_mode": reward_mode,
+            "receiver_options": self.receiver_options,
+            "receiver_profile_options": self.receiver_profile_options,
+            "dwell_profile": self.dwell_profile,
+            "band_centres_mhz": (
+                self.band_centres_mhz.tolist() if self.band_centres_mhz is not None else None
+            ),
+        }
+        _write_json(manifest_path, manifest)
+        def mark_failed(phase: str, exc: Exception, candidate_id: str | None = None) -> None:
+            manifest["status"] = "failed"
+            manifest["failure"] = {
+                "phase": phase,
+                "candidate_id": candidate_id,
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            _write_json(manifest_path, manifest)
+
         validation = {}
         checkpoints = {}
         for candidate_id in candidate_ids:
@@ -288,30 +387,38 @@ class TSRDBenchmarkProtocol:
                 for world in self.train_worlds(worlds_per_candidate, emitter_count):
                     consumed += 1
                     yield world
-            train_candidate(
-                candidate_id, counted_worlds(),
-                checkpoint, reward_mode,
-            )
-            if consumed != worlds_per_candidate:
-                raise ValueError(
-                    f"Trainer {candidate_id} consumed {consumed} of "
-                    f"{worlds_per_candidate} declared training worlds"
+            try:
+                train_candidate(
+                    candidate_id, counted_worlds(),
+                    checkpoint, reward_mode,
                 )
-            if not checkpoint.is_file():
-                raise FileNotFoundError(f"Trainer did not save {checkpoint}")
-            checkpoints[candidate_id] = checkpoint
-            validation[candidate_id] = self._evaluate_split(
-                "val", checkpoint, load_checkpoint
-            )
+                if consumed != worlds_per_candidate:
+                    raise ValueError(
+                        f"Trainer {candidate_id} consumed {consumed} of "
+                        f"{worlds_per_candidate} declared training worlds"
+                    )
+                if not checkpoint.is_file():
+                    raise FileNotFoundError(f"Trainer did not save {checkpoint}")
+                checkpoints[candidate_id] = checkpoint
+                validation[candidate_id] = self._evaluate_split(
+                    "val", checkpoint, load_checkpoint
+                )
+            except Exception as exc:
+                mark_failed("training_or_validation", exc, candidate_id)
+                raise
 
         def selection_score(candidate_id: str) -> float:
             score = validation[candidate_id]["summary"]["pooled_illumination_interception_ratio"]
             return float("-inf") if score is None else score
 
-        selected = max(candidate_ids, key=selection_score)
-        if selection_score(selected) == float("-inf"):
-            raise ValueError("Validation has no recorded emitter-slot opportunities")
-        test = self._evaluate_split("test", checkpoints[selected], load_checkpoint)
+        try:
+            selected = max(candidate_ids, key=selection_score)
+            if selection_score(selected) == float("-inf"):
+                raise ValueError("Validation has no recorded emitter-slot opportunities")
+            test = self._evaluate_split("test", checkpoints[selected], load_checkpoint)
+        except Exception as exc:
+            mark_failed("selection_or_test", exc)
+            raise
         report = {
             "metric_contract_version": (
                 "tsrd_recorded_pulse_emitter_v3"
@@ -338,7 +445,12 @@ class TSRDBenchmarkProtocol:
             "validation": validation,
             "held_out_test": test,
         }
-        report_path.write_text(
-            json.dumps(report, indent=2, allow_nan=False), encoding="utf-8"
-        )
+        _write_json(report_path, report)
+        manifest["status"] = "complete"
+        manifest["selected_candidate"] = selected
+        manifest["checkpoint_sha256"] = {
+            candidate_id: validation[candidate_id]["checkpoint_sha256"]
+            for candidate_id in candidate_ids
+        }
+        _write_json(manifest_path, manifest)
         return report

@@ -86,6 +86,24 @@ report = protocol.run(
 )
 ```
 
+Each run writes `tsrd_run_manifest.json` before training and
+`tsrd_benchmark_report.json` only after a complete run. The manifest records
+the receiver settings, seed derivation, candidate IDs, split file inventory,
+and frozen checkpoint hashes. Its inventory fingerprint uses relative paths,
+sizes, and modification times, **not file-content hashes**; preserve the source
+dataset revision separately for stronger provenance. Training and evaluation
+errors propagate and mark the manifest `failed` with the phase and exception;
+an incomplete run must not be interpreted as a benchmark result. Scorecard
+event totals are checked against the recorded observations before reporting.
+
+The policy callback in `run_episode` receives a whitelisted scenario descriptor
+and prior receiver observations, while the offline metrics engine receives
+truth separately. The training callback is trusted code: it receives a receiver
+object and provenance and could deliberately inspect hidden data. Its policy
+implementation must consume only the documented observations. The whitelist
+and regression tests catch accidental observation leakage, not deliberate
+Python introspection by a trainer.
+
 The default `fixed_50_ms` profile keeps 600 scheduler decisions in a 30 s
 mission. Set `dwell_profile="mixed_50_100_ms"` on a **separate** protocol and
 output directory to allow a policy to return `DwellAction(band, slots)` with

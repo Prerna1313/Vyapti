@@ -1,5 +1,6 @@
 """TSRD corpus protocol and label-aware replay metric regression tests."""
 
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,11 +9,14 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
+from vyapti_simulator.core.episode import run_episode
 from vyapti_simulator.core.mapping import frequency_to_bands
 from vyapti_simulator.core.metrics import MetricsConfig, MetricsEngine
 from vyapti_simulator.core.scheduler_interface import BandPrediction
 from vyapti_simulator.qualification.probes import RoundRobinProbe
-from vyapti_simulator.tsrd.benchmark_protocol import TSRDBenchmarkProtocol
+from vyapti_simulator.tsrd.benchmark_protocol import (
+    TSRDBenchmarkProtocol, _assert_scorecard_consistent,
+)
 from vyapti_simulator.tsrd.corpus_loader import CorpusUnavailableError, iter_tsr_replay_pairs
 from vyapti_simulator.tsrd.mixed_dwell import DwellAction, run_mixed_dwell_episode
 from vyapti_simulator.tsrd.paired_scan_validation import (
@@ -418,6 +422,31 @@ def test_pdw_receiver_exposes_only_causal_measured_pulses_and_noise():
         probe._check_truth_leakage([contaminated])
 
 
+def test_episode_policy_receives_measurements_not_truth():
+    class ObservationProbe(RoundRobinProbe):
+        def reset(self, seed, scenario_config):
+            self.seen_scenario = dict(scenario_config)
+            self.seen_observations = []
+            super().reset(seed, scenario_config)
+
+        def select_action(self, observation_history, current_time_slot):
+            if observation_history:
+                self.seen_observations.append(dict(observation_history[-1]))
+            return super().select_action(observation_history, current_time_slot)
+
+    env = _measured_world()
+    policy = ObservationProbe(2)
+    run_episode(env, policy, seed=19)
+    assert set(policy.seen_scenario).isdisjoint({"emitter_id", "hidden_truth", "labels"})
+    assert policy.seen_observations
+    for obs in policy.seen_observations:
+        assert set(obs).isdisjoint({"emitter_id", "hidden_truth", "labels"})
+        measurement = obs.get("receiver_measurement")
+        if measurement is not None:
+            assert all(set(pdw).isdisjoint({"emitter_id", "hidden_truth", "labels"})
+                       for pdw in measurement["pdws"])
+
+
 def test_pdw_receiver_miss_and_common_potential_noise():
     env = _measured_world()
     env.config.false_alarm_probability = 0.0
@@ -565,6 +594,46 @@ def test_train_pool_and_frozen_split_protocol(tmp_path):
     assert row["tier_a_ps26055"]["conditional_pd"] == row["cell_level"]["conditional_pd"]
     assert row["tier_a_ps26055"]["opportunity_interception_ratio"] == row["cell_level"]["occupied_cell_detection_ratio"]
     assert (tmp_path / "results" / "tsrd_benchmark_report.json").is_file()
+    manifest = json.loads((tmp_path / "results" / "tsrd_run_manifest.json").read_text())
+    assert manifest["status"] == "complete"
+    assert manifest["input_inventory"]["basis"] == "relative_path_size_mtime_not_content_hash"
+    assert len(manifest["input_inventory"]["splits"]["train"]) == 2
+    assert manifest["checkpoint_sha256"]["first"] == report["validation"]["first"]["checkpoint_sha256"]
+
+
+def test_scorecard_consistency_rejects_corrupted_counts():
+    env = _small_world()
+    env.reset(seed=1)
+    trajectory = []
+    for band in (0, 0, 1):
+        obs, _ = env.step(band)
+        trajectory.append(SimpleNamespace(action=band, time_slot=obs["time_slot"], observation=obs))
+    score = score_recorded_replay(env, trajectory)
+    _assert_scorecard_consistent(score, trajectory)
+    score["event_level"]["false_alarms"] += 1
+    with pytest.raises(ValueError, match="inconsistent"):
+        _assert_scorecard_consistent(score, trajectory)
+
+
+def test_failed_training_leaves_incomplete_manifest_and_no_report(tmp_path):
+    corpus = tmp_path / "corpus"
+    _fixture_corpus(corpus)
+    output = tmp_path / "failed_results"
+    protocol = TSRDBenchmarkProtocol(corpus, output)
+
+    def fail_train(candidate_id, worlds, checkpoint, reward_mode):
+        raise RuntimeError("deliberate training failure")
+
+    with pytest.raises(RuntimeError, match="deliberate"):
+        protocol.run(
+            ["failed"], fail_train, lambda checkpoint, bands: RoundRobinProbe(bands),
+            worlds_per_candidate=1, emitter_count=1,
+        )
+    manifest = json.loads((output / "tsrd_run_manifest.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["failure"]["phase"] == "training_or_validation"
+    assert manifest["failure"]["type"] == "RuntimeError"
+    assert not (output / "tsrd_benchmark_report.json").exists()
 
 
 def test_reward_screen_uses_development_splits_only(tmp_path):
