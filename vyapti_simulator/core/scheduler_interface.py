@@ -7,12 +7,16 @@ GRU/LSTM predictor (isolated), approximate POMDP, DQN/PPO — must implement
 this interface and use it WITHOUT access to hidden truth.
 
 The environment passes ONLY:
-  - observation_history: list of previous (band, hit/miss, retune_cost)
+  - observation_history: list of previous receiver outputs
   - current_time_slot
 The scheduler returns ONLY:
   - selected_band: int
   - optional diagnostics (confidence, age, predicted period) for audit
   - optional BandPrediction, for PS metrics 6 and 7
+
+The opt-in TSRD ``pdw_v2`` receiver may also report measured PDWs from the
+completed selected dwell. Its nested schema is checked below and excludes
+emitter identity and unseen-band truth.
 
 TRUTH LEAKAGE PREVENTION: The interface explicitly rejects any call that
 passes hidden truth fields. Per frozen protocol Gate 0 (line 83-86) and
@@ -63,28 +67,25 @@ PERMITTED_OBSERVATION_KEYS = frozenset({
     "truth_excluded",             # explicit negative markers, audited
     "emitter_identity_excluded",
     "future_state_excluded",
-    # TSRD / Option B richer observation (derived from real pulses; not truth):
-    "pulse_count",               # pulses in this cell (0 if empty)
-    "energy_db",                  # aggregate energy: sum_i 10**(amp_i/10) in dB
-    "max_amplitude_db",           # strongest pulse amplitude in dB (relative scale)
-    "mean_pulse_width_us",       # mean PW of pulses in this cell (µs)
-    "mean_aoa_deg",              # mean AoA of pulses in this cell (degrees)
-    "snr_db_estimate",           # approx SNR: max_amplitude_db - noise_floor (dB)
-    # AUDIT 2026-09-05 — System A/B unification:
-    # The following two fields are derived from real pulse data and
-    # contain no truth. They are produced by TSRDEnvironment.step()
-    # for both data_source = "real_tsrd" and data_source = "synthetic_dynamics"
-    # paths. The first is the 10*log10(N) coherent-integration gain
-    # applied to the cell's SNR estimate; the second is the number of
-    # pulses from the dominant emitter in the cell, used to compute that
-    # gain. Neither reveals emitter identity or hidden truth.
-    "coherent_integration_gain_db",  # 10*log10(N) dB applied to snr_db
-    "n_pulses_dominant_emitter",     # pulses from the dominant emitter in cell
+    # Only detector output and receiver timing are scheduler-visible.
     # AUDIT 2026-09-09 — Hardware profiling for F9 compute charts:
     "select_action_ms",              # time spent in select_action
     "predict_ms",                    # time spent in predict
     "wall_clock_ms",                 # total slot time
     "memory_delta_bytes",            # memory change during slot
+})
+
+# The mixed-dwell lane adds these as a complete group after a 50/100 ms action.
+# Keeping them separate preserves the fixed-dwell observation contract.
+MIXED_DWELL_OBSERVATION_KEYS = frozenset({
+    "start_slot", "slots_consumed", "detector_positives",
+})
+
+# Opt-in TSRD receiver output. Nested keys are checked separately below.
+PDW_RECEIVER_OBSERVATION_KEYS = frozenset({"receiver_measurement"})
+PDW_MEASUREMENT_KEYS = frozenset({"pulse_count", "pdws"})
+PDW_FEATURE_KEYS = frozenset({
+    "toa_offset_us", "frequency_mhz", "pulse_width_us", "aoa_deg", "amplitude_db",
 })
 
 #: Names known to denote hidden truth. Retained for a precise error message
@@ -229,7 +230,37 @@ class BaseScheduler(ABC):
                 "Scheduler interface must never receive truth fields. See frozen protocol Gate 0."
             )
 
-        undeclared = keys - PERMITTED_OBSERVATION_KEYS
+        mixed = bool(keys & MIXED_DWELL_OBSERVATION_KEYS)
+        if mixed and not MIXED_DWELL_OBSERVATION_KEYS <= keys:
+            raise ValueError("Incomplete mixed-dwell observation extension")
+        allowed = (
+            PERMITTED_OBSERVATION_KEYS | MIXED_DWELL_OBSERVATION_KEYS
+            if mixed else PERMITTED_OBSERVATION_KEYS
+        )
+        if "receiver_measurement" in keys:
+            allowed = allowed | PDW_RECEIVER_OBSERVATION_KEYS
+            measurements = obs["receiver_measurement"]
+            if not isinstance(measurements, list):
+                measurements = [measurements]
+            if not measurements or (not mixed and len(measurements) != 1) or len(measurements) > 2:
+                raise ValueError("Invalid receiver measurement grouping")
+            import math
+            for measurement in measurements:
+                if measurement is None:
+                    continue
+                if not isinstance(measurement, dict) or set(measurement) != PDW_MEASUREMENT_KEYS:
+                    raise ValueError("Invalid receiver measurement fields")
+                count = measurement["pulse_count"]
+                pdws = measurement["pdws"]
+                if (not isinstance(count, int) or isinstance(count, bool) or count < 1
+                        or not isinstance(pdws, list) or not 1 <= len(pdws) <= count):
+                    raise ValueError("Invalid measured PDW count")
+                for pdw in pdws:
+                    if (not isinstance(pdw, dict) or set(pdw) != PDW_FEATURE_KEYS
+                            or any(not isinstance(value, (int, float))
+                                   or not math.isfinite(value) for value in pdw.values())):
+                        raise ValueError("Invalid measured PDW fields")
+        undeclared = keys - allowed
         if undeclared:
             self.audit_flags.append(
                 f"UNDECLARED_OBSERVATION_KEY: {sorted(undeclared)} at slot "

@@ -144,6 +144,25 @@ def frequency_to_band(freq_mhz: float, cfg: SimulationConfig) -> int:
     return band
 
 
+def frequency_to_bands(
+    freq_mhz: float, cfg: SimulationConfig, *, overlap: bool = False
+) -> tuple[int, ...]:
+    """Map a pulse to one project bin or every explicit receiver passband."""
+    if not overlap:
+        return (frequency_to_band(freq_mhz, cfg),)
+    if not np.isfinite(freq_mhz):
+        return ()
+    centres = (
+        np.asarray(cfg.dwell_centres_mhz, dtype=float)
+        if cfg.dwell_centres_mhz is not None
+        else (np.arange(cfg.band_count) + 0.5) * cfg.band_width_mhz()
+    )
+    if centres.shape != (cfg.band_count,) or not np.all(np.isfinite(centres)):
+        raise ValueError("Invalid receiver tune centres")
+    halfwidth = float(cfg.receiver_ibw_mhz) / 2.0
+    return tuple(int(i) for i in np.flatnonzero(np.abs(centres - freq_mhz) <= halfwidth))
+
+
 def band_edges_mhz(cfg: SimulationConfig) -> tuple:
     """
     Return ``(lower_mhz, upper_mhz, band_width_mhz)`` for the grid.

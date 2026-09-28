@@ -49,6 +49,10 @@ scheduler sees is ``hit`` (bool), computed from amplitude-based
 SNR. All other pulse-level data stays inside the environment
 for evaluation-only access.
 
+The separate ``TSRDStareEnvironment`` below preserves a binary replay profile
+and offers an opt-in ``pdw_v2`` profile with causal, label-free measured PDWs.
+That profile has its own guarded observation extension and metric contract.
+
 Gate 0
 -------
 The scheduler must NEVER receive:
@@ -116,7 +120,7 @@ Senior RF/EW Signal Simulation Engineer — Vyapti Options B+C integration.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 
@@ -287,7 +291,8 @@ class DetectionConfig:
     # groups pulses in a (band, slot) cell by emitter_id and adds this
     # gain to the live SNR before applying the Pd curve. This is the
     # largest single ESM performance lever and was previously missing.
-    coherent_integration_enabled: bool = True
+    # This path groups by dataset emitter_id, so keep oracle-aided integration opt-in.
+    coherent_integration_enabled: bool = False
     coherent_integration_max_pulses: int = 50
     coherent_integration_non_coherent_loss_db: float = 0.5
 
@@ -670,8 +675,8 @@ class TSRDEnvironment:
         band at the current time slot, return an observation.
 
         The observation conforms to ``PERMITTED_OBSERVATION_KEYS``.
-        All fields are derived from real TSRD pulses (Gap 4: pw_us,
-        aoa_deg, amp_db are used).
+        Pulse data is used internally by the detector, not returned to the
+        scheduler as pre-detection cell statistics.
 
         Parameters
         ----------
@@ -691,12 +696,6 @@ class TSRDEnvironment:
               - truth_excluded: True (no truth in observation)
               - emitter_identity_excluded: True
               - future_state_excluded: True
-              - pulse_count: number of pulses in this cell (0 if empty)
-              - energy_db: aggregate energy in dB (sum of 10**(amp/10))
-              - max_amplitude_db: strongest pulse in dB (relative)
-              - mean_pulse_width_us: mean PW of pulses in µs
-              - mean_aoa_deg: mean AoA in degrees
-              - snr_db_estimate: max_amplitude_db - noise_floor
         leaked : bool
             Always False. The observation contract contains no truth.
         """
@@ -724,13 +723,30 @@ class TSRDEnvironment:
             retune_cost_s = self._config.retune_time_ms / 1000.0
             self._retune_count += 1
             self._retune_overhead_s += retune_cost_s
-        elif self._previous_band is not None:
-            self._retune_count += 1
-
         dwell_s = max(0.0, self._config.slot_duration_s() - retune_cost_s)
 
         # --- Get the BandSlotCell (Gap 4: pw_us, aoa_deg, amp_db used) ---
         cell: BandSlotCell = self._discretised_grid[selected_band, t]
+        if not cell.is_empty and retune_cost_s > 0.0:
+            start_us = (t * self._config.slot_duration_s() + retune_cost_s) * 1e6
+            visible = cell.toa_us >= start_us
+            if not np.all(visible):
+                amplitudes = cell.amp_db[visible]
+                cell = replace(
+                    cell,
+                    pulse_count=int(np.sum(visible)),
+                    emitter_ids=cell.emitter_ids[visible],
+                    toa_us=cell.toa_us[visible],
+                    freq_mhz=cell.freq_mhz[visible],
+                    pw_us=cell.pw_us[visible],
+                    aoa_deg=cell.aoa_deg[visible],
+                    amp_db=amplitudes,
+                    max_amplitude_db=float(np.max(amplitudes)) if amplitudes.size else np.nan,
+                    min_amplitude_db=float(np.min(amplitudes)) if amplitudes.size else np.nan,
+                    snr_db=(float(np.max(amplitudes)) - self._detection.nominal_noise_floor_db
+                            if amplitudes.size else np.nan),
+                    is_empty=not bool(amplitudes.size),
+                )
 
         # --- Feed AGC queue from this cell's max amplitude ---------------
         # Non-empty cells carry AGC-relevant amplitude information.
@@ -755,50 +771,8 @@ class TSRDEnvironment:
                     recent_max_db - self._agc_dynamic_range_db
                 )
 
-        # --- Derive TSRD observation fields from the cell ---------------
-        pulse_count: int = cell.pulse_count
-        if pulse_count == 0:
-            energy_db: float = np.nan
-            max_amplitude_db: float = np.nan
-            mean_pulse_width_us: float = np.nan
-            mean_aoa_deg: float = np.nan
-            snr_db_estimate: float = np.nan
-            coherent_integration_gain_db_obs: float = np.nan
-            n_pulses_dominant_emitter_obs: int = 0
-        else:
-            # Energy: sum of linear powers, expressed in dB
-            # 10**(amp_db/10) converts dB → linear; dB of sum = 10*log10(sum)
-            linear_powers = 10.0 ** (cell.amp_db / 10.0)
-            energy_linear = float(np.sum(linear_powers))
-            energy_db = float(10.0 * np.log10(max(energy_linear, 1e-30)))
-            max_amplitude_db = cell.max_amplitude_db
-            mean_pulse_width_us = cell.mean_pw_us
-            mean_aoa_deg = cell.mean_aoa_deg
-            # Coherent integration gain from grouping pulses by emitter_id.
-            # 10*log10(N) dB for N pulses from the same emitter.
-            if self._detection.coherent_integration_enabled:
-                coherent_integration_gain_db_obs = cell.coherent_integration_gain_db(
-                    max_pulses=self._detection.coherent_integration_max_pulses,
-                    non_coherent_loss_db=self._detection.coherent_integration_non_coherent_loss_db,
-                )
-            else:
-                coherent_integration_gain_db_obs = 0.0
-            n_pulses_dominant_emitter_obs = cell.n_pulses_dominant_emitter
-            # SNR estimate: amplitude relative to AGC noise floor,
-            # *with* the coherent integration gain applied so the
-            # reported SNR matches what the Pd curve actually sees.
-            # Antenna gain penalty: pulses in low-gain sectors are weaker.
-            ant_gain_db = self._get_band_antenna_gain(selected_band)
-            snr_db_estimate = (
-                max_amplitude_db
-                - self._agc_noise_floor_db
-                - self._detection.noise_figure_db
-                - ant_gain_db
-                + coherent_integration_gain_db_obs
-            )
-
         # --- Amplitude-based detection -----------------------
-        hit = self._detect(selected_band, t, dwell_s)
+        hit = self._detect(selected_band, t, dwell_s, cell)
 
         observation = {
             "time_slot": t,
@@ -821,15 +795,6 @@ class TSRDEnvironment:
             "truth_excluded": True,
             "emitter_identity_excluded": True,
             "future_state_excluded": True,
-            # Gap 4: TSRD signal-level features (derived, not truth)
-            "pulse_count": pulse_count,
-            "energy_db": energy_db,
-            "max_amplitude_db": max_amplitude_db,
-            "mean_pulse_width_us": mean_pulse_width_us,
-            "mean_aoa_deg": mean_aoa_deg,
-            "snr_db_estimate": snr_db_estimate,
-            "coherent_integration_gain_db": coherent_integration_gain_db_obs,
-            "n_pulses_dominant_emitter": n_pulses_dominant_emitter_obs,
         }
         self._observation_history.append(observation)
         self._previous_band = selected_band
@@ -983,7 +948,8 @@ class TSRDEnvironment:
                 if 0 <= band < self._config.band_count and 0 <= slot < self._config.time_slots:
                     self._deint_tracks_by_cell[(band, slot)].append(track)
 
-    def _detect(self, band: int, slot: int, dwell_s: float) -> bool:
+    def _detect(self, band: int, slot: int, dwell_s: float,
+                cell: Optional[BandSlotCell] = None) -> bool:
         """
         Run the detection model for cell (band, slot).
 
@@ -1007,7 +973,8 @@ class TSRDEnvironment:
         if dwell_s <= 0.0:
             return False
 
-        cell: BandSlotCell = self._discretised_grid[band, slot]
+        if cell is None:
+            cell = self._discretised_grid[band, slot]
 
         if cell.is_empty:
             # Empty cell: false alarm draw
@@ -1215,101 +1182,343 @@ __all__ = [
 
 class TSRDStareEnvironment:
     """
-    Lightweight environment for TRUE Pd/Pfa computation using TSRD Stare Mode.
-    Follows Vyapti interface.
+    Causal receiver replay over one TSRD stare recording.
+
+    The hidden grid represents recorded-pulse opportunities, not all emitted
+    pulses. Each action is one fixed 50 ms receiver dwell; scan-mode recordings
+    are not merged into the world because they are separately censored runs.
     """
-    def __init__(self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config, stare_data=None, stare_labels=None):
+    def __init__(
+        self, n_bands, n_slots, occupancy_grid, scan_grid, sim_config,
+        stare_data=None, stare_labels=None, *, band_centres_mhz=None,
+        passband_halfwidth_mhz=None, receiver_profile="binary_v1",
+        amplitude_midpoint_db=-90.0, amplitude_scale_db=5.0,
+        max_observed_pdws=32,
+    ):
         self.n_bands = n_bands
         self.n_slots = n_slots
-        self._occupancy_grid = occupancy_grid
+        self._occupancy_grid = np.asarray(occupancy_grid, dtype=bool)
+        if self._occupancy_grid.shape != (n_bands, n_slots):
+            raise ValueError("Occupancy grid shape does not match receiver configuration")
         self._scan_grid = scan_grid
         self._config = sim_config
+        if receiver_profile not in ("binary_v1", "pdw_v2"):
+            raise ValueError("receiver_profile must be binary_v1 or pdw_v2")
+        if (not np.isfinite(amplitude_midpoint_db)
+                or not np.isfinite(amplitude_scale_db) or amplitude_scale_db <= 0
+                or not isinstance(max_observed_pdws, int) or max_observed_pdws < 1):
+            raise ValueError("Invalid PDW receiver settings")
+        self._receiver_profile = receiver_profile
+        self._amplitude_midpoint_db = float(amplitude_midpoint_db)
+        self._amplitude_scale_db = float(amplitude_scale_db)
+        self._max_observed_pdws = max_observed_pdws
+        self._centres_mhz = np.asarray(
+            band_centres_mhz if band_centres_mhz is not None
+            else (np.arange(n_bands) + 0.5) * sim_config.band_width_mhz(),
+            dtype=np.float64,
+        )
+        self._halfwidth_mhz = float(
+            passband_halfwidth_mhz if passband_halfwidth_mhz is not None
+            else sim_config.receiver_ibw_mhz / 2.0
+        )
+        if self._centres_mhz.shape != (n_bands,) or self._halfwidth_mhz <= 0:
+            raise ValueError("Invalid TSRD receiver passbands")
         self._current_slot = 0
         self._observation_history = []
         self._deinterleaver_result = None
         self._rng = np.random.default_rng()
-        self._stare_data = stare_data
-        self._stare_labels = stare_labels
+        self._stare_data = None if stare_data is None else np.asarray(stare_data)
+        self._stare_labels = None if stare_labels is None else np.asarray(stare_labels).reshape(-1)
+        if receiver_profile == "pdw_v2" and self._stare_data is None:
+            raise ValueError("pdw_v2 requires recorded TSRD PDWs")
+        if self._stare_data is not None:
+            if self._stare_data.ndim != 2 or self._stare_data.shape[1] < 5:
+                raise ValueError("TSRD stare data must have five PDW columns")
+            if self._stare_labels is not None and len(self._stare_labels) != len(self._stare_data):
+                raise ValueError("TSRD labels and PDWs must have equal length")
+            if np.any(np.diff(self._stare_data[:, 0]) < 0):
+                order = np.argsort(self._stare_data[:, 0], kind="stable")
+                self._stare_data = self._stare_data[order]
+                if self._stare_labels is not None:
+                    self._stare_labels = self._stare_labels[order]
+            self._toa_us = self._stare_data[:, 0].astype(np.float64, copy=False)
+        else:
+            self._toa_us = np.empty(0, dtype=np.float64)
+        self._hidden_truth = self._build_hidden_truth()
+        import hashlib
+        signature = hashlib.sha256()
+        signature.update(np.ascontiguousarray(self._occupancy_grid).tobytes())
+        signature.update(np.ascontiguousarray(self._centres_mhz).tobytes())
+        signature.update(np.float64(self._halfwidth_mhz).tobytes())
+        if self._stare_data is not None:
+            signature.update(np.ascontiguousarray(self._stare_data).tobytes())
+        if self._stare_labels is not None:
+            signature.update(np.ascontiguousarray(self._stare_labels).tobytes())
+        self._signature = signature.hexdigest()
+        self._noise_field = None
+        self.reset()
 
     @classmethod
-    def from_stare_mode(cls, stare_file: str, scan_file: str, sim_config):
+    def from_stare_mode(
+        cls, stare_file: str, scan_file: str = None, sim_config=None, *,
+        band_centres_mhz=None,
+        receiver_profile: str = "binary_v1",
+        amplitude_midpoint_db: float = -90.0,
+        amplitude_scale_db: float = 5.0,
+        max_observed_pdws: int = 32,
+        detection_probability: float = 1.0,
+        false_alarm_probability: float = 0.0,
+        retune_time_ms: float = 0.0,
+    ):
         import h5py
-        import numpy as np
+        from .tsrd_adapter import stare_pulse_occupancy
 
-        n_bands = sim_config.band_count
-        n_slots = sim_config.time_slots
-
-        stare_data = None
-        stare_labels = None
-        def build_grid(filepath, retain=False):
-            nonlocal stare_data, stare_labels
-            grid = np.zeros((n_bands, n_slots), dtype=bool)
-            dwell_us = sim_config.dwell_time_ms * 1000.0
-            try:
-                with h5py.File(filepath, 'r') as f:
-                    if 'data' in f:
-                        data = f['data'][:]
-                        if retain:
-                            stare_data = data
-                            if 'labels' in f and len(f['labels']) == len(data):
-                                stare_labels = np.asarray(f['labels'][:]).reshape(-1)
-                        for row in data:
-                            toa_us, freq_mhz = row[0], row[1]
-                            slot = int(toa_us / dwell_us)
-                            band = int((freq_mhz - 2000.0) / 500.0)
-                            if 0 <= slot < n_slots and 0 <= band < n_bands:
-                                grid[band, slot] = True
-            except Exception as e:
-                import logging
-                logging.warning(f"Failed to build grid from {stare_file if 'stare' in str(e) else scan_file}: {e}")
-                raise
-            return grid
-
-        occupancy_grid = build_grid(stare_file, retain=True)
-        scan_grid = build_grid(scan_file)
-        return cls(n_bands, n_slots, occupancy_grid, scan_grid, sim_config,
-                   stare_data=stare_data, stare_labels=stare_labels)
+        with h5py.File(stare_file, "r") as f:
+            receiver = f["metadata/receiver"]
+            mode = receiver.attrs.get("scan_mode", "")
+            if isinstance(mode, bytes):
+                mode = mode.decode()
+            if str(mode).lower() != "stare":
+                raise ValueError("TSRD replay world requires a stare-mode recording")
+            centres = np.asarray(receiver["dwell_centres_mhz"][:], dtype=np.float64)
+            halfwidth = float(receiver.attrs["bandwith_mhz"])
+            collection_s = float(receiver.attrs["collection_time_s"])
+            data = f["data"][:]
+            raw_labels = np.asarray(f["labels"][:])
+        explicit_centres = (None if band_centres_mhz is None else
+                            np.asarray(band_centres_mhz, dtype=np.float64))
+        if explicit_centres is not None and (
+            explicit_centres.ndim != 1 or len(explicit_centres) < 2
+            or not np.all(np.isfinite(explicit_centres))
+            or not np.all(np.diff(explicit_centres) > 0)
+        ):
+            raise ValueError("Explicit TSRD tune centres must be finite and increasing")
+        if not len(centres):
+            if scan_file is not None:
+                with h5py.File(scan_file, "r") as scan:
+                    centres = np.asarray(
+                        scan["metadata/receiver/dwell_centres_mhz"][:],
+                        dtype=np.float64,
+                    )
+            elif explicit_centres is not None:
+                centres = explicit_centres
+            elif sim_config is not None and sim_config.dwell_centres_mhz is not None:
+                centres = np.asarray(sim_config.dwell_centres_mhz, dtype=np.float64)
+            else:
+                raise ValueError(
+                    "Stare metadata has no tune centres; provide the matching "
+                    "scan file or an explicit dwell-centre configuration"
+                )
+        if (centres.ndim != 1 or len(centres) < 2
+                or not np.all(np.isfinite(centres))
+                or not np.all(np.diff(centres) > 0)):
+            raise ValueError("Invalid TSRD tune centres")
+        if explicit_centres is not None and not np.array_equal(centres, explicit_centres):
+            raise ValueError("Explicit tune centres disagree with TSRD scan metadata")
+        labels = raw_labels[:, 0] if raw_labels.ndim == 2 else raw_labels
+        if len(labels) != len(data):
+            raise ValueError("TSRD labels and PDWs must have equal length")
+        n_bands = len(centres)
+        n_slots = int(round(collection_s / 0.05))
+        spectrum_mhz = float((centres[-1] - centres[0]) + np.median(np.diff(centres)))
+        if sim_config is None:
+            sim_config = SimulationConfig(
+                receiver_ibw_mhz=2.0 * halfwidth,
+                total_spectrum_mhz=spectrum_mhz,
+                band_count=n_bands,
+                time_slots=n_slots,
+                dwell_time_ms=50.0,
+                retune_time_ms=retune_time_ms,
+                detection_probability=detection_probability,
+                false_alarm_probability=false_alarm_probability,
+                dwell_centres_mhz=centres,
+            )
+        elif (sim_config.band_count != n_bands or sim_config.time_slots != n_slots
+              or not np.isclose(sim_config.dwell_time_ms, 50.0)):
+            raise ValueError("TSRD replay requires the H5 band count, 50 ms slots, and full duration")
+        else:
+            sim_config = replace(
+                sim_config, dwell_centres_mhz=centres,
+                receiver_ibw_mhz=2.0 * halfwidth,
+                total_spectrum_mhz=spectrum_mhz,
+            )
+        occupancy = stare_pulse_occupancy(data, centres, halfwidth, n_slots)
+        return cls(
+            n_bands, n_slots, occupancy, None, sim_config,
+            stare_data=data, stare_labels=labels,
+            band_centres_mhz=centres, passband_halfwidth_mhz=halfwidth,
+            receiver_profile=receiver_profile,
+            amplitude_midpoint_db=amplitude_midpoint_db,
+            amplitude_scale_db=amplitude_scale_db,
+            max_observed_pdws=max_observed_pdws,
+        )
 
     @property
     def hidden_truth(self):
-        from vyapti_simulator.core.environment import HiddenTruthGrid
-        import numpy as np
-        from vyapti_simulator.core.environment import EmitterConfig, EmitterBehaviorType
+        return self._hidden_truth
+
+    @property
+    def occupancy_grid(self):
+        return self._occupancy_grid.copy()
+
+    @property
+    def recorded_pulses(self):
+        """Evaluation-only PDWs and labels; never include these in observations."""
+        return self._stare_data, self._stare_labels
+
+    def recorded_capture_indices(self, slot: int):
+        """Evaluation-only captured stare-row indices for the opt-in PDW receiver."""
+        if self._receiver_profile != "pdw_v2":
+            raise ValueError("Pulse capture indices are unavailable in binary_v1")
+        if not 0 <= slot < len(self._captured_pulse_indices):
+            raise ValueError("Slot has not been observed")
+        return self._captured_pulse_indices[slot].copy()
+
+    @property
+    def receiver_geometry(self):
+        return self._centres_mhz.copy(), self._halfwidth_mhz
+
+    @property
+    def receiver_profile(self):
+        return self._receiver_profile
+
+    def _build_hidden_truth(self):
+        from vyapti_simulator.core.environment import (
+            HiddenTruthGrid, EmitterConfig, EmitterBehaviorType,
+        )
         if self._stare_data is None or self._stare_labels is None:
             mask_3d = self._occupancy_grid[np.newaxis, :, :]
-            configs = [EmitterConfig(emitter_id=0, behavior=EmitterBehaviorType.CONTINUOUS_FIXED, active_bands=[])]
+            configs = [EmitterConfig(
+                emitter_id=0, behavior=EmitterBehaviorType.MIXED_POPULATION,
+                active_bands=np.flatnonzero(self._occupancy_grid.any(axis=1)).tolist(),
+            )]
             return HiddenTruthGrid(grid=mask_3d, emitter_configs=configs,
-                                  band_count=self.n_bands, time_slots=self.n_slots)
+                                   band_count=self.n_bands, time_slots=self.n_slots)
 
-        labels = np.unique(self._stare_labels)
-        labels = [x for x in labels if np.isfinite(x)]
+        labels, emitter_index = np.unique(self._stare_labels, return_inverse=True)
         grid = np.zeros((len(labels), self.n_bands, self.n_slots), dtype=bool)
         dwell_us = self._config.dwell_time_ms * 1000.0
-        band_width = self._config.band_width_mhz()
-        configs = []
-        for emitter_index, label in enumerate(labels):
-            rows = self._stare_data[self._stare_labels == label]
-            bands = set()
-            for row in rows:
-                slot = int(row[0] / dwell_us)
-                band = int((row[1] - 2000.0) / band_width)
-                if 0 <= slot < self.n_slots and 0 <= band < self.n_bands:
-                    grid[emitter_index, band, slot] = True
-                    bands.add(band)
-            configs.append(EmitterConfig(emitter_id=int(label),
-                                         behavior=EmitterBehaviorType.CONTINUOUS_FIXED,
-                                         active_bands=sorted(bands)))
+        toa = self._stare_data[:, 0].astype(np.float64, copy=False)
+        freq = self._stare_data[:, 1].astype(np.float64, copy=False)
+        valid = np.isfinite(toa) & np.isfinite(freq) & (toa >= 0)
+        slots = np.floor(np.where(valid, toa, 0.0) / dwell_us).astype(np.int64)
+        valid &= slots < self.n_slots
+        for band, centre in enumerate(self._centres_mhz):
+            covered = valid & (np.abs(freq - centre) <= self._halfwidth_mhz)
+            grid[emitter_index[covered], band, slots[covered]] = True
+        configs = [
+            EmitterConfig(
+                emitter_id=int(label),
+                behavior=EmitterBehaviorType.MIXED_POPULATION,
+                active_bands=np.flatnonzero(grid[i].any(axis=1)).tolist(),
+            )
+            for i, label in enumerate(labels)
+        ]
         return HiddenTruthGrid(grid=grid, emitter_configs=configs,
-                              band_count=self.n_bands, time_slots=self.n_slots)
+                               band_count=self.n_bands, time_slots=self.n_slots)
 
     @property
     def config(self):
         return self._config
 
+    @property
+    def current_slot(self) -> int:
+        return self._current_slot
+
     def reset(self, seed=None, emitter_family_config=None):
         self._current_slot = 0
         self._observation_history.clear()
+        self._captured_pulse_indices = []
         self._rng = np.random.default_rng(seed)
+        receiver_seed = int(self._rng.integers(0, np.iinfo(np.uint64).max, dtype=np.uint64))
+        import hashlib
+        noise_key = hashlib.sha256(
+            f"{self._signature}:{receiver_seed}".encode("ascii")
+        ).digest()
+        field_seed = int.from_bytes(noise_key[:8], "little")
+        self._noise_field = np.random.default_rng(field_seed).random(
+            (self.n_bands, self.n_slots)
+        )
+        if self._receiver_profile == "pdw_v2":
+            self._pulse_noise = np.random.default_rng(field_seed ^ 0x5A17C0DE).random(
+                len(self._stare_data)
+            )
+            self._false_pdw_field = np.random.default_rng(
+                field_seed ^ 0xDC0FFEE5
+            ).random((self.n_bands, self.n_slots, 5))
+
+    def _detect_recorded_pdws(self, band, slot, retune, dwell_s):
+        """Capture current-window PDWs with potential noise fixed by world and seed."""
+        empty_indices = np.empty(0, dtype=np.intp)
+        if dwell_s <= 0:
+            return False, None, empty_indices
+        start_us = (slot * self._config.slot_duration_s() + retune) * 1e6
+        end_us = (slot + 1) * self._config.slot_duration_s() * 1e6
+        lo = int(np.searchsorted(self._toa_us, start_us, side="left"))
+        hi = int(np.searchsorted(self._toa_us, end_us, side="left"))
+        window = self._stare_data[lo:hi]
+        passband = np.isfinite(window[:, 1]) & (
+            np.abs(window[:, 1] - self._centres_mhz[band]) <= self._halfwidth_mhz
+        )
+        valid = passband & np.all(np.isfinite(window[:, :5]), axis=1)
+        candidates = np.flatnonzero(valid) + lo
+        if len(candidates):
+            amplitude = self._stare_data[candidates, 4].astype(np.float64)
+            z = np.clip(
+                (amplitude - self._amplitude_midpoint_db) / self._amplitude_scale_db,
+                -60.0, 60.0,
+            )
+            pd = float(self._config.detection_probability) / (1.0 + np.exp(-z))
+            captured = candidates[self._pulse_noise[candidates] < pd]
+            if len(captured):
+                selected = captured[np.linspace(
+                    0, len(captured) - 1,
+                    min(len(captured), self._max_observed_pdws), dtype=int,
+                )]
+                pdws = [
+                    {
+                        "toa_offset_us": float(self._stare_data[i, 0] - start_us),
+                        "frequency_mhz": float(self._stare_data[i, 1]),
+                        "pulse_width_us": float(self._stare_data[i, 2]),
+                        "aoa_deg": float(self._stare_data[i, 3]),
+                        "amplitude_db": float(self._stare_data[i, 4]),
+                    }
+                    for i in selected
+                ]
+                return True, {"pulse_count": int(len(captured)), "pdws": pdws}, captured
+            return False, None, empty_indices
+        if np.any(passband):
+            return False, None, empty_indices
+        if self._noise_field[band, slot] >= float(self._config.false_alarm_probability):
+            return False, None, empty_indices
+        u = self._false_pdw_field[band, slot]
+        return True, {
+            "pulse_count": 1,
+            "pdws": [{
+                "toa_offset_us": float(u[0] * dwell_s * 1e6),
+                "frequency_mhz": float(self._centres_mhz[band]
+                                       + (2 * u[1] - 1) * self._halfwidth_mhz),
+                "pulse_width_us": float(0.1 * 1000 ** u[2]),
+                "aoa_deg": float(360 * u[3] - 180),
+                "amplitude_db": float(self._amplitude_midpoint_db
+                                      + (2 * u[4] - 1) * self._amplitude_scale_db),
+            }],
+        }, empty_indices
+
+    def eligible_recorded_pulse(self, band: int, slot: int, retune_cost_s: float = 0.0) -> bool:
+        """Evaluation-side window query; never pass its result to the scheduler."""
+        if not (0 <= band < self.n_bands and 0 <= slot < self.n_slots):
+            return False
+        if retune_cost_s >= self._config.slot_duration_s():
+            return False
+        if self._stare_data is None:
+            return bool(self._occupancy_grid[band, slot]) and retune_cost_s == 0.0
+        start_us = (slot * self._config.slot_duration_s() + retune_cost_s) * 1e6
+        end_us = (slot + 1) * self._config.slot_duration_s() * 1e6
+        lo = np.searchsorted(self._toa_us, start_us, side="left")
+        hi = np.searchsorted(self._toa_us, end_us, side="left")
+        freq = self._stare_data[lo:hi, 1]
+        return bool(np.any(np.abs(freq - self._centres_mhz[band]) <= self._halfwidth_mhz))
 
     def step(self, band: int):
         if self.done:
@@ -1317,26 +1526,25 @@ class TSRDStareEnvironment:
         band = int(band)
         if not (0 <= band < self.n_bands):
             raise ValueError(f"Invalid band {band}; expected 0..{self.n_bands - 1}")
-        occupied = bool(self._occupancy_grid[band, self._current_slot])
-        cell = None
-        if self._stare_data is not None:
-            dwell_us = self._config.dwell_time_ms * 1000.0
-            rows = self._stare_data[
-                (self._stare_data[:, 0] >= self._current_slot * dwell_us)
-                & (self._stare_data[:, 0] < (self._current_slot + 1) * dwell_us)
-                & (self._stare_data[:, 1] >= 2000.0 + band * self._config.band_width_mhz())
-                & (self._stare_data[:, 1] < 2000.0 + (band + 1) * self._config.band_width_mhz())
-            ]
-            if rows.size:
-                cell = rows
-                occupied = True
-        if occupied:
-            hit = bool(self._rng.random() < float(self._config.detection_probability))
-        else:
-            hit = bool(self._rng.random() < float(self._config.false_alarm_probability))
         previous = self._observation_history[-1] if self._observation_history else None
         retune = (self._config.retune_time_ms / 1000.0
                   if previous is not None and previous["selected_band"] != band else 0.0)
+        dwell_s = max(0.0, self._config.slot_duration_s() - retune)
+        if self._stare_data is None and retune:
+            raise ValueError("Pulse timestamps are required to model retune loss")
+        if self._receiver_profile == "pdw_v2":
+            hit, measurement, captured = self._detect_recorded_pdws(
+                band, self._current_slot, retune, dwell_s
+            )
+            self._captured_pulse_indices.append(captured)
+        else:
+            observed_pulse = self.eligible_recorded_pulse(band, self._current_slot, retune)
+            hit_probability = (self._config.detection_probability if observed_pulse
+                               else self._config.false_alarm_probability)
+            hit = bool(
+                dwell_s > 0.0
+                and self._noise_field[band, self._current_slot] < float(hit_probability)
+            )
         obs = {
             "time_slot": self._current_slot,
             "selected_band": band,
@@ -1348,25 +1556,69 @@ class TSRDStareEnvironment:
             "truth_excluded": True,
             "emitter_identity_excluded": True,
             "future_state_excluded": True,
-            "pulse_count": int(occupied),
-            "energy_db": float(10.0 * np.log10(np.sum(10.0 ** (cell[:, 4] / 10.0)))) if cell is not None else float("nan"),
-            "max_amplitude_db": float(np.max(cell[:, 4])) if cell is not None else float("nan"),
-            "mean_pulse_width_us": float(np.mean(cell[:, 2])) if cell is not None else float("nan"),
-            "mean_aoa_deg": float(np.mean(cell[:, 3])) if cell is not None else float("nan"),
-            "snr_db_estimate": float(np.max(cell[:, 4]) - (-130.0)) if cell is not None else float("nan"),
-            "coherent_integration_gain_db": 0.0,
-            "n_pulses_dominant_emitter": 0,
         }
+        if self._receiver_profile == "pdw_v2":
+            obs["receiver_measurement"] = measurement
         self._observation_history.append(obs)
         self._current_slot += 1
         return obs, False
+
+    def step_training(self, band: int, reward_mode: str = "false_alarm_aware"):
+        """Training reward; mode is fixed by the experiment before an episode."""
+        if reward_mode not in ("detector_positive", "false_alarm_aware"):
+            raise ValueError("Unknown TSRD training reward mode")
+        obs, _ = self.step(band)
+        if reward_mode == "detector_positive":
+            return obs, float(obs["hit"]), self.done
+        eligible = self.eligible_recorded_pulse(
+            band, obs["time_slot"], obs["retune_cost_s"]
+        )
+        reward = 1.0 if obs["hit"] and eligible else -1.0 if obs["hit"] else 0.0
+        return obs, reward, self.done
+
+    def step_dwell(self, band: int, dwell_slots: int):
+        """Execute a non-preemptible 50/100 ms dwell as independent base looks."""
+        if dwell_slots not in (1, 2):
+            raise ValueError("Mixed TSRD dwell must consume one or two 50 ms slots")
+        if self.done:
+            raise RuntimeError("Episode finished; call reset()")
+        actual_slots = min(dwell_slots, self.n_slots - self._current_slot)
+        return [self.step(band)[0] for _ in range(actual_slots)]
+
+    def step_dwell_training(
+        self, band: int, dwell_slots: int, reward_mode: str = "detector_positive"
+    ):
+        """Train on a whole dwell; current-step rewards are summed over its looks."""
+        if dwell_slots not in (1, 2):
+            raise ValueError("Mixed TSRD dwell must consume one or two 50 ms slots")
+        if self.done:
+            raise RuntimeError("Episode finished; call reset()")
+        actual_slots = min(dwell_slots, self.n_slots - self._current_slot)
+        looks = [self.step_training(band, reward_mode) for _ in range(actual_slots)]
+        return [look[0] for look in looks], sum(look[1] for look in looks), self.done
 
     @property
     def done(self) -> bool:
         return self._current_slot >= self.n_slots
 
     def receiver_accounting(self):
-        return {}
+        actions = [obs["selected_band"] for obs in self._observation_history]
+        retunes = sum(a != b for a, b in zip(actions, actions[1:]))
+        overhead_s = sum(obs["retune_cost_s"] for obs in self._observation_history)
+        elapsed_s = self._current_slot * self._config.slot_duration_s()
+        return {
+            "retune_count": float(retunes),
+            "retune_overhead_total_s": float(overhead_s),
+            "dead_time_fraction": float(overhead_s / elapsed_s) if elapsed_s else 0.0,
+        }
 
     def replay_signature(self):
-        return "dummy_signature"
+        import hashlib
+        profile = (
+            self._receiver_profile, self._amplitude_midpoint_db,
+            self._amplitude_scale_db, self._max_observed_pdws,
+            float(self._config.detection_probability),
+            float(self._config.false_alarm_probability),
+            float(self._config.retune_time_ms),
+        )
+        return hashlib.sha256(f"{self._signature}:{profile!r}".encode("ascii")).hexdigest()

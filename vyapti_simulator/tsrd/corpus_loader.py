@@ -34,12 +34,10 @@ loader yields `PDWStream` and `EmitterConfig` objects that are
 identical in shape to those produced by the per-file adapter.
 The scheduler code path is unchanged.
 
-[INVARIANT-D] Scan and Stare modes are kept separate. The
-loader classifies each file's receiver mode and exposes them
-through the `scan_files` and `stare_files` fields. Stare-Mode
-files are *not* passed to the scheduler's truth grid; they are
-reserved for the deferred `ScanPolicyOracle` (counterfactual
-evaluation).
+[INVARIANT-D] Scan and Stare modes are kept separate. This legacy
+corpus loader can iterate either mode; the TSRD replay receiver builds
+its recorded-pulse world from Stare Mode only and uses a paired Scan
+file solely to obtain tune geometry.
 
 [INVARIANT-E] Schema warnings, not silent substitution. If
 the H5 has an unknown `freq_mode`, the loader records a
@@ -85,6 +83,32 @@ class CorpusUnavailableError(FileNotFoundError):
     compatibility. There is no fallback to fixtures and no
     fallback to synthetic data.
     """
+
+
+def iter_tsr_replay_pairs(
+    corpus_dir: Union[str, Path], split: str = "train", *,
+    allow_stare_only: bool = False,
+) -> Iterator[tuple[Path, Optional[Path]]]:
+    """Yield stare files with scan companions, unless explicit geometry is supplied upstream."""
+    if split not in ("train", "val", "test"):
+        raise ValueError("split must be train, val, or test")
+    root = Path(corpus_dir)
+    stare_dir = root / "stare" / f"{split}_stare"
+    scan_dir = root / "scan" / f"{split}_scan"
+    if not stare_dir.is_dir() or (not scan_dir.is_dir() and not allow_stare_only):
+        raise CorpusUnavailableError(
+            f"TSRD replay split needs {stare_dir} and {scan_dir}"
+        )
+    stare_files = sorted(stare_dir.glob("*.h5"))
+    if not stare_files:
+        raise CorpusUnavailableError(f"No TSRD stare files in {stare_dir}")
+    for stare_file in stare_files:
+        scan_file = scan_dir / stare_file.name
+        if not scan_file.is_file() and not allow_stare_only:
+            raise CorpusUnavailableError(
+                f"Missing scan metadata companion for {stare_file}: {scan_file}"
+            )
+        yield stare_file, scan_file if scan_file.is_file() else None
 
 
 # =====================================================================

@@ -86,6 +86,7 @@ from .metrics import TrajectoryStep
 PERMITTED_SCENARIO_KEYS = frozenset({
     "band_count", "time_slots", "dwell_time_ms", "retune_time_ms",
     "band_width_mhz", "total_spectrum_mhz", "receiver_ibw_mhz",
+    "allowed_dwell_slots",
 })
 
 

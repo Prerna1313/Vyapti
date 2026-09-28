@@ -169,6 +169,21 @@ Both are valid per the frozen protocol's research-platform extension clause.
 
 ---
 
+## TSRD benchmark contract
+
+Results produced through `TSRDMetricsEngine` now use metric contract
+`tsrd_recorded_pulse_v2`. Standalone result scripts may bypass this engine
+and need independent verification. Stare occupancy means a pulse was recorded in a
+band/slot; an empty cell does not prove that an emitter was inactive. The
+scheduler receives detector hits and receiver timing, not pre-detection pulse
+counts, signal statistics, or dataset emitter labels. Retune time excludes
+early-slot pulses from the listening interval. Results produced before this
+contract change must be kept separate and rerun before comparison. The
+optional emitter-ID-based coherent-integration mode is oracle-aided and is
+disabled by default; results using it need a separate label.
+
+---
+
 ## References
 
 - **Protocol and parameter provenance:** [`PROVENANCE.md`](PROVENANCE.md)

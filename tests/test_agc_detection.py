@@ -336,7 +336,7 @@ class TestAGCDisabledIsFixedFloor:
         assert s["agc_noise_floor_db"] == det.agc_no_signal_floor_db
 
     def test_agc_disabled_uses_nominal_floor_for_snr(self):
-        """With AGC off, snr_db_estimate uses the fixed nominal floor."""
+        """With AGC off, the detector keeps the fixed nominal floor internally."""
         stream = PDWStream(
             toa_us=np.array([0.0], dtype=np.float32),
             freq_mhz=np.array([2400.0], dtype=np.float32),
@@ -353,8 +353,9 @@ class TestAGCDisabledIsFixedFloor:
         env = TSRDEnvironment(stream, sim_cfg, det, DeinterleaverConfig(), seed=42)
         env.reset(seed=42)
         obs, _ = env.step(3)  # band 3 has the occupied cell
-        # SNR = -75 - (-130) = 55 dB
-        assert obs["snr_db_estimate"] == pytest.approx(55.0, abs=0.1)
+        assert env.agc_state()["agc_noise_floor_db"] == pytest.approx(-130.0)
+        assert obs["hit"]
+        assert "snr_db_estimate" not in obs
 
 
 # =====================================================================

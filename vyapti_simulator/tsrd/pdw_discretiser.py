@@ -38,10 +38,13 @@ the richer EW-quality metrics that a real receiver produces.
 
 Design decisions
 ----------------
-1. **One pulse → one cell.**  A TSRD pulse is instantaneous at its
+1. **One pulse → one cell by default.** A TSRD pulse is instantaneous at its
    ToA. The discretiser maps it to the cell ``(band, slot)`` that
    contains the ToA. Pulses that arrive within the same band and slot
    are aggregated together; the original per-pulse data is not preserved.
+   The opt-in overlapping-passband mode represents the same pulse in every
+   receiver look that covers it. Those duplicate cells are opportunities,
+   not extra physical pulses.
 
 2. **Aggregation rule: max-amplitude.**  When multiple pulses fall in
    the same cell, the cell reports the strongest amplitude (largest
@@ -84,7 +87,7 @@ import numpy as np
 
 from .tsrd_adapter import PDWStream
 from ..core.environment import SimulationConfig
-from ..core.mapping import frequency_to_band, seconds_to_slot
+from ..core.mapping import frequency_to_bands, seconds_to_slot
 
 # `src` is a sibling top-level package.  The per-pulse type emitted by
 # this module is now the UNIFIED BandSlotPulse from observation_interface,
@@ -99,6 +102,7 @@ def discretize_pdw_to_bands(
     *,
     nominal_noise_floor_db: float = -130.0,
     source_h5_sha256: Optional[str] = None,
+    overlap: bool = False,
 ) -> Iterator[UnifiedBandSlotPulse]:
     """
     Generator: map a TSRD PDW stream to individual unified
@@ -140,6 +144,9 @@ def discretize_pdw_to_bands(
         SHA-256 of the source H5 file, for provenance tracking.
         Stamped into every yielded pulse.  None is acceptable for
         synthetic-only usage (the caller stamps it themselves).
+    overlap : bool
+        False preserves disjoint project bins. True maps each pulse to every
+        configured receiver passband covering its frequency.
 
     Yields
     ------
@@ -156,27 +163,26 @@ def discretize_pdw_to_bands(
         freq = float(pdw.freq_mhz[i])
         toa_us = float(pdw.toa_us[i])
 
-        band = frequency_to_band(freq, cfg)
+        bands = frequency_to_bands(freq, cfg, overlap=overlap)
         slot = seconds_to_slot(toa_us * 1e-6, cfg)
 
-        if not (0 <= band < cfg.band_count):
-            continue
         if not (0 <= slot < cfg.time_slots):
             continue
 
-        yield UnifiedBandSlotPulse.from_tsrd_pulse(
-            toa_us=toa_us,
-            freq_mhz=freq,
-            pw_us=float(pdw.pw_us[i]),
-            aoa_deg=float(pdw.aoa_deg[i]),
-            amp_db=float(pdw.amp_db[i]),
-            emitter_id=int(pdw.emitter_id[i]),
-            band=band,
-            slot=slot,
-            source_h5_sha256=source_h5_sha256,
-            noise_floor_dbm=float(nominal_noise_floor_db),
-            provenance=None,
-        )
+        for band in bands:
+            yield UnifiedBandSlotPulse.from_tsrd_pulse(
+                toa_us=toa_us,
+                freq_mhz=freq,
+                pw_us=float(pdw.pw_us[i]),
+                aoa_deg=float(pdw.aoa_deg[i]),
+                amp_db=float(pdw.amp_db[i]),
+                emitter_id=int(pdw.emitter_id[i]),
+                band=band,
+                slot=slot,
+                source_h5_sha256=source_h5_sha256,
+                noise_floor_dbm=float(nominal_noise_floor_db),
+                provenance=None,
+            )
 
 
 def aggregate_cell_pulses(
@@ -531,6 +537,7 @@ def discretise_pdw_to_grid(
     *,
     nominal_noise_floor_db: float = -130.0,
     provenance: Optional[Dict] = None,
+    overlap: bool = False,
 ) -> DiscretisedGrid:
     """
     Discretise a TSRD PDW stream onto the simulation grid.
@@ -552,6 +559,8 @@ def discretise_pdw_to_grid(
         Optional provenance metadata to attach to the grid's provenance
         field. Typically includes the source H5 SHA-256 and the
         discretiser version string.
+    overlap : bool
+        Opt-in overlapping receiver passbands; default is disjoint bins.
 
     Returns
     -------
@@ -596,10 +605,8 @@ def discretise_pdw_to_grid(
         # --- frequency → band ----------------------------------------
         freq = float(pdw.freq_mhz[i])
         try:
-            band = frequency_to_band(freq, cfg)
+            bands = frequency_to_bands(freq, cfg, overlap=overlap)
         except (ValueError, TypeError):
-            continue
-        if not (0 <= band < n_bands):
             continue
 
         # --- time → slot ---------------------------------------------
@@ -611,23 +618,24 @@ def discretise_pdw_to_grid(
         if not (0 <= slot < n_slots):
             continue
 
-        key = (band, slot)
-        if key not in accumulators:
-            accumulators[key] = {
-                "emitter_ids": [],
-                "toa_us": [],
-                "freq_mhz": [],
-                "pw_us": [],
-                "aoa_deg": [],
-                "amp_db": [],
-            }
-        acc = accumulators[key]
-        acc["emitter_ids"].append(int(pdw.emitter_id[i]))
-        acc["toa_us"].append(float(pdw.toa_us[i]))
-        acc["freq_mhz"].append(float(pdw.freq_mhz[i]))
-        acc["pw_us"].append(float(pdw.pw_us[i]))
-        acc["aoa_deg"].append(float(pdw.aoa_deg[i]))
-        acc["amp_db"].append(float(pdw.amp_db[i]))
+        for band in bands:
+            key = (band, slot)
+            if key not in accumulators:
+                accumulators[key] = {
+                    "emitter_ids": [],
+                    "toa_us": [],
+                    "freq_mhz": [],
+                    "pw_us": [],
+                    "aoa_deg": [],
+                    "amp_db": [],
+                }
+            acc = accumulators[key]
+            acc["emitter_ids"].append(int(pdw.emitter_id[i]))
+            acc["toa_us"].append(float(pdw.toa_us[i]))
+            acc["freq_mhz"].append(float(pdw.freq_mhz[i]))
+            acc["pw_us"].append(float(pdw.pw_us[i]))
+            acc["aoa_deg"].append(float(pdw.aoa_deg[i]))
+            acc["amp_db"].append(float(pdw.amp_db[i]))
 
     # --- build empty-cell template ------------------------------------
     empty_cell = BandSlotCell(
@@ -693,13 +701,19 @@ def discretise_pdw_to_grid(
         time_slots=n_slots,
         cells=cells,
         config=cfg,
-        provenance=provenance or {},
+        provenance={
+            **(provenance or {}),
+            "geometry_profile": "overlapping_receiver_passbands" if overlap else "disjoint_project_bins",
+            "receiver_ibw_mhz": float(cfg.receiver_ibw_mhz),
+        },
     )
 
 
 def iter_pulses_in_grid(
     pdw: PDWStream,
     cfg: SimulationConfig,
+    *,
+    overlap: bool = False,
 ) -> Iterator[BandSlotCell]:
     """
     Generator: yield one ``BandSlotCell`` per occupied (band, slot)
@@ -715,7 +729,7 @@ def iter_pulses_in_grid(
 
     [INVARIANT-2] Uses only ``core.mapping`` helpers.
     """
-    grid = discretise_pdw_to_grid(pdw, cfg)
+    grid = discretise_pdw_to_grid(pdw, cfg, overlap=overlap)
     for b in range(grid.band_count):
         for s in range(grid.time_slots):
             cell = grid.cells[b, s]

@@ -8,16 +8,25 @@ class TSRDMetricsEngine(MetricsEngine):
     Extended MetricsEngine for computing comprehensive TSRD-specific metrics
     using Stare Mode ground truth.
     """
-    def __init__(self, config: MetricsConfig, stare_mode_file: Optional[str] = None, scan_mode_file: Optional[str] = None):
+    def __init__(
+        self, config: MetricsConfig, stare_mode_file: Optional[str] = None,
+        scan_mode_file: Optional[str] = None, receiver_env=None,
+    ):
         super().__init__(config)
         self.stare_mode_file = stare_mode_file
         self.scan_mode_file = scan_mode_file
+        self.receiver_env = receiver_env
 
         self.stare_occupancy_grid = None
         self.emitter_data = None
 
         if self.config.use_tsr_stare_mode and self.stare_mode_file:
-            self.stare_occupancy_grid = load_stare_mode_as_occupancy_grid(self.stare_mode_file)
+            self.stare_occupancy_grid = (
+                receiver_env.occupancy_grid if receiver_env is not None
+                else load_stare_mode_as_occupancy_grid(
+                    self.stare_mode_file, scan_file=self.scan_mode_file
+                )
+            )
             if self.config.compute_emitter_population_metrics:
                 self.emitter_data = extract_emitter_metadata(self.stare_mode_file)
 
@@ -33,15 +42,24 @@ class TSRDMetricsEngine(MetricsEngine):
         )
 
         if self.config.compute_comprehensive_metrics and self.stare_occupancy_grid is not None:
+            scorecard = None
+            if self.receiver_env is not None:
+                from .replay_scorecard import score_recorded_replay
+                scorecard = score_recorded_replay(self.receiver_env, trajectory)
             comp_metrics = self.compute_comprehensive_metrics(
                 trajectory, self.stare_occupancy_grid, truth_grid=truth_grid,
-                base_result=base_result)
+                base_result=base_result, scenario_config=scenario_config,
+                receiver_env=self.receiver_env, scorecard=scorecard)
             base_result.update(comp_metrics)
+            if scorecard is not None:
+                base_result["tsrd_replay_scorecard"] = scorecard
 
         return base_result
 
     def compute_comprehensive_metrics(self, trajectory, occupancy_grid: np.ndarray,
-                                      truth_grid=None, base_result=None) -> Dict[str, Any]:
+                                      truth_grid=None, base_result=None,
+                                      scenario_config=None, receiver_env=None,
+                                      scorecard=None) -> Dict[str, Any]:
         if not trajectory:
             return {}
 
@@ -53,7 +71,16 @@ class TSRDMetricsEngine(MetricsEngine):
         valid_idx = (actions >= 0) & (actions < max_b) & (slots >= 0) & (slots < max_s)
 
         occupied = np.zeros(len(trajectory), dtype=int)
-        occupied[valid_idx] = occupancy_grid[actions[valid_idx], slots[valid_idx]]
+        if receiver_env is None:
+            occupied[valid_idx] = occupancy_grid[actions[valid_idx], slots[valid_idx]]
+        else:
+            occupied[valid_idx] = [
+                receiver_env.eligible_recorded_pulse(
+                    int(actions[i]), int(slots[i]),
+                    float(trajectory[i].observation.get("retune_cost_s", 0.0)),
+                )
+                for i in np.flatnonzero(valid_idx)
+            ]
         empty = 1 - occupied
 
         true_hits = np.sum(hits & occupied)
@@ -63,13 +90,21 @@ class TSRDMetricsEngine(MetricsEngine):
         total_truth_opportunities = np.sum(occupancy_grid)
 
         # Tier A: PS26055
-        conditional_pd = float(true_hits / n_occupied if n_occupied > 0 else 0.0)
-        true_pfa = float(false_alarms / n_empty if n_empty > 0 else 0.0)
-        opportunity_interception_ratio = float(true_hits / total_truth_opportunities if total_truth_opportunities > 0 else 0.0)
+        conditional_pd = float(true_hits / n_occupied) if n_occupied > 0 else None
+        true_pfa = float(false_alarms / n_empty) if n_empty > 0 else None
+        opportunity_interception_ratio = (
+            float(true_hits / total_truth_opportunities)
+            if total_truth_opportunities > 0 else None
+        )
         
-        dwell_ms = scenario_config.get('dwell_time_ms', 10.0)
-        retune_ms = scenario_config.get('retune_time_ms', 1.0)
-        mission_duration_s = len(trajectory) * (dwell_ms + retune_ms) / 1000.0
+        config = scenario_config or {}
+        slot_duration_s = config.get('slot_duration_s')
+        if slot_duration_s is None:
+            slot_duration_s = (
+                receiver_env.config.slot_duration_s() if receiver_env is not None
+                else config.get('dwell_time_ms', 10.0) / 1000.0
+            )
+        mission_duration_s = len(trajectory) * float(slot_duration_s)
         
         average_intercept_rate_hz = float(true_hits / mission_duration_s) if mission_duration_s > 0 else 0.0
         average_seconds_per_intercept = float(mission_duration_s / true_hits) if true_hits > 0 else None
@@ -88,7 +123,7 @@ class TSRDMetricsEngine(MetricsEngine):
             "prediction_count": len(preds),
             "average_intercept_time_error": prediction_metrics.get("average_intercept_time_error_slots"),
             "median_intercept_time_error": prediction_metrics.get("median_intercept_time_error_slots"),
-            "p95_intercept_time_error": None,
+            "p95_intercept_time_error": prediction_metrics.get("p95_intercept_time_error_slots"),
             "brier_score": prediction_metrics.get("brier_score"),
             "unavailable_reason": prediction_metrics.get("unavailable_reason"),
         }
@@ -103,13 +138,15 @@ class TSRDMetricsEngine(MetricsEngine):
         if self.config.compute_per_band_metrics:
             for b in range(max_b):
                 b_visits = np.sum(actions == b)
-                b_hits = np.sum((actions == b) & (hits == 1))
+                b_selected_occupied = (actions == b) & occupied.astype(bool)
+                b_hits = np.sum(b_selected_occupied & (hits == 1))
+                b_occupied_dwells = np.sum(b_selected_occupied)
                 b_occ = np.sum(occupancy_grid[b, :])
                 per_band[str(b)] = {
                     "visits": int(b_visits),
                     "true_hits": int(b_hits),
                     "active_opportunities": int(b_occ),
-                    "conditional_pd": float(b_hits / b_occ) if b_occ > 0 else 0.0
+                    "conditional_pd": float(b_hits / b_occupied_dwells) if b_occupied_dwells > 0 else None
                 }
 
         # Temporal cumulative PD
@@ -143,16 +180,44 @@ class TSRDMetricsEngine(MetricsEngine):
 
         # Plugs for Emitter Interception (To be wired via full HiddenTruthGrid)
         discovery = (base_result or {}).get("discovery_metrics", {})
-        emitter_ratio = discovery.get("emitter_interception_ratio")
+        emitter_ratio = (
+            scorecard["emitter_interception"]["unique_emitter_interception_rate"]
+            if scorecard is not None else discovery.get("emitter_interception_ratio")
+        )
         emitter_audit = {
-            "eligible_emitter_count": None,
-            "intercepted_emitter_count": None,
+            "eligible_emitter_count": (
+                scorecard["emitter_interception"]["eligible_emitters"]
+                if scorecard is not None else None
+            ),
+            "intercepted_emitter_count": (
+                scorecard["emitter_interception"]["intercepted_emitters"]
+                if scorecard is not None else None
+            ),
             "emitter_interception_ratio": emitter_ratio,
-            "emitters_never_intercepted": []
+            "emitters_never_intercepted": (
+                [int(key) for key, value in scorecard["per_emitter"].items()
+                 if not value["emitter_intercepted"]]
+                if scorecard is not None else []
+            ),
+            "attribution_limit": (
+                scorecard["emitter_interception"]["attribution_limit"]
+                if scorecard is not None else None
+            ),
         }
 
         return {
             "tier_a_ps26055": {
+                "metric_contract_version": (
+                    "tsrd_recorded_pulse_v4" if receiver_env is not None
+                    else "tsrd_recorded_pulse_v4_legacy_full_slot"
+                ),
+                "truth_basis": "recorded_stare_pulse_band_slot",
+                "attribution_limit": (
+                    "selected windows are scored after retune against recorded stare pulses"
+                    if receiver_env is not None
+                    else "hits are attributed using full-slot stare occupancy"
+                ),
+                "opportunity_denominator": int(total_truth_opportunities),
                 "conditional_pd": conditional_pd,
                 "true_pfa": true_pfa,
                 "opportunity_interception_ratio": opportunity_interception_ratio,
@@ -165,9 +230,9 @@ class TSRDMetricsEngine(MetricsEngine):
                 "true_detection_yield_per_dwell": true_detection_yield,
                 "empty_scan_fraction": empty_scan_fraction,
                 "total_dwells": total_dwells,
-                "action_entropy": exploration.get("action_entropy", 0.0),
+                "action_entropy": exploration.get("entropy_of_actions", 0.0),
                 "normalized_action_entropy": exploration.get("normalized_action_entropy", 0.0),
-                "unique_band_coverage": exploration.get("unique_band_coverage", 0.0),
+                "unique_band_coverage": exploration.get("coverage_rate", 0.0),
                 "exploration_fraction": exploration.get("exploration_fraction", 0.0),
             },
             "tier_c_prediction": tier_c,

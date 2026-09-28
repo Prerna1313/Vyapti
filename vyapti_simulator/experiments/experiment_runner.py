@@ -35,6 +35,8 @@ silently producing wrong p-values that look right.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
@@ -316,6 +318,12 @@ class ExperimentConfig:
     # Root containing matched `stare/` and `scan/` dataset directories.
     # Required for TSRD runs; never rely on a developer-local cache path.
     tsrd_dataset_root: Optional[str] = None
+    tsrd_split: str = "train"
+    tsrd_allow_legacy_layout: bool = False
+    # Additional receiver assumptions for TSRD stare replay, not dataset facts.
+    tsrd_detection_probability: float = 1.0
+    tsrd_false_alarm_probability: float = 0.0
+    tsrd_retune_time_ms: float = 0.0
 
     # Per frozen protocol §5: 7 mandatory result-tagging fields. Defaults are
     # honest placeholders; production runs MUST supply them at run time so a
@@ -594,42 +602,69 @@ class ExperimentRunner:
         band_count = self.config.band_count
         time_slots = self.config.time_slots
 
-        # Build base emitter population, then apply Swerling target
-        # fluctuation and propagation loss (per-emitter). This matches
-        # the SNR distribution seen by the System B (TSRD) path so
-        # both systems' detection rates converge on the same physics.
-        base_emitters = self._default_emitters(density, band_count, time_slots)
-        fluc_rng = np.random.default_rng(0xC0FFEE)  # Swerling seed
-        emitters = [
-            self._apply_swerling(em, fluc_rng,
-                                 burst_size=self.config.swerling_burst_size)
-            for em in base_emitters
-        ]
-
-        # Per-band antenna gain (frequency-dependent, optional).
-        antenna_gain = self._build_antenna_gain(band_count)
-
-        sim_config = SimulationConfig(
-            band_count=band_count,
-            time_slots=time_slots,
-            detection_probability=1.0,
-            false_alarm_probability=0.0,
-        )
         if use_tsr and tsrd_scenario:
             from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
             if not self.config.tsrd_dataset_root:
                 raise ValueError(
                     "TSRD runs require ExperimentConfig.tsrd_dataset_root pointing "
-                    "to the dataset root containing matched stare/ and scan/ files."
+                    "to the dataset root containing stare-mode files."
                 )
-            tsrd_base = self.config.tsrd_dataset_root
-            stare_file = f'{tsrd_base}/stare/{tsrd_scenario}.h5'
-            scan_file = f'{tsrd_base}/scan/{tsrd_scenario.replace("stare", "scan")}.h5'
-            env = TSRDStareEnvironment.from_stare_mode(stare_file, scan_file, sim_config)
-            emitters = [] # Not used in TSRD
+            if self.config.tsrd_split not in ("train", "val", "test"):
+                raise ValueError("tsrd_split must be train, val, or test")
+            tsrd_base = Path(self.config.tsrd_dataset_root)
+            scenario_name = Path(tsrd_scenario).stem
+            if Path(tsrd_scenario).name != tsrd_scenario:
+                raise ValueError("tsrd_scenario must be a file stem, not a path")
+            scan_name = scenario_name.replace("_stare", "_scan")
+            split = self.config.tsrd_split
+            split_stare = tsrd_base / "stare" / f"{split}_stare"
+            split_scan = tsrd_base / "scan" / f"{split}_scan"
+            if split_stare.is_dir() and split_scan.is_dir():
+                stare_file = split_stare / f"{scenario_name}.h5"
+                scan_file = split_scan / f"{scan_name}.h5"
+            elif self.config.tsrd_allow_legacy_layout:
+                stare_file = tsrd_base / "stare" / f"{scenario_name}.h5"
+                scan_file = tsrd_base / "scan" / f"{scan_name}.h5"
+            else:
+                raise FileNotFoundError(
+                    f"TSRD {split} split directories are missing: "
+                    f"{split_stare}, {split_scan}"
+                )
+            if not stare_file.is_file() or not scan_file.is_file():
+                raise FileNotFoundError(
+                    f"TSRD replay needs both stare and scan metadata files: "
+                    f"{stare_file}, {scan_file}"
+                )
+            env = TSRDStareEnvironment.from_stare_mode(
+                str(stare_file), str(scan_file),
+                detection_probability=self.config.tsrd_detection_probability,
+                false_alarm_probability=self.config.tsrd_false_alarm_probability,
+                retune_time_ms=self.config.tsrd_retune_time_ms,
+            )
+            band_count = env.config.band_count
+            time_slots = env.config.time_slots
+            emitters = []
         else:
+            base_emitters = self._default_emitters(density, band_count, time_slots)
+            fluc_rng = np.random.default_rng(0xC0FFEE)
+            emitters = [
+                self._apply_swerling(
+                    em, fluc_rng, burst_size=self.config.swerling_burst_size
+                )
+                for em in base_emitters
+            ]
+            sim_config = SimulationConfig(
+                band_count=band_count,
+                time_slots=time_slots,
+                detection_probability=1.0,
+                false_alarm_probability=0.0,
+            )
             env = VyaptiEnv(sim_config, emitters)
 
+        antenna_gain = (
+            None if use_tsr and tsrd_scenario
+            else self._build_antenna_gain(band_count)
+        )
         # Stash the antenna gain on the env for any downstream that
         # wants to read it (e.g. the report) without going through
         # the SimulationConfig. The receiver SNR-penalty application
@@ -651,7 +686,8 @@ class ExperimentRunner:
             metrics_engine = TSRDMetricsEngine(
                 config=metrics_config,
                 stare_mode_file=stare_file,
-                scan_mode_file=scan_file
+                scan_mode_file=scan_file,
+                receiver_env=env,
             )
         else:
             metrics_engine = MetricsEngine(metrics_config)
@@ -680,6 +716,9 @@ class ExperimentRunner:
                 # defaulting to 1.0 keeps it auditable without breaking the
                 # contract for schedulers that don't carry a version.
                 scheduler_tagging["technique_version"] = "1.0"
+                scheduler_tagging["slot_duration_s"] = env.config.slot_duration_s()
+                scheduler_tagging["dwell_time_ms"] = env.config.dwell_time_ms
+                scheduler_tagging["retune_time_ms"] = env.config.retune_time_ms
 
                 m = metrics_engine.record_result(
                     episode_id=seed,
@@ -692,16 +731,26 @@ class ExperimentRunner:
                 )
                 all_results[name].append(m)
 
-        # --- Extract primary metric for statistical comparison -------------
-        # [SCIENTIFIC] The protocol does not dictate ONE metric; the choice is
-        # declared a priori. Here: interception probability (fraction of emitters
-        # discovered), as it is the most direct measure of the scheduling objective.
+        # TSRD replay compares recorded-pulse opportunity interception; synthetic
+        # scenarios retain the protocol's emitter-discovery primary metric.
         names = list(schedulers.keys())
-        perf_matrix = np.array([
-            [res['discovery_metrics']['emitter_interception_ratio']
+        primary_metric = (
+            "tier_a_ps26055.opportunity_interception_ratio"
+            if use_tsr and tsrd_scenario
+            else "discovery_metrics.emitter_interception_ratio"
+        )
+        discovery_matrix = np.array([
+            [res["discovery_metrics"]["emitter_interception_ratio"]
              for res in all_results[name]]
             for name in names
-        ])  # shape (n_schedulers, n_seeds)
+        ])
+        perf_matrix = np.array([
+            [res["tier_a_ps26055"]["opportunity_interception_ratio"]
+             if use_tsr and tsrd_scenario
+             else res["discovery_metrics"]["emitter_interception_ratio"]
+             for res in all_results[name]]
+            for name in names
+        ])
 
         # --- Statistical tests ---------------------------------------------
         if len(names) == 2:
@@ -785,7 +834,7 @@ class ExperimentRunner:
 
         report = {
             "experiment_label": label,
-            "timestamp_utc": "2026-09-02T06:52:50Z",
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "density": density,
             "band_count": band_count,
             "time_slots": time_slots,
@@ -805,31 +854,49 @@ class ExperimentRunner:
                 ),
             },
             # RF physics configuration (auditable — must appear in any result row)
-            "rf_physics": {
-                "swerling_model": self.config.swerling_model,
-                "swerling_burst_size": self.config.swerling_burst_size,
-                "propagation_shadowing_db": self.config.propagation_shadowing_db,
-                "propagation_diffraction_db": self.config.propagation_diffraction_db,
-                "antenna_pattern": self.config.antenna_pattern,
-                "antenna_pattern_seed": self.config.antenna_pattern_seed,
-                # Per-band gain values (None = uniform 0 dB)
-                "antenna_gain_per_band": (
-                    env._antenna_gain_db.tolist()
-                    if hasattr(env, '_antenna_gain_db') and env._antenna_gain_db is not None
-                    else None
-                ),
-            },
+            "rf_physics": (
+                {
+                    "source": "tsrd_recorded_stare_pdw_replay",
+                    "truth_basis": "recorded_pulse_opportunity",
+                    "additional_detector_pd": self.config.tsrd_detection_probability,
+                    "additional_detector_pfa": self.config.tsrd_false_alarm_probability,
+                    "retune_time_ms": self.config.tsrd_retune_time_ms,
+                    "passband_halfwidth_mhz": env._halfwidth_mhz,
+                }
+                if use_tsr and tsrd_scenario else {
+                    "swerling_model": self.config.swerling_model,
+                    "swerling_burst_size": self.config.swerling_burst_size,
+                    "propagation_shadowing_db": self.config.propagation_shadowing_db,
+                    "propagation_diffraction_db": self.config.propagation_diffraction_db,
+                    "antenna_pattern": self.config.antenna_pattern,
+                    "antenna_pattern_seed": self.config.antenna_pattern_seed,
+                    "antenna_gain_per_band": (
+                        env._antenna_gain_db.tolist()
+                        if env._antenna_gain_db is not None else None
+                    ),
+                }
+            ),
             "schedulers": names,
-            "primary_metric": "discovery_metrics.emitter_interception_ratio",
+            "primary_metric": primary_metric,
+            "tsrd_metric_contract_version": (
+                "tsrd_recorded_pulse_v4" if use_tsr and tsrd_scenario else None
+            ),
+            "tsrd_truth_basis": (
+                "recorded_stare_pulse_band_slot" if use_tsr and tsrd_scenario else None
+            ),
             "result_tagging": per_scheduler_tagging,
             "statistical_test": stat_summary,
             "bootstrap_ci_on_mean": bootstrap_cis,
             "kaplan_meier_survival_curves": km_curves,
             "per_scheduler_results": {
                 name: {
-                    "mean_emitter_interception_ratio": float(perf_matrix[i].mean()),
-                    "median_emitter_interception_ratio": float(np.median(perf_matrix[i])),
-                    "std_emitter_interception_ratio": float(perf_matrix[i].std()),
+                    "mean_emitter_interception_ratio": float(discovery_matrix[i].mean()),
+                    "median_emitter_interception_ratio": float(np.median(discovery_matrix[i])),
+                    "std_emitter_interception_ratio": float(discovery_matrix[i].std()),
+                    "mean_primary_metric": float(perf_matrix[i].mean()),
+                    "mean_opportunity_interception_ratio": (
+                        float(perf_matrix[i].mean()) if use_tsr and tsrd_scenario else None
+                    ),
                     "all_seeds": perf_matrix[i].tolist(),
                     # Per-scheduler tagging (frozen protocol §5) for audit
                     # of the comparison table at the result-row level.

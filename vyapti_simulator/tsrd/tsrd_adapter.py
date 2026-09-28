@@ -1112,35 +1112,75 @@ class TSRDAdapter:
         }
 
 
-def load_stare_mode_as_occupancy_grid(file_path: str, n_bands: int = 36, n_slots: int = 600) -> np.ndarray:
-    """
-    Load a TSRD Stare Mode H5 file and convert its pulse data into a boolean
-    occupancy grid of shape [n_bands, n_slots].
-    Assumes 50ms dwell time and 500MHz bandwidth per band starting at 2GHz.
+def stare_pulse_occupancy(
+    data: np.ndarray,
+    centres_mhz: np.ndarray,
+    halfwidth_mhz: float,
+    n_slots: int,
+    slot_ms: float = 50.0,
+) -> np.ndarray:
+    """Map recorded PDWs into all receiver windows that could contain them."""
+    centres = np.asarray(centres_mhz, dtype=np.float64)
+    grid = np.zeros((len(centres), n_slots), dtype=bool)
+    if not len(data):
+        return grid
+    toa = np.asarray(data[:, 0], dtype=np.float64)
+    freq = np.asarray(data[:, 1], dtype=np.float64)
+    valid = np.isfinite(toa) & np.isfinite(freq) & (toa >= 0)
+    slot = np.floor(np.where(valid, toa, 0.0) / (slot_ms * 1000.0)).astype(np.int64)
+    valid &= slot < n_slots
+    for band, centre in enumerate(centres):
+        covered = valid & (np.abs(freq - centre) <= halfwidth_mhz)
+        grid[band, slot[covered]] = True
+    return grid
+
+
+def load_stare_mode_as_occupancy_grid(
+    file_path: str,
+    n_bands: Optional[int] = None,
+    n_slots: Optional[int] = None,
+    slot_ms: float = 50.0,
+    scan_file: Optional[str] = None,
+    band_centres_mhz: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Bucket recorded stare pulses using the H5 receiver's tune windows.
+
+    This is recorded-pulse opportunity, not transmitter emission truth.
+    The bandwidth attribute behaves as a half-width in the scan recordings.
     """
     import h5py
-    import numpy as np
 
-    grid = np.zeros((n_bands, n_slots), dtype=bool)
-    dwell_us = 50.0 * 1000.0  # 50ms in microseconds
+    if not np.isfinite(slot_ms) or slot_ms <= 0:
+        raise ValueError("slot_ms must be positive and finite")
+    with h5py.File(file_path, "r") as f:
+        receiver = f["metadata/receiver"]
+        centres = np.asarray(receiver["dwell_centres_mhz"][:], dtype=np.float64)
+        halfwidth = float(receiver.attrs["bandwith_mhz"])
+        collection_s = float(receiver.attrs["collection_time_s"])
+        if centres.ndim != 1 or not len(centres) or not np.isfinite(halfwidth) or halfwidth <= 0:
+            if not np.isfinite(halfwidth) or halfwidth <= 0:
+                raise ValueError("Invalid TSRD receiver bandwidth")
+        data = f["data"][:]
+    if not len(centres):
+        if band_centres_mhz is not None:
+            centres = np.asarray(band_centres_mhz, dtype=np.float64)
+        elif scan_file is not None:
+            with h5py.File(scan_file, "r") as scan:
+                centres = np.asarray(
+                    scan["metadata/receiver/dwell_centres_mhz"][:], dtype=np.float64
+                )
+        else:
+            raise ValueError(
+                "Stare metadata has no tune centres; provide scan_file or band_centres_mhz"
+            )
+    if centres.ndim != 1 or not len(centres) or not np.all(np.isfinite(centres)):
+        raise ValueError("Invalid TSRD tune centres")
+    bands = len(centres) if n_bands is None else int(n_bands)
+    slots = int(round(collection_s * 1000.0 / slot_ms)) if n_slots is None else int(n_slots)
+    if bands != len(centres) or slots <= 0:
+        raise ValueError("Requested grid does not match TSRD receiver geometry")
 
-    try:
-        with h5py.File(file_path, 'r') as f:
-            if 'data' in f:
-                data = f['data'][:]
-                for row in data:
-                    toa_us = row[0]
-                    freq_mhz = row[1]
-                    slot = int(toa_us / dwell_us)
-                    band = int((freq_mhz - 2000.0) / 500.0)
-                    if 0 <= slot < n_slots and 0 <= band < n_bands:
-                        grid[band, slot] = True
-    except Exception as e:
-        import logging
-        logging.warning(f"Failed to load stare mode occupancy grid from {file_path}: {e}")
-        raise
-
-    return grid
+    return stare_pulse_occupancy(data, centres, halfwidth, slots, slot_ms)
 
 def extract_emitter_metadata(file_path: str) -> dict:
     """
@@ -1173,9 +1213,10 @@ def extract_emitter_metadata(file_path: str) -> dict:
                 for tx_name in tx_group.keys():
                     tx = tx_group[tx_name]
 
-                    e_type = "Unknown"
-                    if 'metadata' in tx and 'emitter_type' in tx['metadata'].attrs:
-                        e_type = str(tx['metadata'].attrs['emitter_type'])
+                    e_type = tx.attrs.get('function', 'Unknown')
+                    if isinstance(e_type, bytes):
+                        e_type = e_type.decode('utf-8')
+                    e_type = str(e_type)
                     types.append(e_type)
 
                     freqs = []

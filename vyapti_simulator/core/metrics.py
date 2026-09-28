@@ -770,6 +770,8 @@ class MetricsEngine:
                 float(np.mean(eta_errors)) if eta_errors else None),
             "median_intercept_time_error_slots": (
                 float(np.median(eta_errors)) if eta_errors else None),
+            "p95_intercept_time_error_slots": (
+                float(np.percentile(eta_errors, 95)) if eta_errors else None),
             "intercept_time_error_samples": len(eta_errors),
             "predictions_without_actual_intercept": eta_no_actual_count,
             "excluded_fraction": (
