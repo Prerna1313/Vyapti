@@ -186,6 +186,7 @@ class TSRDBenchmarkProtocol:
         seed: int = 0,
         dwell_profile: str = "fixed_50_ms",
         band_centres_mhz=None,
+        passband_halfwidth_mhz: float = 500.0,
         receiver_profile: str = "binary_v1",
         amplitude_midpoint_db: float = -90.0,
         amplitude_scale_db: float = 5.0,
@@ -199,6 +200,7 @@ class TSRDBenchmarkProtocol:
             "detection_probability": detection_probability,
             "false_alarm_probability": false_alarm_probability,
             "retune_time_ms": retune_time_ms,
+            "passband_halfwidth_mhz": passband_halfwidth_mhz,
         }
         self.band_centres_mhz = (
             None if band_centres_mhz is None else np.asarray(band_centres_mhz, dtype=np.float64)
