@@ -238,8 +238,11 @@ def run_episode(
                 f"environment defect, not a scheduler defect; Gate 0 cannot pass."
             )
 
-        history.append(obs)
-        scheduler.update(action, obs)
+        # Keep runtime profiling out of the scheduler's causal history. The
+        # trajectory gets profiling fields below; a policy must only see the
+        # seeded receiver measurement from env.step().
+        history.append(dict(obs))
+        scheduler.update(action, dict(obs))
         t_update = time.perf_counter()
 
         prediction: Optional[BandPrediction] = None
@@ -254,7 +257,7 @@ def run_episode(
 
         mem_end = process.memory_info().rss
 
-        # Add compute profiling to observation so metrics can read it
+        # Add compute profiling to the offline trajectory for metrics.
         obs["select_action_ms"] = (t_select - t_start) * 1000.0
         obs["predict_ms"] = (t_predict - t_update) * 1000.0
         obs["wall_clock_ms"] = (t_predict - t_start) * 1000.0

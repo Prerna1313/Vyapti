@@ -15,7 +15,7 @@ from vyapti_simulator.core.metrics import MetricsConfig, MetricsEngine
 from vyapti_simulator.core.scheduler_interface import BandPrediction
 from vyapti_simulator.qualification.probes import RoundRobinProbe
 from vyapti_simulator.tsrd.benchmark_protocol import (
-    TSRDBenchmarkProtocol, _assert_scorecard_consistent,
+    TSRDBenchmarkProtocol, _assert_scorecard_consistent, _summarize,
 )
 from vyapti_simulator.tsrd.corpus_loader import CorpusUnavailableError, iter_tsr_replay_pairs
 from vyapti_simulator.tsrd.mixed_dwell import DwellAction, run_mixed_dwell_episode
@@ -341,7 +341,8 @@ def test_stare_only_requires_explicit_geometry_and_audits_metadata(tmp_path):
         return RoundRobinProbe(band_count)
 
     report = protocol.run(
-        ["round_robin"], train, load, worlds_per_candidate=1, emitter_count=1
+        ["round_robin"], train, load, worlds_per_candidate=1, emitter_count=1,
+        evaluate_test=True,
     )
     assert report["receiver_geometry"]["source"] == "explicit_centres"
     assert report["held_out_test"]["summary"]["files_evaluated"] == 1
@@ -491,10 +492,11 @@ def test_pdw_receiver_profile_flows_through_train_and_evaluation(tmp_path):
         return RoundRobinProbe(band_count)
 
     report = protocol.run(
-        ["round_robin"], train, load, worlds_per_candidate=1, emitter_count=1
+        ["round_robin"], train, load, worlds_per_candidate=1, emitter_count=1,
+        evaluate_test=True,
     )
     assert report["receiver_profile_options"]["receiver_profile"] == "pdw_v2"
-    assert report["metric_contract_version"] == "tsrd_recorded_pulse_emitter_v3"
+    assert report["metric_contract_version"] == "tsrd_recorded_pulse_emitter_v4"
     assert report["held_out_test"]["summary"]["files_evaluated"] == 1
 
 
@@ -566,7 +568,13 @@ def test_train_pool_and_frozen_split_protocol(tmp_path):
     report = protocol.run(
         ["first", "second"], train, load, worlds_per_candidate=1, emitter_count=1
     )
+    assert report["evaluation_stage"] == "development"
+    assert report["held_out_test"] is None
+    assert [split for split, _ in calls] == ["val", "val"]
+    report = protocol.finalize_test(load)
     assert [split for split, _ in calls] == ["val", "val", "test"]
+    with pytest.raises(ValueError, match="development run without test results"):
+        protocol.finalize_test(load)
     assert calls[-1][1] == f"{report['selected_candidate']}.checkpoint"
     assert report["held_out_test"]["summary"]["files_evaluated"] == 1
     assert report["validation"]["first"]["summary"]["files_evaluated"] == 1
@@ -613,6 +621,109 @@ def test_scorecard_consistency_rejects_corrupted_counts():
     score["event_level"]["false_alarms"] += 1
     with pytest.raises(ValueError, match="inconsistent"):
         _assert_scorecard_consistent(score, trajectory)
+
+
+def test_empty_recording_keeps_undefined_replay_metrics_null():
+    cfg = SimulationConfig(
+        band_count=2, time_slots=3, dwell_time_ms=50.0,
+        receiver_ibw_mhz=500.0, total_spectrum_mhz=1000.0,
+        detection_probability=1.0, false_alarm_probability=0.0,
+    )
+    env = TSRDStareEnvironment(
+        2, 3, np.zeros((2, 3), dtype=bool), None, cfg,
+        stare_data=np.empty((0, 5)), stare_labels=np.empty(0, dtype=int),
+        band_centres_mhz=np.array([100.0, 600.0]),
+        passband_halfwidth_mhz=250.0,
+    )
+    episode = run_episode(env, RoundRobinProbe(2), seed=7)
+    score = score_recorded_replay(env, episode.trajectory)
+    _assert_scorecard_consistent(score, episode.trajectory)
+    assert score["pulse_level"]["recorded_pulses"] == 0
+    assert score["pulse_level"]["recorded_pulse_coverage_ratio"] is None
+    assert score["illumination"]["illumination_interception_ratio"] is None
+    assert score["emitter_interception"]["unique_emitter_interception_rate"] is None
+    assert score["ttfi"]["censoring_fraction"] is None
+    assert score["cell_level"]["conditional_pd"] is None
+    assert score["cell_level"]["true_pfa"] == 0.0
+    assert _summarize([score])["pooled_illumination_interception_ratio"] is None
+
+
+def test_pooled_replay_ratio_uses_counts_not_mean_of_world_ratios():
+    first = _small_world()
+    first_episode = run_episode(first, RoundRobinProbe(2), seed=1)
+    first_score = score_recorded_replay(first, first_episode.trajectory)
+    one_pulse = np.array([[1_000.0, 100.0, 1.0, 0.0, -70.0]])
+    cfg = SimulationConfig(
+        band_count=2, time_slots=3, dwell_time_ms=50.0,
+        receiver_ibw_mhz=500.0, total_spectrum_mhz=1000.0,
+        detection_probability=1.0, false_alarm_probability=0.0,
+    )
+    second = TSRDStareEnvironment(
+        2, 3, stare_pulse_occupancy(one_pulse, np.array([100.0, 600.0]), 250.0, 3),
+        None, cfg, stare_data=one_pulse, stare_labels=np.array([5]),
+        band_centres_mhz=np.array([100.0, 600.0]), passband_halfwidth_mhz=250.0,
+    )
+    second_episode = run_episode(second, RoundRobinProbe(2), seed=1)
+    second_score = score_recorded_replay(second, second_episode.trajectory)
+    rows = [first_score, second_score]
+    summary = _summarize(rows)
+    numerator = sum(r["illumination"]["detected_emitter_slot_opportunity_count"] for r in rows)
+    denominator = sum(r["illumination"]["emitter_slot_opportunity_count"] for r in rows)
+    per_world_mean = np.mean([r["illumination"]["illumination_interception_ratio"] for r in rows])
+    assert summary["pooled_illumination_interception_ratio"] == pytest.approx(numerator / denominator)
+    assert summary["pooled_illumination_interception_ratio"] != pytest.approx(per_world_mean)
+
+
+def test_scheduler_history_excludes_nondeterministic_profiling_fields():
+    class RecordingProbe(RoundRobinProbe):
+        def __init__(self, bands):
+            super().__init__(bands)
+            self.seen = []
+
+        def select_action(self, observation_history, current_time_slot):
+            if observation_history:
+                self.seen.append(dict(observation_history[-1]))
+            return super().select_action(observation_history, current_time_slot)
+
+    env = _small_world()
+    first, second = RecordingProbe(2), RecordingProbe(2)
+    episode_a = run_episode(env, first, seed=19)
+    episode_b = run_episode(env, second, seed=19)
+    profiling = {"select_action_ms", "predict_ms", "wall_clock_ms", "memory_delta_bytes"}
+    assert first.seen == second.seen
+    assert all(profiling.isdisjoint(obs) for obs in first.seen)
+    assert profiling <= set(episode_a.trajectory[0].observation)
+    assert np.array_equal(episode_a.actions, episode_b.actions)
+    assert np.array_equal(episode_a.hits, episode_b.hits)
+
+
+def test_out_of_mission_pdw_is_reported_but_not_coverage_denominator():
+    centres = np.array([100.0, 600.0])
+    data = np.array([
+        [1_000.0, 100.0, 1.0, 0.0, -70.0],
+        [160_000.0, 100.0, 1.0, 0.0, -70.0],
+    ])
+    cfg = SimulationConfig(
+        band_count=2, time_slots=3, dwell_time_ms=50.0,
+        receiver_ibw_mhz=500.0, total_spectrum_mhz=1000.0,
+        detection_probability=1.0, false_alarm_probability=0.0,
+    )
+    env = TSRDStareEnvironment(
+        2, 3, stare_pulse_occupancy(data, centres, 250.0, 3), None, cfg,
+        stare_data=data, stare_labels=np.array([5, 5]),
+        band_centres_mhz=centres, passband_halfwidth_mhz=250.0,
+    )
+    episode = run_episode(env, RoundRobinProbe(2), seed=3)
+    score = score_recorded_replay(env, episode.trajectory)
+    _assert_scorecard_consistent(score, episode.trajectory)
+    assert score["pulse_level"]["recorded_pulses"] == 2
+    assert score["pulse_level"]["recorded_pulses_in_mission"] == 1
+    assert score["pulse_level"]["recorded_pulses_outside_mission"] == 1
+    assert score["pulse_level"]["recorded_pulse_coverage_ratio"] == 1.0
+    pooled = _summarize([score])
+    assert pooled["recorded_pulses_in_mission"] == 1
+    assert pooled["recorded_pulses_outside_mission"] == 1
+    assert pooled["recorded_pulse_coverage_ratio"] == 1.0
 
 
 def test_failed_training_leaves_incomplete_manifest_and_no_report(tmp_path):
@@ -671,7 +782,8 @@ def test_checkpoint_protocol_mixed_dwell_profile(tmp_path):
         return _TwoSlotProbe(band_count)
 
     report = protocol.run(
-        ["two_slot"], train, load, worlds_per_candidate=1, emitter_count=1
+        ["two_slot"], train, load, worlds_per_candidate=1, emitter_count=1,
+        evaluate_test=True,
     )
     assert report["dwell_profile"] == "mixed_50_100_ms"
     assert report["held_out_test"]["per_config"][0]["decision_level"]["total_dwells"] == 300

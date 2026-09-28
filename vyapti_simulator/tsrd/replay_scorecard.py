@@ -79,6 +79,8 @@ def score_recorded_replay(
     first_intercept = np.full(n_emitters, -1, dtype=int)
     toa = data[:, 0].astype(float, copy=False)
     freq = data[:, 1].astype(float, copy=False)
+    in_mission = np.isfinite(toa) & (toa >= 0) & (toa < mission_s * 1e6)
+    in_mission_pulses = int(np.count_nonzero(in_mission))
     centres, halfwidth = env.receiver_geometry
     label_indices = {label: i for i, label in enumerate(emitter_ids)}
     first_emission_us = np.full(n_emitters, np.inf)
@@ -192,8 +194,8 @@ def score_recorded_replay(
                    else "upper_bound_from_band_positive")
     return {
         "metric_contract_version": (
-            "tsrd_recorded_pulse_emitter_v3" if pulse_resolved
-            else "tsrd_recorded_pulse_emitter_v2"
+            "tsrd_recorded_pulse_emitter_v4" if pulse_resolved
+            else "tsrd_recorded_pulse_emitter_v3"
         ),
         "truth_basis": (
             "recorded_stare_pdws; exact captured-PDW attribution"
@@ -257,6 +259,9 @@ def score_recorded_replay(
             "attribution_limit": attribution,
         },
         "pulse_level": {
+            "time_window_basis": "assumed_replay_toa_window_[0,mission_duration)",
+            "time_window_start_us": 0.0,
+            "time_window_end_us": mission_s * 1e6,
             "physical_pulse_interception_ratio": None,
             "physical_pulse_interception_ratio_unavailable_reason": (
                 "TSRD stare PDWs omit some emitted pulses; physical emission truth is unavailable"
@@ -267,14 +272,16 @@ def score_recorded_replay(
                 if pulse_resolved else
                 "A band-level detector positive does not identify captured individual pulses"
             ),
-            "recorded_pulse_coverage_ratio": _rate(covered_recorded_pulses, len(data)),
+            "recorded_pulse_coverage_ratio": _rate(covered_recorded_pulses, in_mission_pulses),
             "recorded_pulse_detected_ratio": (
-                _rate(captured_recorded_pulses, len(data)) if pulse_resolved else None
+                _rate(captured_recorded_pulses, in_mission_pulses) if pulse_resolved else None
             ),
             "captured_recorded_pulses": (
                 captured_recorded_pulses if pulse_resolved else None
             ),
             "recorded_pulses": len(data),
+            "recorded_pulses_in_mission": in_mission_pulses,
+            "recorded_pulses_outside_mission": len(data) - in_mission_pulses,
             "covered_recorded_pulses": covered_recorded_pulses,
         },
         "revisit": {

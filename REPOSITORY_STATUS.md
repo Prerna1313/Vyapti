@@ -1,12 +1,19 @@
 # Repository status
 
-Last reviewed: 2026-09-26. This page describes this checkout; it is the
+Last reviewed: 2026-09-28. This page describes this checkout; it is the
 starting point for future code reviews. Older `GATE0_COMPLETE.md` and
 `SUMMARY_OF_CHANGES.md` are historical notes, not current certifications.
 
 ## Verified repository facts
 
 - The packaged source is under `vyapti_simulator/` and `src/`.
+- The local, ignored `dataset/` tree contains the 6,000-file TSRD corpus.
+  See [TSRD_BASELINE_2026-09-28.md](TSRD_BASELINE_2026-09-28.md) for the
+  repository baseline and [TSRD_REPLAY_CONTRACT.md](TSRD_REPLAY_CONTRACT.md)
+  for the versioned recorded-PDW replay assumptions. The local content-hash
+  inventory is `data_provenance/tsrd_corpus_manifest.json`; its upstream
+  download revision remains unproven. The full-corpus gate and anomalies are
+  in [TSRD_READINESS_2026-09-28.md](TSRD_READINESS_2026-09-28.md).
 - Python tests live in `tests/`. The two small HDF5 integration fixtures and
   their manifest are in `tests/fixtures/tsrd/`. Local sample folders `3/` and
   `4/` are ignored by Git and are not the complete dataset.
@@ -30,8 +37,8 @@ starting point for future code reviews. Older `GATE0_COMPLETE.md` and
 
 ## Verification and limits
 
-On 2026-09-26, `python -m pytest -q` completed with **583 passed and 13
-legacy-layout deprecation warnings**. The syntax check
+On 2026-09-28, `python -m pytest -q --tb=line` completed with **632 passed**
+using `h5py` 3.16.0 from a temporary local dependency path. The syntax check
 `python -m compileall -q vyapti_simulator src tests` also passed. These are dated checkout results;
 repeat the commands after any changes. Passing tests establish only the
 cases they exercise; they do not certify scientific validity, dataset
@@ -41,9 +48,13 @@ representativeness, or field behavior.
 package imports in Python examples. `tests/test_configuration_contract.py`
 checks early validation and master-config provenance coverage.
 
-The complete train and validation datasets have not been downloaded into
-this workspace. Do not infer full-corpus results from the local fixtures or
-the sample files in `3/` and `4/`.
+All six local HDF5 split/mode directories have been content-hashed, but the
+bundled CSV summaries are inconsistent and the exact source revision is
+unknown. Do not infer scheduler performance from fixture tests or the earlier
+exploratory validation control. A frequency-envelope audit flagged possible
+PDW-label to transmitter-metadata mismatches; see the readiness report for
+split-level counts and interpretation. Test HDF5 files have been opened for
+inventory and data-quality checks only, with no scheduler run on test.
 
 ## Remaining documentation maintenance
 

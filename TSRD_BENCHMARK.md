@@ -48,8 +48,9 @@ replay until that detector assumption is independently justified.
 `TSRDBenchmarkProtocol` indexes labelled histories from **train stare** files,
 samples full recorded histories into train worlds, runs an algorithm-specific
 training callback, scores frozen checkpoints on untouched validation stare
-files, selects by pooled illumination interception ratio, and evaluates the
-winner once on untouched test stare files. Scan files supply receiver geometry,
+files, and selects by pooled illumination interception ratio. The default
+development run leaves test untouched; `finalize_test` evaluates the selected
+frozen checkpoint once when the protocol is locked. Scan files supply receiver geometry,
 not additional pulses. This is a recorded-PDW approximation, not a physical RF
 waveform reconstruction or complete emitted-pulse truth.
 
@@ -84,10 +85,16 @@ report = protocol.run(
     emitter_count=8,
     reward_mode="detector_positive",
 )
+
+# After model, reward, receiver profile, and metrics are frozen:
+final_report = protocol.finalize_test(load_checkpoint)
 ```
 
 Each run writes `tsrd_run_manifest.json` before training and
-`tsrd_benchmark_report.json` only after a complete run. The manifest records
+`tsrd_benchmark_report.json` after development completes. The development
+report has `held_out_test: null`; finalization fills that field after checking
+the corpus inventory, replay settings, and selected checkpoint hash.
+The manifest records
 the receiver settings, seed derivation, candidate IDs, split file inventory,
 and frozen checkpoint hashes. Its inventory fingerprint uses relative paths,
 sizes, and modification times, **not file-content hashes**; preserve the source
@@ -192,7 +199,11 @@ equals a physical pulse interception ratio. `physical_pulse_interception_ratio`
 and `offered_pulse_capture_ratio` are `null` in replay: TSRD stare omits some
 emitted pulses and our band-level detector does not identify individually
 captured pulses. `recorded_pulse_coverage_ratio` is a separate, observable
-selection-window coverage proxy, not a capture metric. Emitter-labelled
+selection-window coverage proxy over recorded PDWs inside the assumed
+`[0,30 s)` replay window,
+not a capture metric. The scorecard also reports all recorded rows and the
+number outside that replay window; the latter are excluded from coverage and
+detected-pulse denominators. Emitter-labelled
 discovery and per-emitter Pd are optimistic upper bounds when multiple emitters
 share a passband and base slot. Undefined zero-denominator ratios are `null`.
 

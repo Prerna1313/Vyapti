@@ -23,6 +23,7 @@ SIMULATOR_STATUS.md
 !pyproject.toml
 !/tests/fixtures/tsrd/manifest.json
 !/data_provenance/manifest.json
+!/data_provenance/tsrd_corpus_manifest.json
 *.csv
 *.png
 *.pdf
@@ -37,6 +38,8 @@ vyapti-simulator-kaggle/
 /3/
 /4/
 /tsrd-data/
+/dataset/
+/.baseline_deps/
 
 # OS
 .DS_Store

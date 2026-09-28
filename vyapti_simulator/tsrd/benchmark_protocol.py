@@ -77,7 +77,9 @@ def _assert_scorecard_consistent(score: dict, trajectory: list) -> None:
         or true_hits != cell["detected_occupied_cell_count"]
         or true_hits > cell["eligible_selected_cells"]
         or false_alarms > cell["empty_selected_cells"]
-        or pulse["covered_recorded_pulses"] > pulse["recorded_pulses"]
+        or pulse["recorded_pulses_in_mission"] + pulse["recorded_pulses_outside_mission"]
+           != pulse["recorded_pulses"]
+        or pulse["covered_recorded_pulses"] > pulse["recorded_pulses_in_mission"]
         or (pulse["captured_recorded_pulses"] is not None
             and pulse["captured_recorded_pulses"] > pulse["covered_recorded_pulses"])
         or score["reward"]["detector_positive_total"] != positives
@@ -115,7 +117,8 @@ def _summarize(rows: list[dict]) -> dict:
         r["emitter_interception"]["eligible_observed_emitter_slot_count"] for r in rows
     )
     covered_pulses = sum(r["pulse_level"]["covered_recorded_pulses"] for r in rows)
-    recorded_pulses = sum(r["pulse_level"]["recorded_pulses"] for r in rows)
+    recorded_pulses = sum(r["pulse_level"]["recorded_pulses_in_mission"] for r in rows)
+    outside_mission_pulses = sum(r["pulse_level"]["recorded_pulses_outside_mission"] for r in rows)
     captured_counts = [r["pulse_level"]["captured_recorded_pulses"] for r in rows]
     def ratio(n, d):
         return float(n / d) if n is not None and d else None
@@ -155,6 +158,8 @@ def _summarize(rows: list[dict]) -> dict:
         "physical_pulse_interception_ratio": None,
         "offered_pulse_capture_ratio": None,
         "recorded_pulse_coverage_ratio": ratio(covered_pulses, recorded_pulses),
+        "recorded_pulses_in_mission": recorded_pulses,
+        "recorded_pulses_outside_mission": outside_mission_pulses,
         "recorded_pulse_detected_ratio": (
             ratio(sum(captured_counts), recorded_pulses)
             if all(count is not None for count in captured_counts) else None
@@ -318,8 +323,9 @@ class TSRDBenchmarkProtocol:
         load_checkpoint: Callable[[Path, int], object],
         *, worlds_per_candidate: int, emitter_count: int,
         reward_mode: str = "detector_positive",
+        evaluate_test: bool = False,
     ) -> dict:
-        """Train candidates, select by validation illumination, test winner once."""
+        """Train and select on development data; test only on explicit request."""
         if reward_mode not in ("detector_positive", "false_alarm_aware"):
             raise ValueError("Unknown reward mode")
         if not candidate_ids or len(set(candidate_ids)) != len(candidate_ids):
@@ -339,9 +345,9 @@ class TSRDBenchmarkProtocol:
             "status": "started",
             "corpus_root": str(self.corpus_root),
             "metric_contract_version": (
-                "tsrd_recorded_pulse_emitter_v3"
+                "tsrd_recorded_pulse_emitter_v4"
                 if self.receiver_profile_options["receiver_profile"] == "pdw_v2"
-                else "tsrd_recorded_pulse_emitter_v2"
+                else "tsrd_recorded_pulse_emitter_v3"
             ),
             "input_inventory": _input_inventory(
                 self.corpus_root, self.band_centres_mhz is not None
@@ -357,6 +363,7 @@ class TSRDBenchmarkProtocol:
             "worlds_per_candidate": worlds_per_candidate,
             "emitters_per_world": emitter_count,
             "reward_mode": reward_mode,
+            "evaluate_test": bool(evaluate_test),
             "receiver_options": self.receiver_options,
             "receiver_profile_options": self.receiver_profile_options,
             "dwell_profile": self.dwell_profile,
@@ -415,15 +422,18 @@ class TSRDBenchmarkProtocol:
             selected = max(candidate_ids, key=selection_score)
             if selection_score(selected) == float("-inf"):
                 raise ValueError("Validation has no recorded emitter-slot opportunities")
-            test = self._evaluate_split("test", checkpoints[selected], load_checkpoint)
+            test = (
+                self._evaluate_split("test", checkpoints[selected], load_checkpoint)
+                if evaluate_test else None
+            )
         except Exception as exc:
             mark_failed("selection_or_test", exc)
             raise
         report = {
             "metric_contract_version": (
-                "tsrd_recorded_pulse_emitter_v3"
+                "tsrd_recorded_pulse_emitter_v4"
                 if self.receiver_profile_options["receiver_profile"] == "pdw_v2"
-                else "tsrd_recorded_pulse_emitter_v2"
+                else "tsrd_recorded_pulse_emitter_v3"
             ),
             "selection_metric": "pooled_illumination_interception_ratio",
             "selected_candidate": selected,
@@ -444,13 +454,51 @@ class TSRDBenchmarkProtocol:
             "train_emitters_per_world": emitter_count,
             "validation": validation,
             "held_out_test": test,
+            "evaluation_stage": "final" if evaluate_test else "development",
         }
         _write_json(report_path, report)
-        manifest["status"] = "complete"
+        manifest["status"] = "complete" if evaluate_test else "development_complete"
         manifest["selected_candidate"] = selected
         manifest["checkpoint_sha256"] = {
             candidate_id: validation[candidate_id]["checkpoint_sha256"]
             for candidate_id in candidate_ids
         }
+        _write_json(manifest_path, manifest)
+        return report
+
+    def finalize_test(self, load_checkpoint: Callable[[Path, int], object]) -> dict:
+        """Evaluate the selected frozen checkpoint once after development."""
+        manifest_path = self.output_dir / "tsrd_run_manifest.json"
+        report_path = self.output_dir / "tsrd_benchmark_report.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if manifest.get("status") != "development_complete" or report.get("evaluation_stage") != "development":
+            raise ValueError("Expected a completed development run without test results")
+        expected_settings = {
+            "corpus_root": str(self.corpus_root),
+            "seed": self.seed,
+            "receiver_options": self.receiver_options,
+            "receiver_profile_options": self.receiver_profile_options,
+            "dwell_profile": self.dwell_profile,
+            "band_centres_mhz": (
+                self.band_centres_mhz.tolist() if self.band_centres_mhz is not None else None
+            ),
+        }
+        if any(manifest.get(key) != value for key, value in expected_settings.items()):
+            raise ValueError("Replay settings differ from the development run")
+        if manifest["input_inventory"]["inventory_sha256"] != _input_inventory(
+            self.corpus_root, self.band_centres_mhz is not None
+        )["inventory_sha256"]:
+            raise ValueError("Source inventory changed since development")
+        selected = report["selected_candidate"]
+        checkpoint = self.output_dir / f"{selected}.checkpoint"
+        if _sha256(checkpoint) != manifest["checkpoint_sha256"][selected]:
+            raise ValueError("Selected checkpoint changed since development")
+        test = self._evaluate_split("test", checkpoint, load_checkpoint)
+        report["held_out_test"] = test
+        report["evaluation_stage"] = "final"
+        _write_json(report_path, report)
+        manifest["status"] = "complete"
+        manifest["evaluate_test"] = True
         _write_json(manifest_path, manifest)
         return report

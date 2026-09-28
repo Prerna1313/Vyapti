@@ -180,8 +180,8 @@ def screen_rewards(
         "split": split,
         "files_screened": len(pairs),
         "metric_contract": (
-            "tsrd_recorded_pulse_emitter_v3" if receiver_profile == "pdw_v2"
-            else "tsrd_recorded_pulse_emitter_v2"
+            "tsrd_recorded_pulse_emitter_v4" if receiver_profile == "pdw_v2"
+            else "tsrd_recorded_pulse_emitter_v3"
         ),
         "receiver_options": {
             "detection_probability": detection_probability,

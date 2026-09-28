@@ -89,12 +89,15 @@ def audit_file(path: Path, *, chunk_size: int = 250_000,
 
 
 def audit_corpus(corpus_root: str | Path, *, max_files: int | None = None,
-                 chunk_size: int = 250_000) -> dict:
+                 chunk_size: int = 250_000,
+                 selected_splits: tuple[str, ...] = ("train", "val", "test")) -> dict:
     root = Path(corpus_root).resolve()
     if max_files is not None and max_files <= 0:
         raise ValueError("max_files must be positive")
+    if not selected_splits or any(split not in ("train", "val", "test") for split in selected_splits):
+        raise ValueError("selected_splits must contain train, val, or test")
     splits = {}
-    for split in ("train", "val", "test"):
+    for split in selected_splits:
         files = sorted((root / "stare" / f"{split}_stare").glob("*.h5"))
         if not files:
             raise FileNotFoundError(f"No TSRD stare files for {split} under {root}")
@@ -120,9 +123,12 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-files", type=int)
     parser.add_argument("--chunk-size", type=int, default=250_000)
+    parser.add_argument("--split", choices=("train", "val", "test"), action="append",
+                        help="Audit only selected split(s); default is all")
     args = parser.parse_args()
     report = audit_corpus(
-        args.corpus_root, max_files=args.max_files, chunk_size=args.chunk_size
+        args.corpus_root, max_files=args.max_files, chunk_size=args.chunk_size,
+        selected_splits=tuple(args.split or ("train", "val", "test")),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
