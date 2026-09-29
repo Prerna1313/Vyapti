@@ -63,15 +63,16 @@ PFA = 0.05
 TRAIN_FILES = 2500
 VAL_FILES = 100
 TEST_FILES = 100
-TRAIN_WORLDS_PER_EPOCH = 100
-TRAIN_EPOCHS = 10
-TOTAL_TRAIN_WORLDS = TRAIN_WORLDS_PER_EPOCH * TRAIN_EPOCHS
-CHECKPOINT_STEPS = (100_000, 200_000, 300_000, 400_000)
+RETUNE_TIME_MS = 1.0
 
-DEFAULT_SEED = 20260928
-TRAIN_RECIPE_SEED = DEFAULT_SEED + 10_000
-VAL_REPLAY_SEED = DEFAULT_SEED + 20_000
-TEST_REPLAY_SEED = DEFAULT_SEED + 30_000
+PPO_ROLLOUT_ACTIONS = 512
+PPO_OPTIMIZER_EPOCHS = 5
+PPO_TRAINING_STEPS = 200_000
+CHECKPOINT_STEPS = (50_000, 100_000, 150_000, 200_000)
+
+DEFAULT_SEED = 20260929
+VAL_REPLAY_SEED = DEFAULT_SEED + 30_000
+TEST_REPLAY_SEED = DEFAULT_SEED + 130_000
 
 EPS = 1e-12
 
@@ -161,71 +162,41 @@ def build_trajectory_step(action: int, obs_dict: dict) -> TrajectoryStep:
 # TRAIN REGISTRY  (corrected for real pool API)
 # ============================================================
 
-def build_replay_registry(files: list[Path]) -> list[dict]:
-    """Build replay registry directly from Stare file paths.
-
-    Guarantees no leakage — val/test files are entirely independent
-    of the training pool.
-    """
-    registry: list[dict] = []
-    for i, path in enumerate(files):
-        registry.append(
-            {
-                "world_id": i,
-                "source_file": str(path),
-                "config_id": path.stem,
-                "replay": True,
-            }
-        )
-    return registry
+def validate_dataset(corpus_root: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for split in ("train", "val", "test"):
+        split_dir = Path(corpus_root) / "stare" / f"{split}_stare"
+        if not split_dir.is_dir():
+            raise FileNotFoundError(f"Missing {split.upper()} Stare directory: {split_dir}")
+        files = list(split_dir.glob("config_*.h5"))
+        counts[split] = len(files)
+    if counts["train"] != TRAIN_FILES:
+        raise RuntimeError(f"Expected exactly {TRAIN_FILES:,} TRAIN configs, found {counts['train']:,}")
+    if counts["val"] < VAL_FILES:
+        raise RuntimeError(f"Need at least {VAL_FILES} VAL configs, found {counts['val']}")
+    if counts["test"] < TEST_FILES:
+        raise RuntimeError(f"Need at least {TEST_FILES} TEST configs, found {counts['test']}")
+    return counts
 
 
-def build_train_recipes(pool: Any, *, seed: int = TRAIN_RECIPE_SEED) -> list[dict]:
-    """Build deterministic training world registry using sample_world().
+def build_replay_registry(files_or_root: list[Path] | Path, split: str | None = None, count: int | None = None) -> list[dict]:
+    """Build a deterministic VAL/TEST replay registry."""
+    if isinstance(files_or_root, (str, Path)):
+        if split not in ("val", "test"):
+            raise ValueError("split must be 'val' or 'test' when corpus_root is supplied")
+        n = int(count if count is not None else (VAL_FILES if split == "val" else TEST_FILES))
+        split_dir = Path(files_or_root) / "stare" / f"{split}_stare"
+        files = sorted(split_dir.glob("config_*.h5"), key=lambda p: int(p.stem.split("_")[-1]))
+        if len(files) < n:
+            raise RuntimeError(f"Need {n} {split} files; found {len(files)}")
+        files = files[:n]
+    else:
+        files = list(files_or_root)
+    return [
+        {"world_id": i, "source_file": str(path), "config_id": path.stem, "replay": True}
+        for i, path in enumerate(files)
+    ]
 
-    Uses pool.sample_world(world_seed, emitter_count) — the only method
-    available on TSRDTrainWorldPool. A deterministic world_seed is derived
-    from the global world index so that every run produces identical worlds.
-    """
-    n_contributions = len(pool.contributions)
-    from collections import Counter
-    
-    # Compute empirical emitter-count distribution PER SOURCE FILE
-    file_counts = Counter(c.stare_file for c in pool.contributions)
-    count_distribution = np.asarray(list(file_counts.values()), dtype=np.int32)
-    
-    rng = np.random.default_rng(int(seed))
-    recipes: list[dict] = []
-
-    for epoch in range(TRAIN_EPOCHS):
-        for world_in_epoch in range(TRAIN_WORLDS_PER_EPOCH):
-            global_world = len(recipes)
-
-            # Sample n_emitters from the empirical distribution
-            emitter_count = int(rng.choice(count_distribution))
-
-            # Fully deterministic world seed
-            world_seed = int(seed + 1_000_003 * global_world)
-
-            # Materialise world to get source provenance
-            env, sources = pool.sample_world(world_seed, emitter_count)
-            uids = [s["source_label"] for s in sources]
-            source_config_ids = sorted(
-                {Path(s["source_file"]).stem for s in sources}
-            )
-
-            recipes.append(
-                {
-                    "epoch": epoch + 1,
-                    "world_in_epoch": world_in_epoch,
-                    "global_world": global_world,
-                    "n_emitters": emitter_count,
-                    "world_seed": world_seed,
-                    "uids": uids,
-                    "source_config_ids": source_config_ids,
-                }
-            )
-    return recipes
 
 
 def save_json(path: Path, obj: Any) -> None:
