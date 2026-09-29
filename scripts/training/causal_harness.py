@@ -195,8 +195,8 @@ def build_train_recipes(pool: Any, *, seed: int = TRAIN_RECIPE_SEED) -> list[dic
         for world_in_epoch in range(TRAIN_WORLDS_PER_EPOCH):
             global_world = len(recipes)
 
-            # Sample emitter count reproducibly
-            emitter_count = int(rng.integers(1, n_contributions + 1))
+            # Sample emitter count reproducibly (fixed to 8 per SIH26055 spec)
+            emitter_count = 8
 
             # Fully deterministic world seed
             world_seed = int(seed + 1_000_003 * global_world)
