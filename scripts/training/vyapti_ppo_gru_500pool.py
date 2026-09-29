@@ -560,8 +560,10 @@ def checkpoint_better(current: dict[str, float], best: dict[str, float] | None) 
         ("pooled_unique_emitter_interception_rate", True),
     )
     for key, higher in criteria:
-        a = float(current.get(key, np.nan))
-        b = float(best.get(key, np.nan))
+        val_a = current.get(key)
+        val_b = best.get(key)
+        a = float(val_a) if val_a is not None else float("nan")
+        b = float(val_b) if val_b is not None else float("nan")
         if not np.isfinite(a):
             return False
         if not np.isfinite(b):

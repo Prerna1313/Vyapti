@@ -915,8 +915,10 @@ def checkpoint_better(
     )
 
     for key, higher in criteria:
-        a = float(current.get(key, np.nan))
-        b = float(best.get(key, np.nan))
+        val_a = current.get(key)
+        val_b = best.get(key)
+        a = float(val_a) if val_a is not None else float("nan")
+        b = float(val_b) if val_b is not None else float("nan")
 
         if not np.isfinite(a):
             return False
