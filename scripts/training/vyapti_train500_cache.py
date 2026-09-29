@@ -378,10 +378,10 @@ class CachedTSRDTrainWorldPool:
             stare_labels=labels,
             band_centres_mhz=self.centres_mhz,
             passband_halfwidth_mhz=self.halfwidth_mhz,
-            **self.receiver_profile_options,
-            detection_probability=self.detection_probability,
-            false_alarm_probability=self.false_alarm_probability,
-            retune_time_ms=self.retune_time_ms,
+            receiver_profile=self.receiver_profile,
+            amplitude_midpoint_db=self.amplitude_midpoint_db,
+            amplitude_scale_db=self.amplitude_scale_db,
+            max_observed_pdws=self.max_observed_pdws,
         )
 
         return env, sorted(sources, key=lambda x: x["world_emitter_id"])
