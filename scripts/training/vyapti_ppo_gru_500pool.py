@@ -62,6 +62,7 @@ from causal_harness import (
     CausalSchedulerState,
     build_replay_registry,
     aggregate_metrics,
+    aggregate_metrics,
     detector_sequence,
     save_json,
     validate_dataset,

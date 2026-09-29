@@ -136,6 +136,7 @@ from causal_harness import (
     CausalSchedulerState,
     build_replay_registry,
     aggregate_metrics,
+    aggregate_metrics,
     detector_sequence,
     save_json,
     validate_dataset,
@@ -1277,6 +1278,7 @@ def run_training() -> None:
         best_blob = torch.load(
             best_path,
             map_location=DEVICE,
+            weights_only=False,
         )
         model.load_state_dict(best_blob["model"])
 
