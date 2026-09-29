@@ -15,7 +15,8 @@ Important:
 
 import hashlib
 import json
-from collections import Counter
+from collections import Counter, defaultdict, OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -117,42 +118,281 @@ def load_train500_cache(cache_root: Path) -> dict[str, Any]:
     }
 
 
-def ensure_selected_pool_corpus(corpus_root: Path, cache: dict[str, Any]) -> Path:
-    """Build symlinks only; no HDF5 bytes are copied."""
-    corpus_root = Path(corpus_root)
-    source_train = corpus_root / "stare" / "train_stare"
-    target_train = Path(cache["runtime_pool_root"]) / "stare" / "train_stare"
-    target_train.mkdir(parents=True, exist_ok=True)
 
-    for config_id in cache["selected_config_ids"]:
-        src = source_train / f"{config_id}.h5"
-        if not src.exists():
-            raise FileNotFoundError(f"Selected source file missing: {src}")
-        dst = target_train / src.name
-        if dst.exists() or dst.is_symlink():
-            continue
-        try:
-            dst.symlink_to(src.resolve())
-        except OSError as exc:
+@dataclass(frozen=True)
+class CachedEmitterContribution:
+    """One cached emitter contribution from the frozen TRAIN-500 pool."""
+
+    stare_file: Path
+    scan_file: Path | None
+    npz_file: Path
+    source_label: int
+    recorded_pulse_count: int
+
+
+class CachedTSRDTrainWorldPool:
+    """
+    Cache-backed replacement for TSRDTrainWorldPool.sample_world().
+
+    The frozen TRAIN-500 preprocessing already stores each emitter's original
+    PDW history in the per-config NPZ cache. This runtime pool reuses those
+    histories instead of reading HDF5 ``data[:]`` for every fresh world.
+
+    Public contract intentionally matches the existing code path:
+
+        sample_world(seed, emitter_count) -> (env, sources)
+
+    The world composition remains sampled without replacement from the same
+    cached emitter-contribution pool. The selected emitter PDWs are rebuilt
+    into the same five-column TSRD ``stare_data`` representation before the
+    normal occupancy/environment construction.
+
+    A single anchor HDF5 is opened once at initialization to recover the
+    installed TSRD environment configuration/receiver geometry. It is not
+    touched during subsequent world generation.
+    """
+
+    def __init__(
+        self,
+        corpus_root: str | Path,
+        cache_root: str | Path,
+        cache: dict[str, Any],
+        *,
+        band_centres_mhz=None,
+        receiver_profile: str = "binary_v1",
+        amplitude_midpoint_db: float = -90.0,
+        amplitude_scale_db: float = 5.0,
+        max_observed_pdws: int = 32,
+        detection_probability: float = 0.90,
+        false_alarm_probability: float = 0.05,
+        retune_time_ms: float = 1.0,
+        npz_lru_size: int = 4,
+    ):
+        self.corpus_root = Path(corpus_root).resolve()
+        self.cache_root = Path(cache_root).resolve()
+        self.explicit_centres_mhz = (
+            None
+            if band_centres_mhz is None
+            else np.asarray(band_centres_mhz, dtype=np.float64)
+        )
+        self.receiver_profile_options = {
+            "receiver_profile": receiver_profile,
+            "amplitude_midpoint_db": amplitude_midpoint_db,
+            "amplitude_scale_db": amplitude_scale_db,
+            "max_observed_pdws": max_observed_pdws,
+        }
+        self.detection_probability = float(detection_probability)
+        self.false_alarm_probability = float(false_alarm_probability)
+        self.retune_time_ms = float(retune_time_ms)
+        self._npz_lru_size = max(1, int(npz_lru_size))
+        self._npz_lru: OrderedDict[str, Any] = OrderedDict()
+
+        selected = list(cache["selected_config_ids"])
+        if len(selected) != 500 or len(set(selected)) != 500:
             raise RuntimeError(
-                "The runtime environment cannot create symlinks. "
-                "Use Colab/Kaggle/Linux or create the 500-file selected corpus manually."
-            ) from exc
+                f"Cached runtime pool requires exactly 500 selected configs; got {len(selected)}"
+            )
 
-    files = sorted(target_train.glob("config_*.h5"), key=lambda p: int(p.stem.split("_")[-1]))
-    if len(files) != 500:
-        raise RuntimeError(f"Selected runtime corpus has {len(files)} HDF5 files; expected 500")
-    return target_train.parent.parent
+        anchor_file = (
+            self.corpus_root
+            / "stare"
+            / "train_stare"
+            / f"{selected[0]}.h5"
+        )
+        if not anchor_file.exists():
+            raise FileNotFoundError(f"Anchor HDF5 missing: {anchor_file}")
+
+        from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+
+        print(
+            "[CachedTSRDTrainWorldPool] "
+            f"one-time anchor read: {anchor_file.name}"
+        )
+        anchor = TSRDStareEnvironment.from_stare_mode(
+            stare_file=str(anchor_file),
+            scan_file=None,
+            band_centres_mhz=self.explicit_centres_mhz,
+            **self.receiver_profile_options,
+            detection_probability=self.detection_probability,
+            false_alarm_probability=self.false_alarm_probability,
+            retune_time_ms=self.retune_time_ms,
+        )
+
+        self.config = anchor.config
+        self.centres_mhz, self.halfwidth_mhz = anchor.receiver_geometry
+        del anchor
+
+        configs_root = self.cache_root / "configs"
+        if not configs_root.is_dir():
+            raise FileNotFoundError(f"Missing cache configs directory: {configs_root}")
+
+        contributions: list[CachedEmitterContribution] = []
+        for config_id in selected:
+            npz_file = configs_root / f"{config_id}.npz"
+            if not npz_file.exists():
+                raise FileNotFoundError(f"Cached config NPZ missing: {npz_file}")
+
+            with np.load(npz_file, allow_pickle=False) as z:
+                labels = np.asarray(z["emitter_labels"], dtype=np.int64).reshape(-1)
+                for label in np.unique(labels):
+                    label = int(label)
+                    toa_key = f"pdw_toa_us_{label}"
+                    pulse_key = f"total_pulses_{label}"
+                    if toa_key not in z.files:
+                        raise RuntimeError(f"Missing {toa_key} in {npz_file}")
+                    pulse_count = (
+                        int(np.asarray(z[pulse_key]).item())
+                        if pulse_key in z.files
+                        else int(np.asarray(z[toa_key]).shape[0])
+                    )
+                    if pulse_count <= 0:
+                        continue
+                    contributions.append(
+                        CachedEmitterContribution(
+                            stare_file=self.corpus_root / "stare" / "train_stare" / f"{config_id}.h5",
+                            scan_file=None,
+                            npz_file=npz_file,
+                            source_label=label,
+                            recorded_pulse_count=pulse_count,
+                        )
+                    )
+
+        if not contributions:
+            raise RuntimeError("Cached TRAIN-500 pool contains no emitter contributions")
+
+        self.contributions = contributions
+        print(
+            "[CachedTSRDTrainWorldPool] "
+            f"configs={len(selected):,} emitters={len(self.contributions):,}"
+        )
+
+    def _get_npz(self, path: Path):
+        key = str(path)
+        z = self._npz_lru.pop(key, None)
+        if z is not None:
+            self._npz_lru[key] = z
+            return z
+        z = np.load(path, allow_pickle=False)
+        self._npz_lru[key] = z
+        while len(self._npz_lru) > self._npz_lru_size:
+            _old_key, old_z = self._npz_lru.popitem(last=False)
+            try:
+                old_z.close()
+            except Exception:
+                pass
+        return z
+
+    def sample_world(self, seed: int, emitter_count: int):
+        if not 1 <= int(emitter_count) <= len(self.contributions):
+            raise ValueError(
+                f"emitter_count must be in [1, {len(self.contributions)}], got {emitter_count}"
+            )
+
+        from vyapti_simulator.tsrd.tsrd_adapter import stare_pulse_occupancy
+        from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+
+        rng = np.random.default_rng(int(seed))
+        chosen = rng.choice(
+            len(self.contributions),
+            size=int(emitter_count),
+            replace=False,
+        )
+
+        by_file: dict[Path, list[tuple[int, CachedEmitterContribution]]] = defaultdict(list)
+        for world_id, index in enumerate(chosen):
+            contribution = self.contributions[int(index)]
+            by_file[contribution.npz_file].append((world_id, contribution))
+
+        data_parts: list[np.ndarray] = []
+        label_parts: list[np.ndarray] = []
+        sources: list[dict[str, Any]] = []
+
+        for npz_file, requested in by_file.items():
+            z = self._get_npz(npz_file)
+            for world_id, contribution in requested:
+                label = int(contribution.source_label)
+                suffix = str(label)
+                keys = {
+                    "toa": f"pdw_toa_us_{suffix}",
+                    "frequency": f"pdw_frequency_mhz_{suffix}",
+                    "pulse_width": f"pdw_pulse_width_{suffix}",
+                    "aoa": f"pdw_aoa_deg_{suffix}",
+                    "amplitude": f"pdw_amplitude_dbm_{suffix}",
+                }
+                missing = [k for k in keys.values() if k not in z.files]
+                if missing:
+                    raise RuntimeError(
+                        f"Missing cached PDW arrays in {npz_file.name}, emitter {label}: {missing}"
+                    )
+
+                toa = np.asarray(z[keys["toa"]], dtype=np.float64)
+                frequency = np.asarray(z[keys["frequency"]], dtype=np.float64)
+                pulse_width = np.asarray(z[keys["pulse_width"]], dtype=np.float64)
+                aoa = np.asarray(z[keys["aoa"]], dtype=np.float64)
+                amplitude = np.asarray(z[keys["amplitude"]], dtype=np.float64)
+
+                n = len(toa)
+                if not (
+                    len(frequency) == len(pulse_width) == len(aoa) == len(amplitude) == n
+                ):
+                    raise RuntimeError(
+                        f"Cached PDW field length mismatch in {npz_file.name}, emitter {label}"
+                    )
+                if n == 0:
+                    continue
+
+                emitter_data = np.column_stack(
+                    (toa, frequency, pulse_width, aoa, amplitude)
+                )
+                data_parts.append(emitter_data)
+                label_parts.append(np.full(n, int(world_id), dtype=np.int64))
+                sources.append(
+                    {
+                        "world_emitter_id": int(world_id),
+                        "source_file": contribution.stare_file.relative_to(self.corpus_root).as_posix(),
+                        "source_label": label,
+                        "recorded_pulse_count": int(n),
+                    }
+                )
+
+        if not data_parts:
+            raise RuntimeError("Cached sample_world produced no PDWs")
+
+        data = np.concatenate(data_parts, axis=0)
+        labels = np.concatenate(label_parts, axis=0)
+
+        occupancy = stare_pulse_occupancy(
+            data,
+            self.centres_mhz,
+            self.halfwidth_mhz,
+            self.config.time_slots,
+        )
+
+        env = TSRDStareEnvironment(
+            self.config.band_count,
+            self.config.time_slots,
+            occupancy,
+            None,
+            self.config,
+            stare_data=data,
+            stare_labels=labels,
+            band_centres_mhz=self.centres_mhz,
+            passband_halfwidth_mhz=self.halfwidth_mhz,
+            **self.receiver_profile_options,
+            detection_probability=self.detection_probability,
+            false_alarm_probability=self.false_alarm_probability,
+            retune_time_ms=self.retune_time_ms,
+        )
+
+        return env, sorted(sources, key=lambda x: x["world_emitter_id"])
 
 
 def build_train_pool_from_cache(corpus_root: Path, cache_root: Path):
     cache = load_train500_cache(Path(cache_root))
-    selected_pool_root = ensure_selected_pool_corpus(Path(corpus_root), cache)
-
-    from vyapti_simulator.tsrd.world_pool import TSRDTrainWorldPool
-
-    pool = TSRDTrainWorldPool(
-        selected_pool_root,
+    pool = CachedTSRDTrainWorldPool(
+        corpus_root=Path(corpus_root),
+        cache_root=Path(cache_root),
+        cache=cache,
         band_centres_mhz=BAND_CENTRES_MHZ,
         receiver_profile=RECEIVER_PROFILE,
         amplitude_midpoint_db=AMPLITUDE_MIDPOINT_DB,
@@ -161,6 +401,7 @@ def build_train_pool_from_cache(corpus_root: Path, cache_root: Path):
         detection_probability=RECEIVER_DETECTION_PROBABILITY,
         false_alarm_probability=RECEIVER_FALSE_ALARM_PROBABILITY,
         retune_time_ms=RECEIVER_RETUNE_TIME_MS,
+        npz_lru_size=4,
     )
 
     actual = {Path(str(c.stare_file)).stem for c in pool.contributions}
@@ -168,12 +409,16 @@ def build_train_pool_from_cache(corpus_root: Path, cache_root: Path):
     if actual != expected:
         missing = sorted(expected - actual, key=config_sort_key)
         extra = sorted(actual - expected, key=config_sort_key)
-        raise RuntimeError(f"TSRDTrainWorldPool selected-config mismatch; missing={missing[:5]}, extra={extra[:5]}")
+        raise RuntimeError(
+            f"Cached runtime pool selected-config mismatch; missing={missing[:5]}, extra={extra[:5]}"
+        )
 
     cache_counts = Counter(str(x["config_id"]) for x in cache["emitter_index"])
     pool_counts = Counter(Path(str(c.stare_file)).stem for c in pool.contributions)
     if cache_counts != pool_counts:
-        raise RuntimeError("Cached emitter contribution counts do not match TSRDTrainWorldPool contributions")
+        raise RuntimeError(
+            "Cached emitter contribution counts do not match runtime cached pool"
+        )
 
     cache["pool"] = pool
     return pool, cache
