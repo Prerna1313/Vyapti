@@ -1333,4 +1333,5 @@ def run_training() -> None:
 # 9. RUN
 # ============================================================
 
-run_training()
+if __name__ == '__main__':
+    run_training()
