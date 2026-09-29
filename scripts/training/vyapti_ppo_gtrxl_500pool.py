@@ -420,7 +420,8 @@ class GTrXLActorCritic(nn.Module):
         memory update is used during rollout collection and PPO recomputation.
         """
         x = self.encoder(obs)
-        x = x.unsqueeze(1)  # (B, H) -> (B, 1, H)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)  # (B, H) -> (B, 1, H) for rollout path
         next_memories: list[torch.Tensor] = []
         valid = memory_valid_len
         for layer_idx, block in enumerate(self.blocks):
