@@ -128,6 +128,7 @@ from causal_harness import (
     TEST_FILES,
     CausalSchedulerState,
     build_replay_registry,
+    aggregate_metrics,
     detector_sequence,
     save_json,
     validate_dataset,
@@ -883,7 +884,7 @@ def evaluate_model(
         model.train()
 
     return {
-        "summary": summarize_validation(rows),
+        "summary": aggregate_metrics(rows),
         "rows": rows,
         "runtime_s": time.perf_counter() - t0,
     }
@@ -902,8 +903,8 @@ def checkpoint_better(
     # 3) higher emitter interception ratio
     criteria = (
         ("opportunity_interception_ratio", True),
-        ("median_censored_ttfi_s", False),
-        ("emitter_interception_ratio", True),
+        ("censored_median_ttfi_s", False),
+        ("pooled_unique_emitter_interception_rate", True),
     )
 
     for key, higher in criteria:

@@ -61,6 +61,7 @@ from causal_harness import (
     TEST_REPLAY_SEED,
     CausalSchedulerState,
     build_replay_registry,
+    aggregate_metrics,
     detector_sequence,
     save_json,
     validate_dataset,
@@ -547,7 +548,7 @@ def evaluate_model(model: GRUActorCritic, corpus_root: Path, registry: list[dict
             bar.set_postfix_str(f"elapsed={fmt_seconds(elapsed)} ETA={fmt_seconds(eta)}")
     finally:
         model.train()
-    return {"summary": summarize_validation(rows), "rows": rows, "runtime_s": time.perf_counter() - t0}
+    return {"summary": aggregate_metrics(rows), "rows": rows, "runtime_s": time.perf_counter() - t0}
 
 
 def checkpoint_better(current: dict[str, float], best: dict[str, float] | None) -> bool:
@@ -555,8 +556,8 @@ def checkpoint_better(current: dict[str, float], best: dict[str, float] | None) 
         return True
     criteria = (
         ("opportunity_interception_ratio", True),
-        ("median_censored_ttfi_s", False),
-        ("emitter_interception_ratio", True),
+        ("censored_median_ttfi_s", False),
+        ("pooled_unique_emitter_interception_rate", True),
     )
     for key, higher in criteria:
         a = float(current.get(key, np.nan))
