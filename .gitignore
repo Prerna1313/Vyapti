@@ -49,3 +49,6 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+
+# Frontend assets
+!frontend/**/*.png

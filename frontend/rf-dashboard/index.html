@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VYAPTI | RF Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{width:100vw;height:100vh;overflow:hidden;background:#0a0a0c;font-family:'Inter',sans-serif}
+
+    /* ── SWITCHER BAR ─────────────────────────────── */
+    .page-switcher-bar{position:fixed;top:0;left:0;z-index:10000;display:flex;align-items:center;height:46px;padding:0 14px;gap:10px;background:rgba(8,9,12,0.97);border-bottom:1px solid #1e2028;border-right:1px solid #1e2028;border-radius:0 0 12px 0;backdrop-filter:blur(14px);box-shadow:0 4px 28px rgba(0,0,0,.75),0 0 0 1px rgba(56,189,248,.07);pointer-events:all;user-select:none}
+
+    /* Logo */
+    .ps-brand{display:flex;align-items:center;gap:8px}
+    .ps-logo-img{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#fff;border:1.5px solid rgba(56,189,248,0.35);box-shadow:0 0 8px rgba(56,189,248,0.25),0 2px 8px rgba(0,0,0,0.5);flex-shrink:0;transition:box-shadow 0.2s}
+    .ps-logo-img:hover{box-shadow:0 0 14px rgba(56,189,248,0.55),0 2px 12px rgba(0,0,0,0.6)}
+    .ps-brand-name{font-family:'Chakra Petch',sans-serif;font-size:13px;font-weight:700;letter-spacing:.1em;color:#38bdf8;text-shadow:0 0 12px rgba(56,189,248,.45);white-space:nowrap}
+    .ps-divider{width:1px;height:26px;background:#22232c;flex-shrink:0}
+
+    /* ── CUSTOM DROPDOWN ──────────────────────────── */
+    .ps-dropdown{position:relative;flex-shrink:0}
+
+    .ps-dropdown-btn{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 9px;background:rgba(255,255,255,.04);border:1px solid #2a2b38;border-radius:8px;cursor:pointer;outline:none;transition:all .18s ease;min-width:170px}
+    .ps-dropdown-btn:hover{background:rgba(56,189,248,.06);border-color:rgba(56,189,248,.3)}
+    .ps-dropdown-btn.open{background:rgba(56,189,248,.08);border-color:rgba(56,189,248,.35);box-shadow:0 0 14px rgba(56,189,248,.1)}
+
+    .ps-dd-icon{width:14px;height:14px;color:#38bdf8;flex-shrink:0}
+    .ps-dd-labels{display:flex;flex-direction:column;align-items:flex-start;flex:1;min-width:0}
+    .ps-dd-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:#e2e8f0;line-height:1}
+    .ps-dd-sub{font-size:9px;font-weight:400;letter-spacing:.05em;color:#38bdf8;display:block;margin-top:2px;line-height:1}
+    .ps-dd-chevron{width:12px;height:12px;color:#52525b;flex-shrink:0;transition:transform .2s ease}
+    .ps-dropdown-btn.open .ps-dd-chevron{transform:rotate(180deg);color:#38bdf8}
+
+    /* Dropdown Menu */
+    .ps-dropdown-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:100%;background:rgba(12,13,16,0.98);border:1px solid #2a2b38;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.8),0 0 0 1px rgba(56,189,248,.06);overflow:hidden;opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity .18s ease,transform .18s ease,visibility .18s ease;z-index:100}
+    .ps-dropdown-menu.open{opacity:1;visibility:visible;transform:translateY(0)}
+
+    .ps-menu-item{display:flex;align-items:center;gap:9px;padding:8px 11px;cursor:pointer;transition:background .14s ease;border-bottom:1px solid #1a1b22}
+    .ps-menu-item:last-child{border-bottom:none}
+    .ps-menu-item:hover{background:rgba(56,189,248,.07)}
+    .ps-menu-item.active{background:rgba(56,189,248,.1)}
+
+    .ps-item-icon{width:14px;height:14px;color:#52525b;flex-shrink:0;transition:color .14s}
+    .ps-menu-item:hover .ps-item-icon,.ps-menu-item.active .ps-item-icon{color:#38bdf8}
+    .ps-item-labels{display:flex;flex-direction:column}
+    .ps-item-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:#a1a1aa;line-height:1;transition:color .14s}
+    .ps-item-sub{font-size:9px;font-weight:400;letter-spacing:.05em;color:#3f4050;display:block;margin-top:2px;line-height:1;transition:color .14s}
+    .ps-menu-item:hover .ps-item-label,.ps-menu-item.active .ps-item-label{color:#e2e8f0}
+    .ps-menu-item:hover .ps-item-sub,.ps-menu-item.active .ps-item-sub{color:#38bdf8}
+    .ps-item-check{width:13px;height:13px;color:#38bdf8;margin-left:auto;flex-shrink:0;opacity:0;transition:opacity .14s}
+    .ps-menu-item.active .ps-item-check{opacity:1}
+
+    /* ── IFRAMES ──────────────────────────────────── */
+    .page-iframe-wrap{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;transition:opacity .25s ease,visibility .25s ease}
+    .page-iframe-wrap--hidden{opacity:0;visibility:hidden;pointer-events:none}
+    .page-iframe{width:100%;height:100%;border:none;display:block}
+    @keyframes pageSlideIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .page-iframe-wrap:not(.page-iframe-wrap--hidden){animation:pageSlideIn .22s ease forwards}
+  </style>
+</head>
+<body>
+
+  <!-- ── PAGE SWITCHER BAR ── -->
+  <div class="page-switcher-bar" id="pageSwitcherBar">
+
+    <!-- Logo + Brand Name -->
+    <div class="ps-brand">
+      <img src="ultraHD-logo.png" alt="VYAPTI Logo" class="ps-logo-img" />
+      <span class="ps-brand-name">VYAPTI</span>
+    </div>
+    <span class="ps-divider"></span>
+
+    <!-- Custom Dropdown -->
+    <div class="ps-dropdown" id="psDropdown">
+
+      <!-- Trigger Button -->
+      <button class="ps-dropdown-btn" id="psDropdownBtn" onclick="toggleDropdown()" aria-haspopup="listbox" aria-expanded="false">
+        <!-- Icon updated by JS -->
+        <svg class="ps-dd-icon" id="psDropdownIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12h3l3-8 4 16 3-8 3 4 2-4"/>
+        </svg>
+        <div class="ps-dd-labels">
+          <span class="ps-dd-label" id="psDropdownLabel">RF Physics</span>
+          <span class="ps-dd-sub"   id="psDropdownSub">Simulation</span>
+        </div>
+        <!-- Chevron -->
+        <svg class="ps-dd-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      <!-- Dropdown Menu -->
+      <div class="ps-dropdown-menu" id="psDropdownMenu" role="listbox">
+
+        <div class="ps-menu-item active" id="psItemPhysics" role="option" onclick="selectPage('physics')">
+          <svg class="ps-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12h3l3-8 4 16 3-8 3 4 2-4"/>
+          </svg>
+          <div class="ps-item-labels">
+            <span class="ps-item-label">RF Physics</span>
+            <span class="ps-item-sub">Simulation</span>
+          </div>
+          <svg class="ps-item-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+
+        <div class="ps-menu-item" id="psItemReceiver" role="option" onclick="selectPage('receiver')">
+          <svg class="ps-item-icon" viewBox="0 0 28 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M2 9H7L10 2L14 16L18 6L21 12L24 9H28"/>
+          </svg>
+          <div class="ps-item-labels">
+            <span class="ps-item-label">RF Receiver</span>
+            <span class="ps-item-sub">Scheduler</span>
+          </div>
+          <svg class="ps-item-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+
+      </div>
+    </div><!-- /ps-dropdown -->
+
+  </div>
+
+  <!-- PAGE IFRAMES -->
+  <div class="page-iframe-wrap" id="pagePhysics">
+    <iframe id="framePhysics" src="page-physics.html" class="page-iframe" title="RF Physics Simulation"></iframe>
+  </div>
+  <div class="page-iframe-wrap page-iframe-wrap--hidden" id="pageReceiver">
+    <iframe id="frameReceiver" class="page-iframe" title="RF Receiver Scheduler" data-src="page-receiver.html"></iframe>
+  </div>
+
+  <script>
+    var currentPage = 'physics';
+    var receiverLoaded = false;
+    var dropdownOpen = false;
+
+    var pages = {
+      physics: {
+        label: 'RF Physics', sub: 'Simulation',
+        iconPath: 'M3 12h3l3-8 4 16 3-8 3 4 2-4',
+        iconViewBox: '0 0 24 24'
+      },
+      receiver: {
+        label: 'RF Receiver', sub: 'Scheduler',
+        iconPath: 'M2 9H7L10 2L14 16L18 6L21 12L24 9H28',
+        iconViewBox: '0 0 28 18'
+      }
+    };
+
+    function toggleDropdown() {
+      dropdownOpen = !dropdownOpen;
+      var btn  = document.getElementById('psDropdownBtn');
+      var menu = document.getElementById('psDropdownMenu');
+      btn.classList.toggle('open', dropdownOpen);
+      menu.classList.toggle('open', dropdownOpen);
+      btn.setAttribute('aria-expanded', dropdownOpen);
+    }
+
+    function closeDropdown() {
+      dropdownOpen = false;
+      document.getElementById('psDropdownBtn').classList.remove('open');
+      document.getElementById('psDropdownMenu').classList.remove('open');
+      document.getElementById('psDropdownBtn').setAttribute('aria-expanded', false);
+    }
+
+    function selectPage(page) {
+      closeDropdown();
+      if (page === currentPage) return;
+      currentPage = page;
+
+      var wP = document.getElementById('pagePhysics');
+      var wR = document.getElementById('pageReceiver');
+      var iP = document.getElementById('psItemPhysics');
+      var iR = document.getElementById('psItemReceiver');
+
+      var p = pages[page];
+      document.getElementById('psDropdownLabel').textContent = p.label;
+      document.getElementById('psDropdownSub').textContent   = p.sub;
+      var icon = document.getElementById('psDropdownIcon');
+      icon.setAttribute('viewBox', p.iconViewBox);
+      icon.querySelector('path').setAttribute('d', p.iconPath);
+
+      if (page === 'physics') {
+        wP.classList.remove('page-iframe-wrap--hidden');
+        wR.classList.add('page-iframe-wrap--hidden');
+        iP.classList.add('active'); iR.classList.remove('active');
+      } else {
+        wP.classList.add('page-iframe-wrap--hidden');
+        wR.classList.remove('page-iframe-wrap--hidden');
+        iP.classList.remove('active'); iR.classList.add('active');
+        if (!receiverLoaded) {
+          receiverLoaded = true;
+          var f = document.getElementById('frameReceiver');
+          f.src = f.getAttribute('data-src');
+        }
+      }
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+      if (dropdownOpen && !document.getElementById('psDropdown').contains(e.target)) {
+        closeDropdown();
+      }
+    });
+  </script>
+</body>
+</html>
