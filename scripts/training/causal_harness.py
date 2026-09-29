@@ -188,6 +188,12 @@ def build_train_recipes(pool: Any, *, seed: int = TRAIN_RECIPE_SEED) -> list[dic
     from the global world index so that every run produces identical worlds.
     """
     n_contributions = len(pool.contributions)
+    from collections import Counter
+    
+    # Compute empirical emitter-count distribution PER SOURCE FILE
+    file_counts = Counter(c.stare_file for c in pool.contributions)
+    count_distribution = np.asarray(list(file_counts.values()), dtype=np.int32)
+    
     rng = np.random.default_rng(int(seed))
     recipes: list[dict] = []
 
@@ -195,8 +201,8 @@ def build_train_recipes(pool: Any, *, seed: int = TRAIN_RECIPE_SEED) -> list[dic
         for world_in_epoch in range(TRAIN_WORLDS_PER_EPOCH):
             global_world = len(recipes)
 
-            # Sample emitter count reproducibly (random, but capped at 16 to prevent OOM)
-            emitter_count = int(rng.integers(2, 17))
+            # Sample n_emitters from the empirical distribution
+            emitter_count = int(rng.choice(count_distribution))
 
             # Fully deterministic world seed
             world_seed = int(seed + 1_000_003 * global_world)
