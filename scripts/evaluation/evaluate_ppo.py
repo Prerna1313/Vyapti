@@ -53,11 +53,11 @@ def main():
                 obs_dim = v.shape[1]
                 break
     print(f"Loading prior from {args.prior_dir}...")
+    prior_path = Path(args.prior_dir) / "pormab_transition.json"
+    fingerprint = json.loads(prior_path.read_text(encoding="utf-8")).get("source_pool_fingerprint", "")
     
     if args.algo == "gru":
         print("Building GRU Actor Critic...")
-        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
-        fingerprint = prior_path.stem.split("_")[1]
         transition, prior_active = gru_module.load_prior(Path(args.prior_dir), fingerprint)
         
         hidden_dim = blob["model"]["gru.weight_ih_l0"].shape[0] // 3
@@ -67,8 +67,6 @@ def main():
         
     elif args.algo == "gtrxl":
         print("Building GTrXL Actor Critic...")
-        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
-        fingerprint = prior_path.stem.split("_")[1]
         transition, prior_active = gtrxl_module.load_prior(Path(args.prior_dir), fingerprint)
         
         d_model = blob["model"]["value.0.weight"].shape[1]
@@ -83,8 +81,6 @@ def main():
         
     elif args.algo == "lstm":
         print("Building LSTM Actor Critic...")
-        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
-        fingerprint = prior_path.stem.split("_")[1]
         transition, prior_active = lstm_module.load_prior(Path(args.prior_dir), fingerprint)
         
         hidden_dim = blob["model"]["lstm.weight_ih_l0"].shape[0] // 4
