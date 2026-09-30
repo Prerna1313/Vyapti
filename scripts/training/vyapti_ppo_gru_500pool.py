@@ -627,6 +627,8 @@ def run_training(args: argparse.Namespace) -> None:
     save_json(output_dir / "val_replay_registry.json", val_registry)
 
     target_steps = PPO_TRAINING_STEPS if args.max_action_steps is None else min(PPO_TRAINING_STEPS, int(args.max_action_steps))
+    if getattr(args, "test_only", False):
+        target_steps = 0
     checkpoints = [x for x in CHECKPOINT_STEPS if x <= target_steps]
     manifest = {
         "algorithm": "PPO-GRU",
@@ -746,7 +748,7 @@ def run_training(args: argparse.Namespace) -> None:
     progress.close()
 
     # Final TEST exactly once after best validation checkpoint selection.
-    if not args.skip_test:
+    if getattr(args, "test_only", False) or not args.skip_test:
         best_path = output_dir / "best_validation.pt"
         if not best_path.exists():
             raise RuntimeError("No best_validation.pt exists; TEST cannot be run")
@@ -772,7 +774,7 @@ def run_training(args: argparse.Namespace) -> None:
         "rollout_actions": PPO_ROLLOUT_ACTIONS,
         "optimizer_epochs": PPO_OPTIMIZER_EPOCHS,
         "best_validation": best_summary,
-        "test": "completed once" if not args.skip_test else "skipped",
+        "test": "completed once" if (getattr(args, "test_only", False) or not args.skip_test) else "skipped",
         "runtime_s": time.perf_counter() - t0,
         "runtime": fmt_seconds(time.perf_counter() - t0),
     }
@@ -802,6 +804,7 @@ def main() -> None:
     ap.add_argument("--sequence-minibatch", type=int, default=DEFAULT_SEQUENCE_MINIBATCH)
     ap.add_argument("--max-action-steps", type=int, default=None)
     ap.add_argument("--skip-test", action="store_true")
+    ap.add_argument("--test-only", action="store_true")
     args = ap.parse_args()
     run_training(args)
 
