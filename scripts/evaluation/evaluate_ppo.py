@@ -8,16 +8,16 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from scripts.training.causal_harness import N_BANDS, load_prior, build_replay_registry
+from scripts.training.causal_harness import N_BANDS, build_replay_registry
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from vyapti_simulator.core.metrics import TrajectoryStep
 from vyapti_simulator.tsrd.benchmark_protocol import score_recorded_replay, _assert_scorecard_consistent, _seed_for_file
 from scripts.training.vyapti_ppo_components import PPOFeatureBuilder
 
-# Need to import the model definitions from their respective files
-from scripts.training.vyapti_ppo_gru_500pool import GRUActorCritic, evaluate_model as eval_gru
-from scripts.training.vyapti_ppo_gtrxl_500pool import GTrXLActorCritic, evaluate_model as eval_gtrxl
-from scripts.training.vyapti_ppo_lstm_500pool import LSTMActorCritic, evaluate_model as eval_lstm
+import scripts.training.vyapti_ppo_gru_500pool as gru_module
+import scripts.training.vyapti_ppo_gtrxl_500pool as gtrxl_module
+# The LSTM script is named vyapti_ppo_lstm_500pool_colab.py
+import scripts.training.vyapti_ppo_lstm_500pool_colab as lstm_module
 
 TEST_FILES = 100
 VAL_REPLAY_SEED = 42
@@ -40,9 +40,6 @@ def main():
     model_path = Path(args.model_path)
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found at {model_path}")
-        
-    print(f"Loading prior from {args.prior_dir}...")
-    transition, prior_active = load_prior(Path(args.prior_dir))
     
     print("Loading test registry...")
     test_registry = build_replay_registry(Path(args.corpus_root), "test", TEST_FILES)
@@ -50,36 +47,52 @@ def main():
     print(f"Loading model weights from {model_path}...")
     blob = torch.load(model_path, map_location=DEVICE, weights_only=False)
     
-    # Infer obs dimension
     obs_dim = blob["model"]["actor.0.weight"].shape[1]
+    
+    print(f"Loading prior from {args.prior_dir}...")
+    # Get the fingerprint from the blob metadata if it exists, otherwise use the cache root signature.
+    # The load_prior functions expect (prior_dir, fingerprint) in GRU/GTrXL, but sometimes they just 
+    # accept a path if modified. Let's inspect the module's load_prior argument count.
     
     if args.algo == "gru":
         print("Building GRU Actor Critic...")
-        # Note: hidden dim in the original training script might be 512, check from weight shapes
+        # Note: GRU load_prior requires (prior_dir, fingerprint). 
+        # We can extract the fingerprint from the prior_dir filenames (e.g. prior_{fingerprint}.npz)
+        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
+        fingerprint = prior_path.stem.split("_")[1]
+        transition, prior_active = gru_module.load_prior(Path(args.prior_dir), fingerprint)
+        
         hidden_dim = blob["model"]["gru.weight_ih_l0"].shape[0] // 3
-        model = GRUActorCritic(obs_dim, N_BANDS, hidden_dim).to(DEVICE)
+        model = gru_module.GRUActorCritic(obs_dim, N_BANDS, hidden_dim).to(DEVICE)
         model.load_state_dict(blob["model"])
-        test_summary = eval_gru(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
+        test_summary = gru_module.evaluate_model(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
         
     elif args.algo == "gtrxl":
         print("Building GTrXL Actor Critic...")
+        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
+        fingerprint = prior_path.stem.split("_")[1]
+        transition, prior_active = gtrxl_module.load_prior(Path(args.prior_dir), fingerprint)
+        
         d_model = blob["model"]["value.0.weight"].shape[1]
         n_layers = 0
         for k in blob["model"].keys():
             if k.startswith("gtrxl.layers.") and k.endswith(".mha.q_proj.weight"):
                 n_layers = max(n_layers, int(k.split(".")[2]) + 1)
-        # default memory_len to 64 if we can't infer it easily
         memory_len = 64
-        model = GTrXLActorCritic(obs_dim, N_BANDS, d_model=d_model, n_layers=n_layers, n_heads=8, memory_len=memory_len).to(DEVICE)
+        model = gtrxl_module.GTrXLActorCritic(obs_dim, N_BANDS, d_model=d_model, n_layers=n_layers, n_heads=8, memory_len=memory_len).to(DEVICE)
         model.load_state_dict(blob["model"])
-        test_summary = eval_gtrxl(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
+        test_summary = gtrxl_module.evaluate_model(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
         
     elif args.algo == "lstm":
         print("Building LSTM Actor Critic...")
+        prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
+        fingerprint = prior_path.stem.split("_")[1]
+        transition, prior_active = lstm_module.load_prior(Path(args.prior_dir), fingerprint)
+        
         hidden_dim = blob["model"]["lstm.weight_ih_l0"].shape[0] // 4
-        model = LSTMActorCritic(obs_dim, N_BANDS, hidden_dim).to(DEVICE)
+        model = lstm_module.LSTMActorCritic(obs_dim, N_BANDS, hidden_dim).to(DEVICE)
         model.load_state_dict(blob["model"])
-        test_summary = eval_lstm(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
+        test_summary = lstm_module.evaluate_model(model, Path(args.corpus_root), test_registry, transition, prior_active, args.feature_mode, args.dwell_slots, VAL_REPLAY_SEED)
     
     save_path = output_dir / "TEST_final.json"
     with open(save_path, "w") as f:
