@@ -46,8 +46,12 @@ def main():
     print(f"Loading model weights from {model_path}...")
     blob = torch.load(model_path, map_location=DEVICE, weights_only=False)
     
-    obs_dim = blob["model"]["actor.0.weight"].shape[1]
-    
+    obs_dim = 544
+    for k, v in blob["model"].items():
+        if "encoder" in k and "weight" in k:
+            if v.dim() == 2 and v.shape[1] > 500:
+                obs_dim = v.shape[1]
+                break
     print(f"Loading prior from {args.prior_dir}...")
     
     if args.algo == "gru":
