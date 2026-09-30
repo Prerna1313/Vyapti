@@ -1315,6 +1315,7 @@ def evaluate_model(
             np.max(action_count)
             / total_actions
         )
+        score["action_distribution"] = [int(x) for x in action_count]
         score["mean_policy_entropy"] = float(
             np.mean(entropies)
             if entropies

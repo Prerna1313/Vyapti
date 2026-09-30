@@ -1446,6 +1446,7 @@ def evaluate_model(
                 1,
             )
         )
+        score["action_distribution"] = [int(x) for x in action_counts]
 
         score["world_id"] = int(
             recipe["world_id"]
