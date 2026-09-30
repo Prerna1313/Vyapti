@@ -8,7 +8,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from scripts.training.causal_harness import N_BANDS, DEVICE, load_prior, build_replay_registry
+from scripts.training.causal_harness import N_BANDS, load_prior, build_replay_registry
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from vyapti_simulator.core.metrics import TrajectoryStep
 from vyapti_simulator.tsrd.benchmark_protocol import score_recorded_replay, _assert_scorecard_consistent, _seed_for_file
 from scripts.training.vyapti_ppo_components import PPOFeatureBuilder
