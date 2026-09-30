@@ -1,23 +1,22 @@
 import argparse
 import json
-import time
+import sys
 from pathlib import Path
-from typing import Any
 
-import numpy as np
+# Add scripts/training to Python path so all imports resolve flawlessly
+HERE = Path(__file__).resolve().parent
+TRAINING_DIR = HERE.parent / "training"
+if str(TRAINING_DIR) not in sys.path:
+    sys.path.insert(0, str(TRAINING_DIR))
+
 import torch
-from tqdm import tqdm
-
-from scripts.training.causal_harness import N_BANDS, build_replay_registry
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-from vyapti_simulator.core.metrics import TrajectoryStep
-from vyapti_simulator.tsrd.benchmark_protocol import score_recorded_replay, _assert_scorecard_consistent, _seed_for_file
-from scripts.training.vyapti_ppo_components import PPOFeatureBuilder
 
-import scripts.training.vyapti_ppo_gru_500pool as gru_module
-import scripts.training.vyapti_ppo_gtrxl_500pool as gtrxl_module
-# The LSTM script is named vyapti_ppo_lstm_500pool_colab.py
-import scripts.training.vyapti_ppo_lstm_500pool_colab as lstm_module
+from causal_harness import N_BANDS, build_replay_registry
+
+import vyapti_ppo_gru_500pool as gru_module
+import vyapti_ppo_gtrxl_500pool as gtrxl_module
+import vyapti_ppo_lstm_500pool_colab as lstm_module
 
 TEST_FILES = 100
 VAL_REPLAY_SEED = 42
@@ -50,14 +49,9 @@ def main():
     obs_dim = blob["model"]["actor.0.weight"].shape[1]
     
     print(f"Loading prior from {args.prior_dir}...")
-    # Get the fingerprint from the blob metadata if it exists, otherwise use the cache root signature.
-    # The load_prior functions expect (prior_dir, fingerprint) in GRU/GTrXL, but sometimes they just 
-    # accept a path if modified. Let's inspect the module's load_prior argument count.
     
     if args.algo == "gru":
         print("Building GRU Actor Critic...")
-        # Note: GRU load_prior requires (prior_dir, fingerprint). 
-        # We can extract the fingerprint from the prior_dir filenames (e.g. prior_{fingerprint}.npz)
         prior_path = list(Path(args.prior_dir).glob("prior_*.npz"))[0]
         fingerprint = prior_path.stem.split("_")[1]
         transition, prior_active = gru_module.load_prior(Path(args.prior_dir), fingerprint)
