@@ -45,8 +45,10 @@ under [`docs/audits/`](docs/audits/README.md) and are not current certifications
 
 ## Verification and limits
 
-On 2026-10-02, `python -m pytest -q --tb=short -p no:cacheprovider`
-completed with **702 passed**. The Mode-B evaluator now includes TRAIN-only
+On 2026-10-03, `python -m pytest -q --tb=short -p no:cacheprovider`
+completed with **703 passed**, including the revised v2 receiver timing,
+strongest-emitter attribution, and mission-normalized reward contract.
+The Mode-B evaluator includes TRAIN-only
 agility regimes, a privileged expected-OIR scheduler with separate censored
 TTFI comparisons, optional prediction scoring, and automatic three-seed pilot /
 five-seed final paired reporting. The inventory remains 250 TRAIN / 50 VAL /
@@ -58,6 +60,10 @@ SHA-256 hashes in the historical corpus inventory. The 250/50/50 STARE file
 IDs exactly matched the TRAIN-cache and held-out selections. The local report
 is `results/tsrd_local_subset_verification.json`. This verifies the retained
 subset's identity and integrity; the upstream download revision remains unknown.
+The active Mode-B environment specs now use `train250_recorded_pdw_v2`:
+300 us band-change retune, TRAIN SCAN-derived 29/7 dwell mapping, and the
+mission-normalized truth-based reward with normalized false-alarm rate. See
+the protocol for its exact terms and disclosure.
 
 On 2026-09-28, `python -m pytest -q --tb=line` completed with **632 passed**
 using `h5py` 3.16.0 from a temporary local dependency path. The syntax check

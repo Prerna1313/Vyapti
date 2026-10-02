@@ -4,5 +4,7 @@
   "module": "vyapti_simulator.system_b.tsrd.policies.ucb_prior",
   "api": "legacy_episode",
   "checkpoint_extension": ".json",
-  "settings": {}
+  "settings": {
+    "reward_bounds": [-0.01, 1.0]
+  }
 }

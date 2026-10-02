@@ -246,7 +246,7 @@ def build_stare_evaluation_world(
     receiver_profile: str = "binary_v1",
     detection_probability: float = 0.9,
     false_alarm_probability: float = 0.05,
-    retune_time_ms: float = 1.0,
+    retune_time_ms: float = 0.3,
     amplitude_midpoint_db: float = -90.0,
     amplitude_scale_db: float = 5.0,
     max_observed_pdws: int = 32,
@@ -281,7 +281,7 @@ def compose_heldout_world(
     world_seed: int, emitter_count: int, receiver_seed: int,
     band_centres_mhz=None, passband_halfwidth_mhz: float = 500.0,
     receiver_profile: str = "binary_v1", detection_probability: float = 0.9,
-    false_alarm_probability: float = 0.05, retune_time_ms: float = 1.0,
+    false_alarm_probability: float = 0.05, retune_time_ms: float = 0.3,
     time_offset_us: int = DEFAULT_TIME_OFFSET_US,
 ) -> tuple[TSRDStareEnvironment, list[dict]]:
     """Compose a deterministic VAL/TEST world solely from its named split.

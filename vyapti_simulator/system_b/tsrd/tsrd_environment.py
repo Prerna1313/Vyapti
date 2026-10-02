@@ -89,7 +89,7 @@ Usage (Kaggle)
     sim_cfg = SimulationConfig(
         band_count=36, total_spectrum_mhz=18000.0,
         receiver_ibw_mhz=500.0, dwell_time_ms=50.0,
-        retune_time_ms=1.0, time_slots=600,
+        retune_time_ms=0.3, time_slots=600,
     )
 
     adapter = TSRDAdapter(

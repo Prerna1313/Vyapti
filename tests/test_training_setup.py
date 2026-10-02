@@ -3,14 +3,17 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
+import numpy as np
 import pytest
 
 from tests.test_train250_cache import _small_pool
 from vyapti_simulator.system_b.tsrd.algorithm_interface import PublicState, PublicTransition
 from vyapti_simulator.system_b.tsrd.checkpoints import freeze_selection
-from vyapti_simulator.system_b.tsrd.experiment import evaluate, load_contract, train
+from vyapti_simulator.system_b.tsrd.experiment import (
+    _strongest_emitter_in_selected_window, evaluate, load_contract, train,
+)
 from vyapti_simulator.system_b.tsrd.training_setup import resolve_plan, resolve_setup
 
 
@@ -39,6 +42,20 @@ def test_public_state_cannot_carry_untyped_truth():
         PublicTransition(PublicState(0, None), 0, 0.0, PublicState(1, None), False, truth=True)
 
 
+def test_binary_cell_hit_truth_credit_selects_only_strongest_emitter():
+    world = SimpleNamespace(
+        recorded_pulses=(
+            np.asarray([[1_000.0, 105.0, 1.0, 0.0, -30.0],
+                        [2_000.0, 108.0, 1.0, 0.0, -12.0],
+                        [3_000.0, 104.0, 1.0, 0.0, -20.0]]),
+            np.asarray([11, 22, 33]),
+        ),
+        config=SimpleNamespace(slot_duration_s=lambda: 0.05),
+        receiver_geometry=(np.asarray([100.0]), 10.0),
+    )
+    assert _strongest_emitter_in_selected_window(world, 0, 0, 0.0) == 22
+
+
 def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(tmp_path, monkeypatch):
     module = ModuleType("test_replay_algorithm")
     instances = []
@@ -62,8 +79,8 @@ def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(
 
         def observe(self, transition, *, training):
             assert type(transition) is PublicTransition
-            assert transition.reward == float(transition.next_state.previous_observation.hit)
-            assert transition.next_state.time_slot == transition.state.time_slot + 1
+            assert transition.next_state.time_slot - transition.state.time_slot in (1, 2)
+            assert isinstance(transition.reward, float)
             if training:
                 self.replay.append(transition)
                 self.steps += 1
@@ -97,9 +114,36 @@ def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(
             {"id": f"{split}_world_000", "source_config_ids": ["config_9"], "world_seed": 17, "emitter_count": 1}]
     run = tmp_path / "run"
     train(config, run)
-    assert instances[0].steps == 1800
+    decisions = [json.loads(line) for line in (run / "train/steps.jsonl").read_text().splitlines()
+                 if "decision_reward" in json.loads(line)]
+    assert instances[0].steps == len(decisions)
+    assert 900 <= instances[0].steps <= 1800
     assert instances[0].terminals == 3
-    assert instances[0].updates == 1800 // 7
+    assert instances[0].updates == instances[0].steps // 7
+    previous_band_by_episode = {}
+    for item in decisions:
+        episode = item["episode"]
+        band = item["action_band"]
+        observation = item["observation"]
+        previous_band = previous_band_by_episode.get(episode)
+        expected_retune = 0.0003 if previous_band is not None and previous_band != band else 0.0
+        assert observation["retune_cost_s"] == expected_retune
+        previous_band_by_episode[episode] = band
+        reward = item["decision_reward"]
+        expected_utility = (reward["new_first_intercepts"] / reward["eligible_emitters"]
+                            if reward["eligible_emitters"] else 0.0)
+        elapsed_seconds = item["dwell_slots"] * 0.05 + expected_retune
+        expected_elapsed = (reward["unresolved_emitters_before_action"]
+                            / reward["eligible_emitters"] * elapsed_seconds / 30.0
+                            if reward["eligible_emitters"] else 0.0)
+        expected_false_alarm_cost = (
+            reward["false_alarms"] / reward["empty_opportunities"] * elapsed_seconds / 30.0
+            if reward["empty_opportunities"] else 0.0)
+        assert reward["new_intercept_utility"] == pytest.approx(expected_utility)
+        assert reward["elapsed_cost"] == pytest.approx(expected_elapsed)
+        assert reward["false_alarm_cost"] == pytest.approx(expected_false_alarm_cost)
+        assert reward["reward"] == pytest.approx(
+            expected_utility - expected_elapsed - expected_false_alarm_cost)
     index = json.loads((run / "checkpoints/index.json").read_text())["checkpoints"]
     assert [r["file"] for r in index] == ["episode_000001.json", "episode_000002.json", "final.json"]
     assert [r["receiver_steps"] for r in index] == [600, 1200, 1800]

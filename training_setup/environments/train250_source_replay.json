@@ -1,5 +1,5 @@
 {
-  "contract_version": "train250_recorded_pdw_v1",
+  "contract_version": "train250_recorded_pdw_v2",
   "claim": "TSRD emitter-realization compositional scheduler development; synthetic cross-source arrangements, no global RF physics reconstruction",
   "beam_and_illumination_state": "unobserved in source STARE PDWs; hidden periodic and CTMC visibility gates are applied in evaluation only",
   "data_root": "../../Data",
@@ -8,17 +8,26 @@
   "receiver": {
     "profile": "binary_v1",
     "detector_model": "recorded_stare_bernoulli",
+    "band_count": 36,
+    "mission_duration_s": 30.0,
+    "base_slot_duration_ms": 50.0,
+    "receiver_bandwidth_mhz": 1000.0,
+    "band_spacing_mhz": 500.0,
+    "spectrum_mhz": [0.0, 18000.0],
     "band_centres_mhz": "250 + 500 * band_index, band_index=0..35",
     "passband_halfwidth_mhz": 500.0,
     "detection_probability": 0.9,
     "false_alarm_probability": 0.05,
-    "retune_time_ms": 1.0
+    "retune_time_ms": 0.3,
+    "same_band_retune_time_ms": 0.0,
+    "band_change_retune_time_ms": 0.3,
+    "retune_time_rationale": "Published QoS electronic-support receiver-search simulation assumption; not a universal receiver specification."
   },
   "action": {
     "band_indices": "0..35",
-    "dwell_slots": [
-      1
-    ]
+    "base_dwell_slot_duration_ms": 50.0,
+    "dwell_slots_by_band": [2, 2, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    "dwell_profile_source": "TRAIN SCAN metadata; identical across retained scan/train_scan files"
   },
   "observation": [
     "time_slot",
@@ -28,7 +37,19 @@
     "dwell_elapsed_s",
     "receiver_metadata"
   ],
-  "reward": "detector_positive: +1 for an observed hit, 0 otherwise; no hidden truth to policy",
+  "reward": {
+    "name": "truth_based_intercept_utility_v2",
+    "equation": "N_new/E - (U_before/E)*(dwell_seconds + 0.0003*band_change)/30.0 - lambda_fa*(F_t/N_empty_t)*(dwell_seconds + 0.0003*band_change)/30.0",
+    "new_first_intercepts": "at most one strongest-amplitude in-band emitter per positive occupied binary_v1 base-slot look, deduplicated across the episode",
+    "eligible_emitters": "unique emitters with at least one in-scope pulse opportunity in the hidden world during the mission; independent of scheduler observations",
+    "unresolved_emitters_before_action": "eligible emitters not intercepted before this action",
+    "false_alarms": "positive detector results in empty selected base-slot opportunities during the action",
+    "empty_opportunities": "selected base-slot windows with no in-band recorded pulses during the action",
+    "lambda_fa": 1.0,
+    "mission_duration_s": 30.0,
+    "false_alarm_zero_denominator_rule": "false-alarm contribution is zero when N_empty_t is zero",
+    "reward_channel": "scalar algorithm reward; emitter identities and truth remain absent from observations"
+  },
   "world_sampling": "empirical TRAIN-250 emitter count; uniform distinct source configs then uniform complete emitter trace within each source; independent seeded additive ToA offsets",
   "metrics": {
     "conditional_pd": "true detections / selected eligible band-slot windows",

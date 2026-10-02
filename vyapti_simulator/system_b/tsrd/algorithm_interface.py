@@ -55,8 +55,9 @@ class Algorithm(Protocol):
 
 class LegacyEpisodeAdapter:
     """Keep previously saved UCB/episode-based runs replayable."""
-    def __init__(self, policy):
+    def __init__(self, policy, *, reward_bounds=None):
         self.policy = policy
+        self.reward_bounds = reward_bounds
         self.history = []
 
     def reset_episode(self, *, training):
@@ -68,7 +69,11 @@ class LegacyEpisodeAdapter:
 
     def observe(self, transition, *, training):
         observation = transition.next_state.previous_observation
-        self.policy.observe(observation)
+        reward_observer = getattr(self.policy, "observe_reward", None)
+        if self.reward_bounds is not None and callable(reward_observer):
+            reward_observer(transition.action, transition.reward, self.reward_bounds)
+        else:
+            self.policy.observe(observation)
         self.history.append(observation)
 
     def end_episode(self, *, training):
@@ -104,9 +109,23 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
         raise ValueError("Algorithm module must export create")
     settings = deepcopy(spec.get("settings", {}))
     if spec.get("api") == "legacy_episode":
+        reward_bounds = settings.pop("reward_bounds", None)
         if settings:
-            raise ValueError("Legacy episode factories do not accept algorithm settings")
-        algorithm = LegacyEpisodeAdapter(factory(bands, seed, checkpoint))
+            raise ValueError("Legacy episode factories only accept the runner's reward_bounds setting")
+        if reward_bounds is not None and (
+                not isinstance(reward_bounds, list) or len(reward_bounds) != 2
+                or not all(math.isfinite(float(value)) for value in reward_bounds)
+                or float(reward_bounds[0]) >= float(reward_bounds[1])):
+            raise ValueError("reward_bounds must be a finite [minimum, maximum] pair")
+        is_v2 = config.get("contract_version") == "train250_recorded_pdw_v2"
+        if not is_v2:
+            reward_bounds = None
+        elif reward_bounds is None:
+            raise ValueError("A legacy policy used with v2 must declare reward_bounds")
+        legacy_policy = factory(bands, seed, checkpoint)
+        if reward_bounds is not None and not callable(getattr(legacy_policy, "observe_reward", None)):
+            raise ValueError("A legacy policy used with v2 must implement observe_reward")
+        algorithm = LegacyEpisodeAdapter(legacy_policy, reward_bounds=reward_bounds)
     elif spec.get("api") == "public_transitions":
         algorithm = factory(bands=bands, seed=seed, settings=settings, checkpoint=checkpoint)
     else:

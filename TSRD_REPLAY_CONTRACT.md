@@ -35,10 +35,19 @@ The validation reference profile is `binary_v1` with `fixed_50_ms` dwells,
 file, passband half-width from the HDF5 receiver attribute, detection
 probability 0.9, false-alarm probability 0.05, and 1 ms retune time. These
 probabilities and retune time are **declared simulator assumptions**, not
-measured TSRD hardware properties. A different value or `pdw_v2` profile is a
-separate experiment and requires a new profile ID and report. The original
-scan recording contains both 50 and 100 ms dwells; it does not validate the
-replay's 50 ms decision model or any two-look 100 ms model.
+measured TSRD hardware properties. The original scan recording contains both
+50 and 100 ms dwells; that metadata motivates the new v2 band dwell profile,
+but does not prove whether a 100 ms observation should be one integrated
+detection or two 50 ms detection opportunities. The v1 profile below remains
+the earlier fixed-50-ms reference.
+
+This is the earlier `fixed_50_ms` reference profile. The current Mode-B
+training contract is versioned separately as `train250_recorded_pdw_v2`; it
+uses the 300 us retune assumption, the TRAIN-derived 50/100 ms band dwell map,
+and a truth-based scalar reward. These are a separate experiment contract,
+while `binary_v1` continues to identify the Bernoulli receiver model. See
+[`docs/protocols/mode-b-evaluation.md`](docs/protocols/mode-b-evaluation.md)
+for that contract. The legacy reference values above remain unchanged.
 
 The replay time origin is **assumed** to be ToA zero, with a `[0,30 s)`
 analytical window aligned to the recorded scan schedule. This is a scheduler

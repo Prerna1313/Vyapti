@@ -1,5 +1,10 @@
 # TSRD replay benchmark
 
+This standalone callback benchmark preserves its earlier illustrative 1 ms
+retune setting. The current TRAIN-250 Mode-B trainer uses the separately
+versioned v2 contract and 300 us retune assumption; see
+[`docs/protocols/mode-b-evaluation.md`](docs/protocols/mode-b-evaluation.md).
+
 Set `corpus_root` to the Hugging Face snapshot's `data` directory. The expected
 layout is `stare/{train,val,test}_stare/config_*.h5` and matching
 `scan/{train,val,test}_scan/config_*.h5`. Keep the three source splits distinct.

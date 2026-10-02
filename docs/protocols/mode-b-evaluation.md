@@ -9,6 +9,53 @@ not claim a 250-world VAL or TEST set; obtain additional held-out source files
 before making that claim. Do not manufacture extra source records by relabeling
 or repeatedly composing the current 50 files.
 
+## Canonical receiver and reward (Mode-B contract v2)
+
+The active Mode-B setup uses a 30 s mission divided into 600 base slots of
+50 ms. Its receiver spans 0–18 GHz with 36 overlapping 1 GHz passbands spaced
+500 MHz apart. A band change costs 300 us (0.3 ms); staying on the same band
+costs zero. The 300 us value is the RF-switch dead time in the example receiver
+of Apfeld, Charlish, and Koch's QoS electronic-support search paper. It is a
+published simulation parameter, not a universal hardware claim. The paper adds
+switch dead time to dwell when accounting for receiver resource. [Paper](https://doi.org/10.1109/SSPD.2017.8233257).
+
+Each band has a fixed native dwell from retained TRAIN SCAN metadata. Bands
+0, 1, 6, 7, 17, 18, and 19 (zero-based) consume two 50 ms slots; the other 29
+consume one slot. The same 29/7 profile was present in all ten retained
+TRAIN SCAN files. A scheduler chooses a band; that band's frozen profile
+determines its dwell. Each base slot still produces a separate receiver
+observation for scorecard replay.
+
+Training uses the following scalar reward per band decision:
+
+```text
+N_new / E
+- (U_before / E) * (actual_dwell_seconds + switch * 0.0003) / 30
+- lambda_FA * (F_t / N_empty_t)
+    * (actual_dwell_seconds + switch * 0.0003) / 30
+```
+
+`E` is the count of eligible emitters with an in-scope pulse opportunity in
+the hidden world, independent of scheduler observations. `U_before` is the
+number of those emitters not intercepted before the action. A binary-v1 hit is
+cell-level, so the reward credits at most one emitter per positive occupied
+50 ms look: the emitter with the strongest recorded in-band pulse in that
+look. First interceptions are deduplicated over the episode. `dwell` is the
+actual 50/100 ms action dwell, shortened at the mission end. `switch` is one
+when the band changes and zero otherwise; the first selection has no switch
+cost. `F_t` counts positive detections in empty selected base-slot windows,
+and `N_empty_t` counts empty selected windows. The false-alarm term is zero
+when `N_empty_t` is zero; otherwise it uses the observed false-alarm fraction.
+`lambda_FA` is frozen at 1.0.
+
+Thus, 30 s of unresolved dwell accumulates one normalized mission-time unit,
+rather than one penalty unit per 50 ms look; retune dead time adds its small
+fraction of mission resource. Hidden pulse provenance is used only to calculate the
+scalar reward and audit fields. Receiver observations still exclude emitter
+identities, labels, and occupancy. Results must identify this as the
+truth-based `truth_based_intercept_utility_v2` reward contract. Historical v1
+snapshots retain their original contract.
+
 All held-out source IDs, composed-world recipes, receiver seeds, and
 illumination seeds are fixed in
 `training_setup/evaluation/heldout_worlds.json`. Every algorithm and training

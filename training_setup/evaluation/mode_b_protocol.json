@@ -15,6 +15,32 @@
     "final_comparison": [101, 202, 303, 404, 505]
   },
   "primary_metric": "opportunity_interception_ratio",
+  "canonical_receiver": {
+    "mission_duration_s": 30.0,
+    "base_slot_duration_ms": 50.0,
+    "base_slots": 600,
+    "band_count": 36,
+    "receiver_bandwidth_mhz": 1000.0,
+    "band_spacing_mhz": 500.0,
+    "spectrum_mhz": [0.0, 18000.0],
+    "band_change_retune_ms": 0.3,
+    "same_band_retune_ms": 0.0,
+    "dwell_profile_source": "retained TRAIN SCAN metadata",
+    "dwell_50ms_band_count": 29,
+    "dwell_100ms_band_count": 7,
+    "dwell_100ms_band_indices_zero_based": [0, 1, 6, 7, 17, 18, 19],
+    "retune_value_status": "published QoS ES search simulation parameter, not a universal hardware claim"
+  },
+  "training_reward": {
+    "name": "truth_based_intercept_utility_v2",
+    "equation": "N_new/E - (U_before/E)*(dwell_seconds + 0.0003*switch)/30 - lambda_fa*(F_t/N_empty_t)*(dwell_seconds + 0.0003*switch)/30",
+    "new_intercept_utility": "N_new / E; credit at most the strongest-amplitude emitter in each positive occupied binary_v1 base-slot look; deduplicate first interceptions across the episode",
+    "elapsed_cost": "(unresolved emitters before action / eligible emitters) * (dwell seconds + band-change retune seconds) / 30 seconds",
+    "false_alarm_cost": "lambda_fa * (false-positive empty base-slot looks / empty base-slot opportunities) * (dwell + retune) / 30 seconds; zero when there are no empty opportunities",
+    "lambda_fa": 1.0,
+    "retune_dead_time_s": 0.0003,
+    "truth_channel": "scalar reward only; no emitter identity or hidden truth in observation"
+  },
   "oracle": {
     "label": "Privileged Oracle Scheduler / Upper-Bound Scheduler",
     "oir_gap": "per_world_oir_privileged_minus_policy_with_paired_95_percent_ci",

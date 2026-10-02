@@ -18,6 +18,8 @@ The composed environment uses the existing TRAIN-250 source cache. Its 50 VAL
 and 50 TEST recipes and seeds were migrated without resampling. Periodic and
 CTMC illumination are evaluation-only transforms of those same worlds. The
 source-replay environment evaluates the 50 original recordings instead.
+Both active Mode-B specs use contract v2: 300 us band-change retune, zero
+same-band retune, and the TRAIN SCAN-derived 29/7 native dwell profile.
 
 Use an explicit run plan:
 
@@ -56,15 +58,21 @@ weights. `end_episode` may return JSON-serializable update diagnostics, which ar
 saved to `train/algorithm_updates.jsonl`.
 
 `PublicState` contains only the slot and previous typed receiver observation.
-`PublicTransition` contains current state, action, detector-positive reward,
+`PublicTransition` contains current state, action, scalar training reward,
 next state, and terminal/truncation flags. Closed observation records exclude
 source IDs, emitter types, future pulses, hidden occupancy and illumination.
 For recurrence, an adapter manages its own memory and resets it between worlds.
-The exact six-field receiver contract, 36 discrete bands and fixed dwell apply
-to every algorithm. Standard continuous-action SAC needs an appropriate adapter
-or an explicitly revised action contract; discrete SAC can fit the current one.
+The v2 receiver contract has 36 discrete bands and a TRAIN SCAN-derived dwell
+profile: 29 bands consume one 50 ms slot and 7 bands consume two. The selected
+band determines its dwell duration; algorithms still return one band index.
+Standard continuous-action SAC needs an appropriate adapter or an explicitly
+revised action contract; discrete SAC can fit the current one.
 
 `legacy_episode` wraps existing episode-based implementations such as UCB.
+For v2, a legacy adapter must also implement `observe_reward(band, reward,
+bounds)` and declare finite `reward_bounds` in its algorithm spec so it learns
+from the frozen scalar reward rather than silently reverting to raw detector
+hits. The supplied UCB uses the frozen v2 reward range `[-0.01, 1.0]`.
 There is no PPO-specific branch in the runner. The earlier recurrent PPO example
 is retained under `vyapti_simulator/system_b/tsrd/prototypes/`; it has no active spec,
 trained weights or validation claim. Select the actual implementation before
@@ -131,12 +139,20 @@ offset provenance is logged per episode. Unknown type/mode/revision stays unknow
 Held-out emitter-count sampling is conditioned on counts feasible under the
 50-source deduplication limit, with original distributions stored in the recipe.
 
-The active receiver is recorded-PDW Bernoulli detection: Pd=0.9 for an eligible
-selected window and Pfa=0.05 for an empty window. `hit` means a trigger, including
-false alarms, and the current training reward is +1 for that public trigger.
-Evaluator truth alone separates true hits and false alarms; model selection uses
-VAL_NORMAL pooled recorded opportunity interception ratio. If the objective or
-reward changes, freeze a new environment specification before comparing models.
+The active receiver uses a Bernoulli observation: P(hit)=0.9 in a selected
+window containing an in-band pulse and P(hit)=0.05 in an empty window. A band
+change costs 0.3 ms; staying on the same band costs zero. The v2 scalar reward
+normalizes first-intercept utility by eligible emitters, unresolved receiver
+time by the 30 s mission duration, and false alarms by empty selected looks
+before applying that same mission-time fraction. A positive occupied binary_v1
+look credits at most the emitter with the strongest recorded in-band pulse;
+one cell hit never credits all co-occurring emitters. Retune dead time is
+already included in elapsed receiver resource, with no separate switch penalty.
+Reward uses evaluator-side truth, but observations contain no emitter identities
+or occupancy. Reward components are retained in the audit logs. Model selection
+uses VAL_NORMAL pooled recorded opportunity interception ratio. The 0.3 ms
+retune is the RF-switch dead time used in the cited QoS ES simulation example,
+not a universal hardware specification.
 
 Periodic visibility uses a 2 s cycle and 10% duty, with seeded emitter phases.
 Stochastic visibility uses a two-state CTMC with 0.2 s mean illuminated residence
