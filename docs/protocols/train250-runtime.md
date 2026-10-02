@@ -2,6 +2,11 @@
 
 This is the small-pool development setup, not the final full-pool experiment. It is scheduler-agnostic: training code interacts with `TSRDStareEnvironment`, never with NPZ internals or source labels.
 
+Shared environment, frozen evaluation recipes, selected algorithm settings and
+explicit run budgets now live separately under `training_setup/`. See
+[the current training guide](../../training_setup/README.md) for the public
+transition adapter interface, CLI, periodic checkpoints and VAL selection.
+
 ## Inputs and outputs
 
 - Original TRAIN recordings: `Data/stare/train_stare/*.h5` (250 selected configurations).
@@ -15,7 +20,7 @@ The cache is derived data, not an alternative ground truth. `docs/audits/train25
 
 ```python
 import numpy as np
-from vyapti_simulator.tsrd.train250_cache import (
+from vyapti_simulator.system_b.tsrd.train250_cache import (
     build_train_pool_from_cache,
     sample_fresh_training_world,
     write_runtime_manifest,
@@ -33,7 +38,7 @@ observation, reward, done = world.step_training(0)
 # Keep evaluator_only_sources and cache metadata outside its observation.
 ```
 
-`sample_fresh_training_world` draws emitter count from the empirical selected-configuration distribution, samples whole cached emitter histories without replacement, preserves the five PDW fields and each emitter's ToA chronology, then composes a new world. The returned world has a fresh seed and is reset. `pool.sample_world(seed, emitter_count)` allows an explicit deterministic recipe. This is compositional replay of recorded receiver-side PDWs; it does **not** invent a beam/illumination process or propagation physics.
+`sample_fresh_training_world` draws emitter count from the empirical selected-configuration distribution and samples at most one complete emitter history per source config. A seeded additive ToA offset per emitter preserves every pulse and relative timing; frequency, PW, AoA and amplitude are unchanged. The returned world has a fresh seed and is reset. `pool.sample_world(seed, emitter_count)` allows an explicit deterministic recipe. This is compositional replay of recorded receiver-side PDWs; it does **not** invent TRAIN beam/illumination or propagation physics.
 
 The receiver contract defaults to the cache manifest: `binary_v1`, detection probability 0.9, false-alarm probability 0.05, retune time 1 ms. Geometry is explicit: 36 centres at `250 + 500*b` MHz, nominal halfwidth 500 MHz, and 600 slots of 50 ms. Freeze any changed receiver options in each run manifest, for example:
 
@@ -51,7 +56,7 @@ write_runtime_manifest(
 ## Held-out source replay
 
 ```python
-from vyapti_simulator.tsrd.train250_cache import build_stare_evaluation_world
+from vyapti_simulator.system_b.tsrd.train250_cache import build_stare_evaluation_world
 
 world = build_stare_evaluation_world(
     "Data", "val", "config_9", receiver_seed=12345
@@ -60,8 +65,14 @@ world = build_stare_evaluation_world(
 
 Use actual filenames from the held-out split. `split` accepts only `val` or `test`; the function cannot read TRAIN or the NPZ cache. This is original-source replay, not composed held-out worlds. Freeze lists of evaluation config IDs, world/receiver seeds, policy checkpoint and metric definitions before comparing methods. Use VAL for tuning; repeated TEST-driven choices turn TEST into development data.
 
-## Scope still missing
+## Current scope
 
-This delivers the storage adapter and usable causal receiver boundary. It does not yet provide a final scheduler training program, Gym wrapper, compositional held-out worlds, illumination/beam physics, synchronization sweeps, or full episode audit logs. Those require separately specified experiment protocols. Do not interpret an intercept in this baseline as a validated spatial-beam interception.
+The runner now records complete public transitions and episode audits, composes
+frozen held-out worlds, supports checkpoint intervals and freezes one selection
+from VAL before final TEST. Algorithms own replay/rollout buffers and optimization;
+no neural implementation is selected by default. Evaluation-only periodic/CTMC
+visibility gates are controlled synthetic stress conditions. Global propagation,
+measured beam state and independent physical synchronization validation remain
+outside this recorded-PDW claim.
 
 Existing historical audit reports describe the state before this migration and should be read with this runtime document for the current paths and repaired geometry interface.

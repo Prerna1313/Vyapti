@@ -1,7 +1,7 @@
 """Regenerate a run's saved learning and evaluation figures."""
 
 import argparse
-from vyapti_simulator.tsrd.experiment import plot_run
+from vyapti_simulator.system_b.tsrd.experiment import plot_run
 
 
 def main():

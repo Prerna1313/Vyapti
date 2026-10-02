@@ -1,0 +1,60 @@
+{
+  "schema": "mode_b_evaluation_protocol",
+  "data_inventory": {
+    "train_source_files": 250,
+    "val_source_files": 50,
+    "test_source_files": 50,
+    "val_role": "fixed_model_selection",
+    "test_role": "sealed_final_evaluation",
+    "test_requires_explicit_final": true,
+    "separate_dev_val_final_val": false,
+    "reason": "Current corpus provides only 50 VAL files; do not reuse them as independent DEV-VAL and FINAL-VAL sets."
+  },
+  "training_seeds": {
+    "development": [11, 22, 33],
+    "final_comparison": [101, 202, 303, 404, 505]
+  },
+  "primary_metric": "opportunity_interception_ratio",
+  "oracle": {
+    "label": "Privileged Oracle Scheduler / Upper-Bound Scheduler",
+    "oir_gap": "per_world_oir_privileged_minus_policy_with_paired_95_percent_ci",
+    "ttfi": "report_distribution_and_censoring_separately; ratio_policy_over_privileged_when_defined",
+    "available_in_current_evaluator": true,
+    "absolute_optimum_claim": false
+  },
+  "frequency_agility": {
+    "source": "complete_unmodified_train_tsrd_emitter_trajectories",
+    "regimes": ["low", "medium", "high"],
+    "fit_on_train_only": true,
+    "channel_width_mhz": 500.0,
+    "channel_origin_mhz": 0.0,
+    "primary_feature": "mean_emitter_channel_transition_rate_hz",
+    "dataset_paper": "https://arxiv.org/html/2602.03856v2",
+    "features": [
+      "observed_channel_transition_rate_hz",
+      "median_complete_channel_dwell_s",
+      "frequency_span_mhz",
+      "distinct_observed_frequencies",
+      "distinct_channels_visited",
+      "transition_interval_time_fraction"
+    ],
+    "synthetic_hop_transformations_in_primary_suite": false,
+    "stratified_replay_implemented": true
+  },
+  "prediction_metrics": {
+    "required_for_all_algorithms": false,
+    "optional_target": "next_slot_activity_probability_for_36_bands",
+    "metrics": ["brier_score", "log_loss", "calibration", "per_band_precision_recall_f1"],
+    "intercept_time_error_requires_explicit_prediction": true
+  },
+  "uncertainty": {
+    "world_comparison": "paired_per_world_metric_differences",
+    "bootstrap": "paired_percentile_resampling_with_replacement",
+    "confidence": 0.95,
+    "resamples": 10000,
+    "bootstrap_seed": 20261002,
+    "seed_variability_reported_separately": true
+  },
+  "conditions": ["normal", "beam_periodic", "beam_stochastic"],
+  "test_policy": "evaluate_once_after_checkpoint_and_analysis_are_frozen"
+}

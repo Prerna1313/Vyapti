@@ -24,8 +24,8 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd import TSRDAdapter, TSRDDataMode
-from vyapti_simulator.tsrd.tsrd_emitter import TSRDEmitterSampler
+from vyapti_simulator.system_b.tsrd import TSRDAdapter, TSRDDataMode
+from vyapti_simulator.system_b.tsrd.tsrd_emitter import TSRDEmitterSampler
 
 
 # =====================================================================
@@ -164,7 +164,7 @@ class TestSamplerUsesReceiverPosition:
 
     def test_default_no_receiver_position_uses_50km(self, monkeypatch):
         """With default receiver_position_km=None, uses 50 km fallback."""
-        from vyapti_simulator.tsrd import tsrd_emitter
+        from vyapti_simulator.system_b.tsrd import tsrd_emitter
 
         stats = self._make_stats()
         monkeypatch.setattr(
@@ -183,7 +183,7 @@ class TestSamplerUsesReceiverPosition:
 
     def test_explicit_receiver_position_recorded(self, monkeypatch):
         """With receiver_position_km=(100,100), the provenance records it."""
-        from vyapti_simulator.tsrd import tsrd_emitter
+        from vyapti_simulator.system_b.tsrd import tsrd_emitter
 
         stats = self._make_stats()
         monkeypatch.setattr(
@@ -206,7 +206,7 @@ class TestSamplerUsesReceiverPosition:
 
     def test_shadowing_diffraction_recorded(self, monkeypatch):
         """The per-emitter shadowing/diffraction draws are in provenance."""
-        from vyapti_simulator.tsrd import tsrd_emitter
+        from vyapti_simulator.system_b.tsrd import tsrd_emitter
 
         stats = self._make_stats()
         monkeypatch.setattr(
@@ -240,7 +240,7 @@ class TestLongRangePathLoss:
 
     def test_long_range_snr_is_low(self, monkeypatch):
         """200 km range produces low SNR even with strong emitter."""
-        from vyapti_simulator.tsrd import tsrd_emitter
+        from vyapti_simulator.system_b.tsrd import tsrd_emitter
 
         stats = {
             "source_h5_sha256": "deadbeef" * 8,

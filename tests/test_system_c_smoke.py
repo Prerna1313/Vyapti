@@ -2,10 +2,10 @@ import pytest
 import numpy as np
 from numpy.random import SeedSequence, default_rng
 from vyapti_simulator.core.metrics import MetricsConfig
-from vyapti_simulator.rf.closed_loop import MissionRunner, RoundRobinScheduler
-from vyapti_simulator.rf.pulse_detector import PulseDetectorConfig, PulseDetector, EmitterInfo
-from vyapti_simulator.rf.simulator_engine import SimulationEngineConfig, RealTimeRFSimulator
-from vyapti_simulator.tsrd.synthetic_pdw_generator import SyntheticEmitterSpec
+from vyapti_simulator.system_c.rf.closed_loop import MissionRunner, RoundRobinScheduler
+from vyapti_simulator.system_c.rf.pulse_detector import PulseDetectorConfig, PulseDetector, EmitterInfo
+from vyapti_simulator.system_c.rf.simulator_engine import SimulationEngineConfig, RealTimeRFSimulator
+from vyapti_simulator.system_a.synthetic_pdw.generator import SyntheticEmitterSpec
 
 def test_system_c_smoke():
     """

@@ -115,7 +115,7 @@ def run_comparison(
     if tsrd_active:
         # Lazy import: keep the TSRD import off the default CLI's
         # critical path so users without h5py etc. still run.
-        from .tsrd.tsrd_emitter import TSRDEmitterSampler
+        from vyapti_simulator.system_b.tsrd.tsrd_emitter import TSRDEmitterSampler
 
         config = _build_tsrd_config()
         sampler = TSRDEmitterSampler(

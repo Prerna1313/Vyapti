@@ -1,6 +1,6 @@
 """Compatibility import for new training scripts; implementation lives in the package."""
 
-from vyapti_simulator.tsrd.train250_cache import (
+from vyapti_simulator.system_b.tsrd.train250_cache import (
     CachedTSRDTrain250Pool,
     build_stare_evaluation_world,
     build_train_pool_from_cache,

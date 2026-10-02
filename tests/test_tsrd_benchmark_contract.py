@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from vyapti_simulator.core.environment import SimulationConfig
 from vyapti_simulator.core.metrics import MetricsConfig
 from vyapti_simulator.core.scheduler_interface import PERMITTED_OBSERVATION_KEYS
-from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
-from vyapti_simulator.tsrd.tsrd_environment import (
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
+from vyapti_simulator.system_b.tsrd.tsrd_environment import (
     DetectionConfig,
     TSRDEnvironment,
     TSRDStareEnvironment,
 )
-from vyapti_simulator.tsrd.tsrd_metrics import TSRDMetricsEngine
+from vyapti_simulator.system_b.tsrd.tsrd_metrics import TSRDMetricsEngine
 
 
 HIDDEN_FIELDS = {
@@ -108,7 +108,7 @@ def test_stare_scorecard_labels_recorded_pulse_basis_and_uses_slot_duration():
 
 def test_stare_replay_uses_scan_metadata_only_for_geometry():
     from pathlib import Path
-    from vyapti_simulator.tsrd.tsrd_adapter import load_stare_mode_as_occupancy_grid
+    from vyapti_simulator.system_b.tsrd.tsrd_adapter import load_stare_mode_as_occupancy_grid
 
     fixture = Path(__file__).parent / "fixtures" / "tsrd"
     stare = fixture / "config_0_stare.h5"
@@ -207,7 +207,7 @@ def test_experiment_runner_uses_tsr_split_and_oir_primary_metric(tmp_path):
         ExperimentConfig, ExperimentRunner,
     )
     from vyapti_simulator.qualification.probes import RoundRobinProbe
-    from vyapti_simulator.tsrd.corpus_loader import iter_tsr_replay_pairs
+    from vyapti_simulator.system_b.tsrd.corpus_loader import iter_tsr_replay_pairs
 
     source = Path(__file__).parent / "fixtures" / "tsrd"
     stare_dir = tmp_path / "stare" / "train_stare"

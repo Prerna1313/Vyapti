@@ -3,7 +3,7 @@ tests.test_rf_amplifiers
 =========================
 
 Tests for the non-linear power amplifier models in
-``vyapti_simulator.rf.amplifiers``.
+``vyapti_simulator.system_c.rf.amplifiers``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.amplifiers import (
+from vyapti_simulator.system_c.rf.amplifiers import (
     RappAmplifier,
     SalehAmplifier,
     OIP3,

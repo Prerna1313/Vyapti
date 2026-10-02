@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.emitter_models import (
+from vyapti_simulator.system_c.emitters.emitter_models import (
     FixedContinuousEmitter,
     FixedIntermittentEmitter,
     FrequencyAgileEmitter,

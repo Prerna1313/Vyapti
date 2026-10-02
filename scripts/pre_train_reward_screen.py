@@ -17,9 +17,9 @@ from vyapti_simulator.core.scheduler_interface import BaseScheduler
 from vyapti_simulator.qualification.probes import (
     RoundRobinProbe, StaticBandProbe, UniformRandomProbe,
 )
-from vyapti_simulator.tsrd.corpus_loader import iter_tsr_replay_pairs
-from vyapti_simulator.tsrd.replay_scorecard import score_recorded_replay
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.corpus_loader import iter_tsr_replay_pairs
+from vyapti_simulator.system_b.tsrd.replay_scorecard import score_recorded_replay
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
 
 
 class ScreenProbe(BaseScheduler):
@@ -180,8 +180,8 @@ def screen_rewards(
         "split": split,
         "files_screened": len(pairs),
         "metric_contract": (
-            "tsrd_recorded_pulse_emitter_v4" if receiver_profile == "pdw_v2"
-            else "tsrd_recorded_pulse_emitter_v3"
+            "tsrd_recorded_pulse_emitter_v5" if receiver_profile == "pdw_v2"
+            else "tsrd_recorded_pulse_emitter_v4"
         ),
         "receiver_options": {
             "detection_probability": detection_probability,

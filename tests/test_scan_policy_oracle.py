@@ -22,7 +22,7 @@ import pytest
 import numpy as np
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd.scan_policy_oracle import (
+from vyapti_simulator.system_b.tsrd.scan_policy_oracle import (
     DefaultScanPolicyOracle,
     DwellWindow,
     OracleResult,
@@ -34,7 +34,7 @@ from vyapti_simulator.tsrd.scan_policy_oracle import (
     build_stare_policy,
     build_adaptive_dwell_policy,
 )
-from vyapti_simulator.tsrd.tsrd_adapter import (
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import (
     TSRDAdapter,
     TSRDDataMode,
     TSRDReceiverMode,

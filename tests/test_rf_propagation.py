@@ -3,7 +3,7 @@ tests.test_rf_propagation
 ===========================
 
 Tests for the RF propagation physics in
-``vyapti_simulator.rf.propagation``:
+``vyapti_simulator.system_c.rf.propagation``:
 
   - KinematicEmitter: position, velocity, range, AoA
   - Doppler shift computation
@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.propagation import (
+from vyapti_simulator.system_c.rf.propagation import (
     SPEED_OF_LIGHT,
     KinematicEmitter,
     compute_doppler_shift,

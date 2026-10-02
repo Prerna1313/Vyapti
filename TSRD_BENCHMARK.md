@@ -56,7 +56,7 @@ waveform reconstruction or complete emitted-pulse truth.
 
 ```python
 from pathlib import Path
-from vyapti_simulator.tsrd.benchmark_protocol import TSRDBenchmarkProtocol
+from vyapti_simulator.system_b.tsrd.benchmark_protocol import TSRDBenchmarkProtocol
 
 protocol = TSRDBenchmarkProtocol(
     corpus_root=Path(snapshot_path) / "data",

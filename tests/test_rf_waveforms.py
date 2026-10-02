@@ -3,7 +3,7 @@ tests.test_rf_waveforms
 ========================
 
 Tests for the RF waveform synthesizers in
-``vyapti_simulator.rf.waveforms``:
+``vyapti_simulator.system_c.rf.waveforms``:
 
   - PSK (BPSK, QPSK, 8-PSK) — phase-shift keying modulators
   - QAM (16-QAM, 64-QAM) — rectangular constellation modulators
@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.waveforms import (
+from vyapti_simulator.system_c.rf.waveforms import (
     generate_psk_symbols,
     bits_to_psk_symbols,
     generate_qam_symbols,

@@ -7,14 +7,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.waveforms import (
+from vyapti_simulator.system_c.rf.waveforms import (
     generate_lfm_chirp, add_awgn, matched_filter,
 )
-from vyapti_simulator.rf.propagation import (
+from vyapti_simulator.system_c.rf.propagation import (
     KinematicEmitter, compute_doppler_shift,
     FreeSpacePathLoss, RayleighFadingChannel,
 )
-from vyapti_simulator.rf.simulator_engine import (
+from vyapti_simulator.system_c.rf.simulator_engine import (
     RealTimeRFSimulator, SimulationEngineConfig,
 )
 
@@ -27,7 +27,7 @@ def _chirp_fn(t, cfg, rng):
 
 
 def _make_pdw_stream(seed=42, n_pulses=10):
-    from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+    from vyapti_simulator.system_a.synthetic_pdw.generator import (
         SyntheticEWPDWGenerator, SyntheticEmitterSpec,
     )
     specs = [SyntheticEmitterSpec(
@@ -181,7 +181,8 @@ class TestRealTimePipeline:
         signal = np.concatenate(buffers)
 
         # Step 4: Matched-filter detect
-        t_ref = np.arange(cfg.samples_per_tick, dtype=np.float64) / cfg.dsp_sample_rate_hz
+        ref_samples = int(round(pw_s * cfg.dsp_sample_rate_hz))
+        t_ref = np.arange(ref_samples, dtype=np.float64) / cfg.dsp_sample_rate_hz
         ref_chirp = generate_lfm_chirp(
             t_ref, f0=0.0, f1=pw_s * 1e6, peak_power_w=1.0,
         )
@@ -206,10 +207,10 @@ class TestRFPulsePipeline:
 
     def test_pipeline_single_emitter(self):
         """Single fixed emitter → pipeline runs → PDW stream."""
-        from vyapti_simulator.rf.rf_to_pdw_pipeline import (
+        from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import (
             RFPulsePipeline, RFPipelineConfig,
         )
-        from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+        from vyapti_simulator.system_a.synthetic_pdw.generator import (
             SyntheticEmitterSpec,
         )
         import numpy as np
@@ -268,10 +269,10 @@ class TestRFPulsePipeline:
 
     def test_pipeline_two_emitters(self):
         """Two emitters at different frequencies → pipeline detects both."""
-        from vyapti_simulator.rf.rf_to_pdw_pipeline import (
+        from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import (
             RFPulsePipeline, RFPipelineConfig,
         )
-        from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+        from vyapti_simulator.system_a.synthetic_pdw.generator import (
             SyntheticEmitterSpec,
         )
         import numpy as np
@@ -312,10 +313,10 @@ class TestRFPulsePipeline:
 
     def test_pipeline_vs_synthetic_generator(self):
         """Same spec → pipeline and synthetic generator produce comparable pulse counts."""
-        from vyapti_simulator.rf.rf_to_pdw_pipeline import (
+        from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import (
             RFPulsePipeline, RFPipelineConfig,
         )
-        from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+        from vyapti_simulator.system_a.synthetic_pdw.generator import (
             SyntheticEmitterSpec, SyntheticEWPDWGenerator,
         )
         import numpy as np
@@ -361,10 +362,10 @@ class TestRFPulsePipeline:
 
     def test_pipeline_empty_when_no_pulses(self):
         """Empty mission → empty PDWStream (not an error)."""
-        from vyapti_simulator.rf.rf_to_pdw_pipeline import (
+        from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import (
             RFPulsePipeline, RFPipelineConfig,
         )
-        from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+        from vyapti_simulator.system_a.synthetic_pdw.generator import (
             SyntheticEmitterSpec,
         )
         import numpy as np
@@ -397,10 +398,10 @@ class TestRFPulsePipeline:
 
     def test_pipeline_smoke_import(self):
         """Smoke test: pipeline module is importable and run() is callable."""
-        from vyapti_simulator.rf.rf_to_pdw_pipeline import (
+        from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import (
             RFPulsePipeline, RFPipelineConfig,
         )
-        from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+        from vyapti_simulator.system_a.synthetic_pdw.generator import (
             SyntheticEmitterSpec,
         )
         import numpy as np

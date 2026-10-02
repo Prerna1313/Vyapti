@@ -26,8 +26,8 @@ print(config.band_count, config.time_slots)
 #### Using the RF to PDW Pipeline
 
 ```python
-from vyapti_simulator.rf.rf_to_pdw_pipeline import RFPulsePipeline, RFPipelineConfig
-from vyapti_simulator.tsrd.synthetic_pdw_generator import SyntheticEmitterSpec
+from vyapti_simulator.system_c.rf.rf_to_pdw_pipeline import RFPulsePipeline, RFPipelineConfig
+from vyapti_simulator.core.emitter_spec import SyntheticEmitterSpec
 import numpy as np
 
 # Define emitter specifications
@@ -61,7 +61,7 @@ print(f"Detected {len(pdw)} pulses")
 
 ## Key Features
 
-- **Three-system architecture**: System A (synthetic), System B (TSRD-driven), System C (closed-loop RF physics)
+- **Three-system architecture**: System A (synthetic PDWs), System B (recorded TSRD), System C (RF/IQ physics)
 - **Realistic RF simulation**: I/Q baseband with AWGN, fading channels, Doppler effects
 - **Pulse detection**: CFAR-based detector with matched filtering
 - **TSRD compatibility**: Input/output formats compatible with Turing Synthetic Radar Dataset

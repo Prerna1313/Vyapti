@@ -1,0 +1,8 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "ucb_prior",
+  "module": "vyapti_simulator.system_b.tsrd.policies.ucb_prior",
+  "api": "legacy_episode",
+  "checkpoint_extension": ".json",
+  "settings": {}
+}

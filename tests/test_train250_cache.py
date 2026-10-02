@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
-from vyapti_simulator.tsrd.train250_cache import (
+from vyapti_simulator.system_b.tsrd.train250_cache import (
     CachedTSRDTrain250Pool,
     build_stare_evaluation_world,
     load_train250_cache,
@@ -97,6 +97,8 @@ def test_npz_world_preserves_all_source_pdws_and_causal_receiver(tmp_path):
             raw = h["data"][:]
             labels = h["labels"][:].reshape(-1)
         expected = raw[labels == source["source_label"]]
+        expected = expected.astype(np.float64)
+        expected[:, 0] += source["time_offset_us"]
         actual = world_data[world_labels == source["world_emitter_id"]]
         np.testing.assert_array_equal(actual, expected)
     first.reset(seed=7)

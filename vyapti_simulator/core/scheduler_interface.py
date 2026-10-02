@@ -94,6 +94,8 @@ PDW_FEATURE_KEYS = frozenset({
 FORBIDDEN_OBSERVATION_KEYS = frozenset({
     "truth", "emitter_id", "source_config_id", "source_label", "pool_id",
     "future_frequency", "beam_state", "illumination_state",
+    "type_id", "operating_mode", "world_seed", "SNRtruth", "snr_truth",
+    "true_occupancy", "future_pulse", "time_offset_us", "local_label",
     "true_emitter_state", "hidden_truth", "hidden_truth_grid", "ground_truth_band",
     "true_activity", "emitter_identity", "emitter_label", "actual_period",
     "hopping_sequence", "future_transmission", "future_state", "complete_occupancy",

@@ -2,19 +2,19 @@
 tests.test_rf_pulse_detector
 =============================
 
-Tests for :mod:`vyapti_simulator.rf.pulse_detector`.
+Tests for :mod:`vyapti_simulator.system_c.rf.pulse_detector`.
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.pulse_detector import (
+from vyapti_simulator.system_c.rf.pulse_detector import (
     PulseDetector,
     PulseDetectorConfig,
     EmitterInfo,
 )
-from vyapti_simulator.rf.waveforms import generate_lfm_chirp
+from vyapti_simulator.system_c.rf.waveforms import generate_lfm_chirp
 
 
 def _chirp_in_buffer(
@@ -72,6 +72,32 @@ class TestPulseDetectorBasics:
         assert pdw.aoa_deg.dtype == np.float32
         assert pdw.amp_db.dtype == np.float32
         assert not hasattr(pdw, "emitter_id")
+
+    @pytest.mark.parametrize("length,train_cells,guard_cells", [
+        (1, 40, 50), (17, 3, 2), (64, 4, 1), (129, 20, 4),
+    ])
+    def test_vectorized_cfar_threshold_matches_clipped_reference_windows(
+        self, length, train_cells, guard_cells
+    ):
+        cfg = PulseDetectorConfig(
+            dsp_sample_rate_hz=1e6, tick_interval_s=1e-3,
+            cfar_db=7.0, cfar_train_cells=train_cells,
+            cfar_guard_cells=guard_cells,
+        )
+        detector = PulseDetector(cfg, emitter_map={})
+        envelope = np.random.default_rng(length).uniform(0.1, 3.0, length)
+        actual = detector._cfar_threshold(envelope)
+        expected = []
+        half_window = train_cells + guard_cells
+        for index in range(length):
+            start = max(0, index - half_window)
+            left_end = max(0, index - guard_cells)
+            right_start = min(length, index + guard_cells + 1)
+            end = min(length, index + half_window + 1)
+            training = np.concatenate((envelope[start:left_end], envelope[right_start:end]))
+            estimate = float(training.mean()) if len(training) else float(envelope.mean())
+            expected.append(10.0 ** (cfg.cfar_db / 10.0) * max(estimate, 1e-12))
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
     def test_detect_pure_noise_zero_detections(self):
         """Pure noise at low amplitude yields zero detections at high CFAR."""

@@ -9,7 +9,7 @@ real TSRD PDW or synthetic emitter dynamics.
 The five unification requirements being tested:
 
   1. TSRDEmitterSampler.build_emitter_objects() constructs
-     emitters using src.emitter_models classes.
+     emitters using vyapti_simulator.system_c.emitters.emitter_models classes.
 
   2. Both paths route through the SAME discretize_pdw_to_bands()
      function (verified by tracing the call path).
@@ -31,7 +31,7 @@ Gate-0 properties verified:
   - Same emitter objects → identical PDW stream (bridge identity).
   - Paired comparison: two equally-seeded samplers produce the same
     SNR, arrival_slot, and visibility_fraction across both views
-    (EmitterConfig vs src.emitter_models.Emitter).
+    (EmitterConfig vs vyapti_simulator.system_c.emitters.emitter_models.Emitter).
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
 from vyapti_simulator.core.scheduler_interface import PERMITTED_OBSERVATION_KEYS
-from vyapti_simulator.tsrd.unified_environment import (
+from vyapti_simulator.system_b.tsrd.unified_environment import (
     DataSource,
     UnifiedEnvironment,
     build_unified_environment,
 )
-from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
-from vyapti_simulator.tsrd.tsrd_emitter import TSRDEmitterSampler
-from vyapti_simulator.tsrd.tsrd_environment import DetectionConfig
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
+from vyapti_simulator.system_b.tsrd.tsrd_emitter import TSRDEmitterSampler
+from vyapti_simulator.system_b.tsrd.tsrd_environment import DetectionConfig
 
 
 # =====================================================================
@@ -250,7 +250,7 @@ def mock_pdw() -> PDWStream:
 
 @pytest.fixture
 def synthetic_emitters(sim_cfg, tmp_path):
-    """Build a list of src.emitter_models.Emitter from the fixture JSON."""
+    """Build a list of vyapti_simulator.system_c.emitters.emitter_models.Emitter from the fixture JSON."""
     stats_file = _make_stats_file(tmp_path)
     sampler = TSRDEmitterSampler(
         tsrd_statistics_path=str(stats_file),
@@ -487,7 +487,7 @@ class TestUnifiedBridge:
         """
         local_emitters_to_pdw_stream produces a valid PDWStream.
         """
-        from vyapti_simulator.tsrd.local_emitter_bridge import local_emitters_to_pdw_stream
+        from vyapti_simulator.system_b.tsrd.local_emitter_bridge import local_emitters_to_pdw_stream
         rng = np.random.default_rng(42)
         pdw = local_emitters_to_pdw_stream(
             emitters=synthetic_emitters,
@@ -504,7 +504,7 @@ class TestUnifiedBridge:
         """
         Both real TSRD PDW and bridge PDW have identical numpy dtypes.
         """
-        from vyapti_simulator.tsrd.local_emitter_bridge import local_emitters_to_pdw_stream
+        from vyapti_simulator.system_b.tsrd.local_emitter_bridge import local_emitters_to_pdw_stream
         rng = np.random.default_rng(42)
         bridge_pdw = local_emitters_to_pdw_stream(
             emitters=synthetic_emitters,
@@ -517,8 +517,8 @@ class TestUnifiedBridge:
         """
         bridge_local_emitters_to_grid produces unified BandSlotPulse objects.
         """
-        from vyapti_simulator.tsrd.local_emitter_bridge import bridge_local_emitters_to_grid
-        from src.observation_interface import BandSlotPulse as UnifiedBP, DataSource as SrcDS
+        from vyapti_simulator.system_b.tsrd.local_emitter_bridge import bridge_local_emitters_to_grid
+        from vyapti_simulator.core.observation_interface import BandSlotPulse as UnifiedBP, DataSource as SrcDS
 
         rng = np.random.default_rng(42)
         result = bridge_local_emitters_to_grid(
@@ -543,8 +543,8 @@ class TestUnifiedBridge:
         The bridge's PDWStream, when discretised by the SAME function
         used for real TSRD, produces a DiscretisedGrid of the same type.
         """
-        from vyapti_simulator.tsrd.local_emitter_bridge import bridge_local_emitters_to_grid
-        from vyapti_simulator.tsrd.pdw_discretiser import DiscretisedGrid
+        from vyapti_simulator.system_b.tsrd.local_emitter_bridge import bridge_local_emitters_to_grid
+        from vyapti_simulator.system_b.tsrd.pdw_discretiser import DiscretisedGrid
 
         rng = np.random.default_rng(42)
         result = bridge_local_emitters_to_grid(
@@ -567,7 +567,7 @@ class TestDeterminismAndPairedComparison:
     """
     Requirement (1): Same seed → same emitter list.
     Paired comparison: two equally-seeded samplers produce identical
-    EmitterConfig and src.emitter_models.Emitter objects.
+    EmitterConfig and vyapti_simulator.system_c.emitters.emitter_models.Emitter objects.
     """
 
     def test_same_seed_same_emitter_ids(self, sim_cfg, tmp_path):
@@ -598,7 +598,7 @@ class TestDeterminismAndPairedComparison:
     def test_emitter_config_and_emitter_object_paired(self, sim_cfg, tmp_path):
         """
         For the same tx_id, the EmitterConfig (build_emitter_configs) and
-        the src.emitter_models.Emitter (build_emitter_objects) share the
+        the vyapti_simulator.system_c.emitters.emitter_models.Emitter (build_emitter_objects) share the
         same snr_db, arrival_slot, and visibility_fraction.
         """
         stats_file = _make_stats_file(tmp_path)

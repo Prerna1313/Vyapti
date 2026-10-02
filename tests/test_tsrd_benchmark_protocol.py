@@ -14,20 +14,20 @@ from vyapti_simulator.core.mapping import frequency_to_bands
 from vyapti_simulator.core.metrics import MetricsConfig, MetricsEngine
 from vyapti_simulator.core.scheduler_interface import BandPrediction
 from vyapti_simulator.qualification.probes import RoundRobinProbe
-from vyapti_simulator.tsrd.benchmark_protocol import (
+from vyapti_simulator.system_b.tsrd.benchmark_protocol import (
     TSRDBenchmarkProtocol, _assert_scorecard_consistent, _summarize,
 )
-from vyapti_simulator.tsrd.corpus_loader import CorpusUnavailableError, iter_tsr_replay_pairs
-from vyapti_simulator.tsrd.mixed_dwell import DwellAction, run_mixed_dwell_episode
-from vyapti_simulator.tsrd.paired_scan_validation import (
+from vyapti_simulator.system_b.tsrd.corpus_loader import CorpusUnavailableError, iter_tsr_replay_pairs
+from vyapti_simulator.system_b.tsrd.mixed_dwell import DwellAction, run_mixed_dwell_episode
+from vyapti_simulator.system_b.tsrd.paired_scan_validation import (
     validate_development_pairs, validate_pair,
 )
-from vyapti_simulator.tsrd.pdw_discretiser import discretise_pdw_to_grid
-from vyapti_simulator.tsrd.replay_scorecard import score_recorded_replay
-from vyapti_simulator.tsrd.tsrd_adapter import PDWStream, stare_pulse_occupancy
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
-from vyapti_simulator.tsrd.tsrd_metrics import TSRDMetricsEngine
-from vyapti_simulator.tsrd.world_pool import TSRDTrainWorldPool
+from vyapti_simulator.system_b.tsrd.pdw_discretiser import discretise_pdw_to_grid
+from vyapti_simulator.system_b.tsrd.replay_scorecard import score_recorded_replay
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream, stare_pulse_occupancy
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.tsrd_metrics import TSRDMetricsEngine
+from vyapti_simulator.system_b.tsrd.world_pool import TSRDTrainWorldPool
 from scripts.audit_tsrd_metadata import audit_corpus
 from scripts.pre_train_reward_screen import screen_rewards
 
@@ -496,7 +496,7 @@ def test_pdw_receiver_profile_flows_through_train_and_evaluation(tmp_path):
         evaluate_test=True,
     )
     assert report["receiver_profile_options"]["receiver_profile"] == "pdw_v2"
-    assert report["metric_contract_version"] == "tsrd_recorded_pulse_emitter_v4"
+    assert report["metric_contract_version"] == "tsrd_recorded_pulse_emitter_v5"
     assert report["held_out_test"]["summary"]["files_evaluated"] == 1
 
 

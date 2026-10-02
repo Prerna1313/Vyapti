@@ -1,8 +1,8 @@
 import pytest
 import numpy as np
-from vyapti_simulator.rf.closed_loop import MissionRunner, RoundRobinScheduler
-from vyapti_simulator.rf.pulse_detector import PulseDetectorConfig, PulseDetector
-from vyapti_simulator.rf.simulator_engine import SimulationEngineConfig, RealTimeRFSimulator
+from vyapti_simulator.system_c.rf.closed_loop import MissionRunner, RoundRobinScheduler
+from vyapti_simulator.system_c.rf.pulse_detector import PulseDetectorConfig, PulseDetector
+from vyapti_simulator.system_c.rf.simulator_engine import SimulationEngineConfig, RealTimeRFSimulator
 
 class FaultySimulatorEngine(RealTimeRFSimulator):
     def simulate_dwell(self, *args, **kwargs):

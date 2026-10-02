@@ -9,10 +9,58 @@ import numpy as np
 import pytest
 
 from tests.test_train250_cache import _small_pool
-from vyapti_simulator.tsrd.experiment import _evaluation_ids, evaluate, plot_run, train
-from vyapti_simulator.tsrd.train250_cache import compose_heldout_world
-from vyapti_simulator.tsrd.tsrd_adapter import stare_pulse_occupancy
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.experiment import _evaluation_ids, evaluate, plot_run, train
+from vyapti_simulator.system_b.tsrd.train250_cache import compose_heldout_world
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import stare_pulse_occupancy
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.training_setup import resolve_setup
+
+
+def _legacy_template():
+    root = Path(__file__).parents[1] / "training_setup"
+    config = resolve_setup(root / "environments/train250_source_replay.json",
+                           root / "algorithms/ucb_prior.json", seed=20261002,
+                           episodes=100, checkpoint_every=25)
+    # Legacy replay compatibility: earlier saved runs had no selection record.
+    config["checkpoint_selection_required"] = False
+    config.pop("checkpointing")
+    return config
+
+
+def test_mode_b_runs_only_frozen_compositions_and_keeps_test_reserved(tmp_path):
+    data, cache = _small_pool(tmp_path)
+    fixture = Path(__file__).parent / "fixtures/tsrd/config_0_stare.h5"
+    for split in ("val", "test"):
+        directory = data / "stare" / f"{split}_stare"
+        directory.mkdir(parents=True)
+        shutil.copyfile(fixture, directory / "config_9.h5")
+    config = _legacy_template()
+    config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2, train_episodes=1)
+    config["world"] = {"mode": "emitter_recombined", "spatial_model": "tsrd_native", "time_offset_us": 12345}
+    config["evaluation"]["world_mode"] = "emitter_recombined"
+    for split in ("val", "test"):
+        config["evaluation"][f"{split}_config_ids"] = ["config_9"]
+        config["evaluation"][f"expected_{split}_configs"] = 1
+        config["evaluation"][f"{split}_composed_worlds"] = [
+            {"id": f"{split}_world_000", "source_config_ids": ["config_9"],
+             "world_seed": 23, "emitter_count": 1}]
+    config_path = tmp_path / "mode_b.json"
+    config_path.write_text(json.dumps(config))
+    run = tmp_path / "run"
+    train(config_path, run)
+    reports = evaluate(run, "val", condition="all")
+    assert set(reports["conditions"]) == {"normal", "beam_periodic", "beam_stochastic"}
+    sources = []
+    for condition in reports["conditions"]:
+        worlds = [json.loads(row) for row in (run / "eval/val" / condition / "per_world.jsonl").read_text().splitlines()]
+        assert len(worlds) == 1
+        assert worlds[0]["kind"] == "composed_heldout"
+        assert abs(worlds[0]["sources"][0]["time_offset_us"]) <= 12345
+        sources.append(worlds[0]["sources"])
+    assert sources[0] == sources[1] == sources[2]
+    assert not (run / "eval/test").exists()
+    with pytest.raises(ValueError, match="final"):
+        evaluate(run, "test")
 
 
 def test_training_and_fixed_validation_are_reproducible(tmp_path):
@@ -23,8 +71,7 @@ def test_training_and_fixed_validation_are_reproducible(tmp_path):
     shutil.copyfile(fixture, val)
     with pytest.raises(ValueError, match="Expected 50 fixed val configs"):
         _evaluation_ids(data, "val", ["config_9"], expected_count=50)
-    template = Path(__file__).parents[1] / "experiments/configs/train250_binary_v1.json"
-    config = json.loads(template.read_text(encoding="utf-8"))
+    config = _legacy_template()
     config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2,
                   train_episodes=1)
     config["evaluation"]["val_config_ids"] = ["config_9"]
@@ -36,10 +83,19 @@ def test_training_and_fixed_validation_are_reproducible(tmp_path):
     assert checkpoint.is_file()
     episode = json.loads((run / "train/episodes.jsonl").read_text().splitlines()[0])
     assert episode["sources"][0]["source_file"].startswith("stare/train_stare/")
+    assert episode["training_elapsed_wall_clock_s"] > 0
+    run_status = json.loads((run / "status.json").read_text())
+    assert run_status["state"] == "complete"
+    assert run_status["environment_steps"] == run_status["completed_receiver_steps"]
+    assert run_status["wall_clock_training_s"] > 0
+    assert run_status["steps_per_second"] > 0
     with pytest.raises(ValueError, match="explicit"):
         evaluate(run, "test")
     report = evaluate(run, "val")
     assert report["summary"]["worlds"] == 1
+    assert report["summary"]["eligibility"]["physical_emitters"] >= 1
+    assert report["summary"]["missed_emitter_slot_opportunity_count"] >= 0
+    assert report["summary"]["worlds_reaching_90pct_band_coverage"] == 1
     row = json.loads((run / "eval/val/normal/per_world.jsonl").read_text().splitlines()[0])
     assert row["config_id"] == "config_9"
     assert row["source_sha256"]
@@ -87,8 +143,7 @@ def test_all_val_and_test_conditions_write_isolated_audits(tmp_path):
         directory = data / "stare" / f"{split}_stare"
         directory.mkdir(parents=True)
         shutil.copyfile(fixture, directory / "config_9.h5")
-    config = json.loads((Path(__file__).parents[1] /
-                         "experiments/configs/train250_binary_v1.json").read_text(encoding="utf-8"))
+    config = _legacy_template()
     config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2,
                   train_episodes=1)
     for split in ("val", "test"):
@@ -121,7 +176,7 @@ def test_all_val_and_test_conditions_write_isolated_audits(tmp_path):
 
 def test_slot_and_retune_boundaries_are_synchronized(tmp_path):
     data, cache = _small_pool(tmp_path)
-    from vyapti_simulator.tsrd.train250_cache import build_train_pool_from_cache
+    from vyapti_simulator.system_b.tsrd.train250_cache import build_train_pool_from_cache
     pool, _ = build_train_pool_from_cache(data, cache, expected_configs=2)
     cfg = replace(pool.config, detection_probability=1.0,
                   false_alarm_probability=0.0, retune_time_ms=1.0)

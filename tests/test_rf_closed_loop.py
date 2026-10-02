@@ -13,18 +13,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.simulator_engine import (
+from vyapti_simulator.system_c.rf.simulator_engine import (
     RealTimeRFSimulator,
     SimulationEngineConfig,
 )
-from vyapti_simulator.rf.waveforms import generate_lfm_chirp
-from vyapti_simulator.rf.propagation import KinematicEmitter
-from vyapti_simulator.rf.pulse_detector import (
+from vyapti_simulator.system_c.rf.waveforms import generate_lfm_chirp
+from vyapti_simulator.system_c.rf.propagation import KinematicEmitter
+from vyapti_simulator.system_c.rf.pulse_detector import (
     PulseDetector,
     PulseDetectorConfig,
     EmitterInfo,
 )
-from vyapti_simulator.rf.closed_loop import (
+from vyapti_simulator.system_c.rf.closed_loop import (
     Dwell,
     MissionState,
     MissionRunner,
@@ -38,7 +38,7 @@ from vyapti_simulator.rf.closed_loop import (
     summarise_results,
     TrackedEmitter,
 )
-from vyapti_simulator.tsrd.synthetic_pdw_generator import SyntheticEmitterSpec
+from vyapti_simulator.system_a.synthetic_pdw.generator import SyntheticEmitterSpec
 
 
 # =====================================================================
@@ -83,7 +83,26 @@ def _make_engine(dsp_hz=10e6, tick_s=10e-3, snr_db=20.0):
 # simulate_dwell — band / AoA windowing
 # =====================================================================
 class TestSimulateDwell:
-    """Tests for engine.simulate_dwell band/AoA filtering."""
+    """Tests for engine.simulate_dwell band/AoA windowing."""
+
+    def test_receiver_noise_is_continuous_and_added_once_without_emitters(self):
+        cfg = SimulationEngineConfig(
+            tick_interval_s=1e-3, dsp_sample_rate_hz=1e6,
+            num_ticks=1, buffer_ticks=1, snr_db=20.0, pulse_power_w=1.0,
+        )
+        sim = RealTimeRFSimulator(cfg, rng=np.random.default_rng(9))
+        expected_noise_power = 2.0 * cfg.pulse_power_w / (10.0 ** (cfg.snr_db / 10.0))
+
+        output = np.zeros(cfg.samples_per_buffer, dtype=np.complex128)
+        sim._fill_buffer(output)
+        assert float(np.mean(np.abs(output) ** 2)) == pytest.approx(
+            expected_noise_power, rel=0.12
+        )
+
+        dwell = sim.simulate_dwell(1e9, 2e9, dwell_ms=1.0)
+        assert float(np.mean(np.abs(dwell) ** 2)) == pytest.approx(
+            expected_noise_power, rel=0.12
+        )
 
     def test_returns_complex_array(self):
         """simulate_dwell returns a complex array."""
@@ -342,7 +361,7 @@ class TestSchedulers:
             bands_hz=[(2e9, 4e9)],
             dwell_ms=5.0,
         )
-        from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
+        from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
         state = MissionState(
             recent_pdws=PDWStream(
                 toa_us=np.array([1000.0], dtype=np.float32),
@@ -362,7 +381,7 @@ class TestSchedulers:
             bands_hz=[(2e9, 4e9)],
             dwell_ms=5.0,
         )
-        from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
+        from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
         state = MissionState(
             recent_pdws=PDWStream(
                 toa_us=np.array([1000.0], dtype=np.float32),
@@ -386,7 +405,7 @@ class TestSchedulers:
             bands_hz=[(2e9, 4e9)],
             dwell_ms=5.0,
         )
-        from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
+        from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
         state = MissionState(
             recent_pdws=PDWStream(
                 toa_us=np.array([1000.0], dtype=np.float32),
@@ -413,7 +432,7 @@ class TestSchedulers:
             dwell_ms=5.0,
             weights=weights,
         )
-        from vyapti_simulator.tsrd.tsrd_adapter import PDWStream
+        from vyapti_simulator.system_b.tsrd.tsrd_adapter import PDWStream
         state = MissionState(
             recent_pdws=PDWStream(
                 toa_us=np.array([1000.0], dtype=np.float32),

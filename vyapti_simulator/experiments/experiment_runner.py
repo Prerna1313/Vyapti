@@ -51,7 +51,7 @@ from ..core.environment import VyaptiEnv, EmitterConfig, SimulationConfig
 from ..core.episode import run_paired_episodes
 from ..core.metrics import MetricsEngine, MetricsConfig
 from ..core.scheduler_interface import BaseScheduler
-from ..tsrd.antenna_patterns import (
+from ..system_b.tsrd.antenna_patterns import (
     uniform_antenna_gain,
     sectorised_antenna_gain,
     realistic_antenna_gain,
@@ -463,7 +463,7 @@ class ExperimentRunner:
             return emitter
 
         # We need to import swerling lazily to avoid hard dependency.
-        from vyapti_simulator.rf.swerling import apply_swerling_fluctuation
+        from vyapti_simulator.system_c.rf.swerling import apply_swerling_fluctuation
 
         # Draw one sample from the Swerling distribution.
         # Single pulse is enough: the constant offset over the mission
@@ -603,7 +603,7 @@ class ExperimentRunner:
         time_slots = self.config.time_slots
 
         if use_tsr and tsrd_scenario:
-            from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+            from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
             if not self.config.tsrd_dataset_root:
                 raise ValueError(
                     "TSRD runs require ExperimentConfig.tsrd_dataset_root pointing "
@@ -675,7 +675,7 @@ class ExperimentRunner:
         metrics_config = MetricsConfig()
 
         if use_tsr and tsrd_scenario:
-            from vyapti_simulator.tsrd.tsrd_metrics import TSRDMetricsEngine
+            from vyapti_simulator.system_b.tsrd.tsrd_metrics import TSRDMetricsEngine
             metrics_config.compute_comprehensive_metrics = True
             metrics_config.compute_emitter_population_metrics = True
             metrics_config.compute_per_band_metrics = True

@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.rf_pulse_simulator import RealRFSimulator, SimulatorConfig, freq_to_band
-from src.emitter_models import (
+from vyapti_simulator.system_c.emitters.rf_pulse_simulator import RealRFSimulator, SimulatorConfig, freq_to_band
+from vyapti_simulator.system_c.emitters.emitter_models import (
     FixedContinuousEmitter,
     FixedIntermittentEmitter,
     ScanningEmitter,

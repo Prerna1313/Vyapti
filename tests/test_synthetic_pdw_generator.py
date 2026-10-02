@@ -6,8 +6,8 @@ Tests for `SyntheticEWPDWGenerator` — the synthetic EW PDW
 generator that produces TSRD-shaped `PDWStream` objects from
 `SyntheticEmitterSpec` lists.
 
-The generator is the fallback path for Kaggle runs when TSRD is
-unavailable. It must:
+The generator is a controlled synthetic-data path for development
+and integration checks. It must:
 
   * Emit dtypes that match the TSRD schema (float32 for the
     five PDW fields, int64 for emitter_id).
@@ -30,13 +30,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.tsrd import (
+from vyapti_simulator.system_a.synthetic_pdw import (
     SyntheticEmitterSpec,
     SyntheticEWPDWGenerator,
     default_two_emitter_scenario,
     default_six_emitter_scenario,
-    quick_deinterleave,
 )
+from vyapti_simulator.system_b.tsrd import quick_deinterleave
 
 
 # =====================================================================

@@ -1,0 +1,8 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "your_chosen_algorithm",
+  "module": "your_package.your_algorithm_adapter",
+  "api": "public_transitions",
+  "checkpoint_extension": ".pt",
+  "settings": {}
+}

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 
-from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+from vyapti_simulator.system_a.synthetic_pdw.generator import (
     SyntheticEWPDWGenerator,
     SyntheticEmitterSpec,
 )

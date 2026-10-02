@@ -24,6 +24,7 @@ SIMULATOR_STATUS.md
 
 # Loose experiment artifacts at the repo root
 *.json
+!/training_setup/**/*.json
 !pyproject.toml
 !/experiments/configs/*.json
 !/tests/fixtures/tsrd/manifest.json

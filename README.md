@@ -1,5 +1,26 @@
 # Vyapti Simulator
 
+## Three separate simulation systems
+
+- **[System A](vyapti_simulator/system_a/README.md)** —
+  `vyapti_simulator/system_a/synthetic_pdw/`: controlled synthetic PDW
+  generation for development and examples.
+- **[System B](vyapti_simulator/system_b/README.md)** — `vyapti_simulator/system_b/tsrd/`: recorded TSRD Scan/Stare
+  PDWs, TRAIN-250 cache, world composition, scheduler training and frozen
+  evaluation using 50 VAL and 50 TEST sources.
+- **[System C](vyapti_simulator/system_c/README.md)** — `vyapti_simulator/system_c/emitters/` and `vyapti_simulator/system_c/rf/`:
+  synthetic emitters, RF physics, IQ generation and CFAR detection.
+- **Shared support** — `vyapti_simulator/core/`, scheduler algorithms, metrics,
+  qualification and experiment utilities. Each system has its own data source
+  and receiver assumptions.
+
+New imports use `vyapti_simulator.system_a`, `vyapti_simulator.system_b`, or
+`vyapti_simulator.system_c`. Shared interfaces remain under `vyapti_simulator/core/`.
+See [training_setup/README.md](training_setup/README.md) for the current
+model-neutral training interface. Data and run outputs keep their existing paths.
+See [the scorecard naming order](docs/protocols/scorecard-order.md) for the
+recommended result presentation hierarchy.
+
 For the current code and documentation status, see [REPOSITORY_STATUS.md](REPOSITORY_STATUS.md).
 Older project notes are historical snapshots; test results and implementation details in
 those notes may no longer describe this checkout.
@@ -19,9 +40,10 @@ Vyapti is a research prototype with modules that:
    (500 MHz–18 GHz, PRI 50 μs–10 ms, PW 0.2–10 μs, power −100 to −30 dBm).
 2. **Implements channel physics** — free-space path loss, log-normal shadowing (σ=8 dB),
    Rayleigh fast fading, atmospheric attenuation, coherent integration gain (10·log₁₀ N dB).
-3. **Shares a detection model** between synthetic (System A) and TSRD-driven (System B) paths —
-   the same logistic SNR→Pd curve is applied on both, so synthetic and real-TSRD experiments
-   are directly comparable.
+3. **Provides receiver models for each path** — the synthetic pulse/slot path and
+   TSRD grid path can share amplitude detector settings; the recorded-PDW
+   training receiver and IQ CFAR detector have separate assumptions. Comparisons
+   must identify the active receiver model.
 4. **Implements protocol checks** — 8 gate checkpoints, result-tagging
    (7 fields per result row), oracle-free scheduler observation contract, and negative-result
    reporting discipline.
@@ -88,10 +110,10 @@ Attach the TSRD dataset (`alan-turing-institute/turing-synthetic-radar-dataset`)
 a Kaggle input, then:
 
 ```python
-from vyapti_simulator.tsrd.corpus_loader import TSRDCorpusLoader
-from vyapti_simulator.tsrd.tsrd_environment import TSRDEnvironment, DetectionConfig
+from vyapti_simulator.system_b.tsrd.corpus_loader import TSRDCorpusLoader
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDEnvironment, DetectionConfig
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd.tsrd_adapter import TSRDDataMode
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import TSRDDataMode
 
 sim_cfg = SimulationConfig(band_count=36, time_slots=600)
 loader = TSRDCorpusLoader(
@@ -137,12 +159,17 @@ vyapti_simulator/
 ├── experiments/       ExperimentConfig, ExperimentRunner, statistics
 ├── protocol/          FrozenProtocolEnforcer (Gates 0–7, F, G)
 ├── qualification/     Conformance checks (C0–C11), probe schedulers
-├── tsrd/              TSRD adapter, corpus loader, deinterleaver, discretiser
+├── system_a/          Synthetic PDW generation
+├── system_b/tsrd/     Recorded PDWs, composition, training and evaluation
+├── system_c/emitters/ Synthetic emitters and pulse/slot simulation
+├── system_c/rf/       RF physics, IQ generation, CFAR and closed loop
 ├── visualization/     12 mandatory publication figures
 └── simulator.py       CLI entry point
-src/
-├── rf_pulse_simulator.py   System A: pulse-level synthetic RF
-└── emitter_models.py        7 emitter classes + channel physics
+training_setup/        Environment, evaluation, algorithm and run-plan settings
+scripts/training/      Model-neutral training CLI
+scripts/evaluation/    Frozen evaluation and checkpoint selection CLI
+Data/                  Source H5 files and reusable TRAIN-250 cache
+runs/                  Exact configs, manifests, checkpoints, logs and results
 ```
 
 ---

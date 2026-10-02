@@ -34,14 +34,14 @@ from typing import List
 import numpy as np
 import pytest
 
-from vyapti_simulator.tsrd.deinterleaver import (
+from vyapti_simulator.system_b.tsrd.deinterleaver import (
     DeinterleaverConfig,
     DeinterleaverResult,
     EmitterTrack,
     FeatureBasedDeinterleaver,
     quick_deinterleave,
 )
-from vyapti_simulator.tsrd.tsrd_adapter import (
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import (
     TSRDAdapter,
     TSRDDataMode,
 )
@@ -399,7 +399,7 @@ class TestDeprecatedAlias:
 
     def test_alias_emits_deprecation_warning(self):
         """Instantiating the old class name emits a DeprecationWarning."""
-        from vyapti_simulator.tsrd.deinterleaver import PRIBasedDeinterleaver
+        from vyapti_simulator.system_b.tsrd.deinterleaver import PRIBasedDeinterleaver
         with pytest.warns(DeprecationWarning, match="FeatureBasedDeinterleaver"):
             PRIBasedDeinterleaver()
         # Suppress warning from the un-instantiated class lookup above

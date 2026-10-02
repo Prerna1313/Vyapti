@@ -86,8 +86,11 @@ not a capture rate. Its denominator is the recorded PDWs inside the assumed
 `[0,30 s)` replay window; raw and outside-window row counts are reported
 separately. This
 contract changes the binary scorecard version to
-`tsrd_recorded_pulse_emitter_v3` and the measured-PDW version to
-`tsrd_recorded_pulse_emitter_v4`. Earlier exploratory reports use the prior
+`tsrd_recorded_pulse_emitter_v4` and the measured-PDW version to
+`tsrd_recorded_pulse_emitter_v5`. The current scorecard also reports separate
+physical, active, eligible, and intercepted emitter counts; missed
+emitter-slot opportunities; band-coverage timing; blind intervals; and
+action entropy. Earlier exploratory reports use the prior
 denominator and should not be mixed with these metrics. `binary_v1` credits a
 band-level positive to all recorded emitters present in that slot, so emitter
 attribution is an optimistic upper

@@ -3,7 +3,7 @@ tests.test_swerling
 ==================
 
 Tests for the Swerling target fluctuation models in
-``vyapti_simulator.rf.swerling``.
+``vyapti_simulator.system_c.rf.swerling``.
 
 The five Swerling cases describe the statistical distribution of
 received amplitude from a fluctuating radar target. The tests
@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.swerling import (
+from vyapti_simulator.system_c.rf.swerling import (
     SwerlingModel,
     apply_swerling_fluctuation,
 )

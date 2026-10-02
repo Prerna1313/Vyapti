@@ -2,18 +2,18 @@
 tests.test_rf_tsrd_bridge
 =========================
 
-Tests for :mod:`vyapti_simulator.rf.tsrd_bridge`.
+Tests for :mod:`vyapti_simulator.system_c.rf.tsrd_bridge`.
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.tsrd_bridge import (
+from vyapti_simulator.system_c.rf.tsrd_bridge import (
     TSRDSpecToRFBridge,
     SimEmitterSpec,
 )
-from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+from vyapti_simulator.system_a.synthetic_pdw.generator import (
     SyntheticEmitterSpec,
 )
 
@@ -132,7 +132,7 @@ class TestTSRDSpecToRFBridge:
         bridge = TSRDSpecToRFBridge(spec, np.random.default_rng(0))
         sspec = bridge.build()
         # Waveform function was built (call it to verify)
-        from vyapti_simulator.rf.simulator_engine import SimulationEngineConfig
+        from vyapti_simulator.system_c.rf.simulator_engine import SimulationEngineConfig
         cfg = SimulationEngineConfig()
         # The function truncates to n_pulse samples regardless of input length
         result = sspec.waveform_fn(
@@ -154,7 +154,7 @@ class TestTSRDSpecToRFBridge:
         )
         bridge = TSRDSpecToRFBridge(spec, np.random.default_rng(0))
         sspec = bridge.build()
-        from vyapti_simulator.rf.simulator_engine import SimulationEngineConfig
+        from vyapti_simulator.system_c.rf.simulator_engine import SimulationEngineConfig
         cfg = SimulationEngineConfig()
         result = sspec.waveform_fn(
             np.arange(100, dtype=np.float64) / cfg.dsp_sample_rate_hz,

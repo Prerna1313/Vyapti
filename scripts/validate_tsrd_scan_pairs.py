@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from vyapti_simulator.tsrd.paired_scan_validation import validate_development_pairs
+from vyapti_simulator.system_b.tsrd.paired_scan_validation import validate_development_pairs
 
 
 def main() -> None:

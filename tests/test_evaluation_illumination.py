@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd.evaluation_illumination import (
+from vyapti_simulator.system_b.tsrd.evaluation_illumination import (
     IlluminationSettings, _intervals, apply_evaluation_illumination, annotate_illumination_score,
 )
 from vyapti_simulator.core.metrics import TrajectoryStep
-from vyapti_simulator.tsrd.replay_scorecard import score_recorded_replay
-from vyapti_simulator.tsrd.tsrd_adapter import stare_pulse_occupancy
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.replay_scorecard import score_recorded_replay
+from vyapti_simulator.system_b.tsrd.tsrd_adapter import stare_pulse_occupancy
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
 
 
 def _world():
@@ -100,3 +100,30 @@ def test_fully_occluded_emitters_remain_in_source_population_as_censored():
     assert score["illumination_stress"]["source_population_interception_rate"] == 0
     assert all(record["ttfi_censored"] for record in
                score["illumination_stress"]["source_relative_ttfi"].values())
+
+
+def test_scorecard_exposes_eligibility_coverage_blind_time_and_action_entropy():
+    world = _world()
+    trajectory = []
+    for slot in range(world.n_slots):
+        band = slot % world.n_bands
+        observation, _ = world.step(band)
+        trajectory.append(TrajectoryStep(band, observation, slot))
+
+    score = score_recorded_replay(world, trajectory)
+    emitters = score["emitter_interception"]
+    assert score["metric_contract_version"] == "tsrd_recorded_pulse_emitter_v4"
+    assert emitters["physical_emitters"] == 2
+    assert emitters["active_emitters"] == 2
+    assert emitters["eligible_intercept_emitters"] == 2
+    assert emitters["intercepted_emitters"] == 2
+    opportunities = score["illumination"]["emitter_slot_opportunity_count"]
+    detected = score["illumination"]["detected_emitter_slot_opportunity_count"]
+    assert score["illumination"]["missed_emitter_slot_opportunity_count"] == opportunities - detected
+    assert score["revisit"]["time_to_90pct_band_coverage_s"] == pytest.approx(0.15)
+    assert score["revisit"]["band_coverage_fraction"] == 1.0
+    assert score["revisit"]["max_blind_interval_s"] == 0.0
+    counts = np.asarray(score["revisit"]["visit_counts"], dtype=float)
+    probabilities = counts[counts > 0] / counts.sum()
+    expected_entropy = -np.sum(probabilities * np.log(probabilities))
+    assert score["revisit"]["action_entropy"] == pytest.approx(expected_entropy)

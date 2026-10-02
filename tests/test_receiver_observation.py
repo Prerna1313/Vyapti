@@ -8,11 +8,13 @@ import pytest
 from tests.test_train250_cache import _small_pool
 from vyapti_simulator.core.receiver_observation import ReceiverObservation
 from vyapti_simulator.core.environment import SimulationConfig, VyaptiEnv, EmitterConfig, EmitterBehaviorType
-from vyapti_simulator.tsrd.train250_cache import build_train_pool_from_cache
+from vyapti_simulator.system_b.tsrd.train250_cache import build_train_pool_from_cache
 
 
 FORBIDDEN = {"truth", "emitter_id", "source_config_id", "source_label", "pool_id",
-             "future_frequency", "hidden_truth", "beam_state", "illumination_state"}
+             "future_frequency", "hidden_truth", "beam_state", "illumination_state",
+             "type_id", "operating_mode", "world_seed", "SNRtruth", "snr_truth",
+             "true_occupancy", "future_pulse", "time_offset_us", "local_label"}
 
 
 def _observation():

@@ -40,7 +40,7 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd import (
+from vyapti_simulator.system_b.tsrd import (
     CorpusFileDisposition,
     CorpusUnavailableError,
     TSRDCorpusLoader,

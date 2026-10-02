@@ -15,10 +15,10 @@ from pathlib import Path
 from vyapti_simulator.algorithms.bandit.ucb import UCB1Scheduler
 from vyapti_simulator.core.episode import run_episode
 from vyapti_simulator.qualification.probes import RoundRobinProbe
-from vyapti_simulator.tsrd.benchmark_protocol import _seed_for_file, _summarize
-from vyapti_simulator.tsrd.corpus_loader import iter_tsr_replay_pairs
-from vyapti_simulator.tsrd.replay_scorecard import score_recorded_replay
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.benchmark_protocol import _seed_for_file, _summarize
+from vyapti_simulator.system_b.tsrd.corpus_loader import iter_tsr_replay_pairs
+from vyapti_simulator.system_b.tsrd.replay_scorecard import score_recorded_replay
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
 
 
 def run_validation(
@@ -84,7 +84,7 @@ def run_validation(
         "corpus_root": str(corpus_root.resolve()),
         "receiver_profile": "binary_v1",
         "dwell_profile": "fixed_50_ms",
-        "metric_contract_version": "tsrd_recorded_pulse_emitter_v3",
+        "metric_contract_version": "tsrd_recorded_pulse_emitter_v4",
         "seed": seed,
         "receiver_options": {
             "detection_probability": detection_probability,

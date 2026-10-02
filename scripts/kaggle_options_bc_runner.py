@@ -108,7 +108,7 @@ sim_cfg = SimulationConfig(
 )
 
 # ---- 3. Imports for Options B and C -------------------------------
-from vyapti_simulator.tsrd import (
+from vyapti_simulator.system_b.tsrd import (
     TSRDCorpusLoader,
     TSRDDataMode,
     TSRDAdapter,

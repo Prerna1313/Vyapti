@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd import (
+from vyapti_simulator.system_b.tsrd import (
     DetectionConfig,
     DeinterleaverConfig,
     PDWStream,
@@ -267,7 +267,7 @@ class TestSamplerStartTime:
         We mock load_tsrd_statistics to return a synthetic dict with
         start_time_s = 5.0 so the test doesn't depend on fixture files.
         """
-        from vyapti_simulator.tsrd import tsrd_emitter
+        from vyapti_simulator.system_b.tsrd import tsrd_emitter
 
         fake_stats = {
             "source_h5_sha256": "deadbeef" * 8,

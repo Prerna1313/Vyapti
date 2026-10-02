@@ -19,9 +19,9 @@ import numpy as np
 from vyapti_simulator.core.episode import PERMITTED_SCENARIO_KEYS, run_episode
 from vyapti_simulator.core.scheduler_interface import PERMITTED_OBSERVATION_KEYS
 from vyapti_simulator.qualification.probes import RoundRobinProbe
-from vyapti_simulator.tsrd.benchmark_protocol import _assert_scorecard_consistent, _seed_for_file
-from vyapti_simulator.tsrd.replay_scorecard import score_recorded_replay
-from vyapti_simulator.tsrd.tsrd_environment import TSRDStareEnvironment
+from vyapti_simulator.system_b.tsrd.benchmark_protocol import _assert_scorecard_consistent, _seed_for_file
+from vyapti_simulator.system_b.tsrd.replay_scorecard import score_recorded_replay
+from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
 
 PROFILING_KEYS = frozenset({
     "select_action_ms", "predict_ms", "wall_clock_ms", "memory_delta_bytes",

@@ -1,0 +1,738 @@
+{
+  "expected_val_configs": 50,
+  "analysis_protocol_spec": "mode_b_protocol.json",
+  "expected_test_configs": 50,
+  "val_config_ids": [
+    "config_2",
+    "config_4",
+    "config_16",
+    "config_22",
+    "config_41",
+    "config_42",
+    "config_43",
+    "config_47",
+    "config_53",
+    "config_56",
+    "config_66",
+    "config_67",
+    "config_68",
+    "config_74",
+    "config_79",
+    "config_81",
+    "config_83",
+    "config_86",
+    "config_91",
+    "config_101",
+    "config_108",
+    "config_115",
+    "config_120",
+    "config_122",
+    "config_143",
+    "config_147",
+    "config_150",
+    "config_152",
+    "config_160",
+    "config_163",
+    "config_166",
+    "config_169",
+    "config_170",
+    "config_171",
+    "config_178",
+    "config_181",
+    "config_183",
+    "config_184",
+    "config_186",
+    "config_193",
+    "config_196",
+    "config_208",
+    "config_209",
+    "config_213",
+    "config_217",
+    "config_224",
+    "config_232",
+    "config_235",
+    "config_236",
+    "config_248"
+  ],
+  "test_config_ids": [
+    "config_0",
+    "config_1",
+    "config_3",
+    "config_6",
+    "config_9",
+    "config_11",
+    "config_19",
+    "config_21",
+    "config_31",
+    "config_39",
+    "config_40",
+    "config_41",
+    "config_49",
+    "config_51",
+    "config_52",
+    "config_53",
+    "config_56",
+    "config_60",
+    "config_65",
+    "config_68",
+    "config_71",
+    "config_72",
+    "config_79",
+    "config_85",
+    "config_87",
+    "config_91",
+    "config_93",
+    "config_103",
+    "config_106",
+    "config_109",
+    "config_114",
+    "config_137",
+    "config_148",
+    "config_150",
+    "config_157",
+    "config_160",
+    "config_165",
+    "config_168",
+    "config_179",
+    "config_180",
+    "config_181",
+    "config_182",
+    "config_186",
+    "config_190",
+    "config_193",
+    "config_200",
+    "config_205",
+    "config_209",
+    "config_216",
+    "config_248"
+  ],
+  "val_composed_worlds": [
+    {
+      "id": "val_world_000",
+      "emitter_count": 49,
+      "world_seed": 728572034
+    },
+    {
+      "id": "val_world_001",
+      "emitter_count": 18,
+      "world_seed": 865314009
+    },
+    {
+      "id": "val_world_002",
+      "emitter_count": 29,
+      "world_seed": 401591267
+    },
+    {
+      "id": "val_world_003",
+      "emitter_count": 6,
+      "world_seed": 962446707
+    },
+    {
+      "id": "val_world_004",
+      "emitter_count": 49,
+      "world_seed": 1348493209
+    },
+    {
+      "id": "val_world_005",
+      "emitter_count": 13,
+      "world_seed": 1634779013
+    },
+    {
+      "id": "val_world_006",
+      "emitter_count": 4,
+      "world_seed": 1117781769
+    },
+    {
+      "id": "val_world_007",
+      "emitter_count": 10,
+      "world_seed": 1067670188
+    },
+    {
+      "id": "val_world_008",
+      "emitter_count": 10,
+      "world_seed": 622445435
+    },
+    {
+      "id": "val_world_009",
+      "emitter_count": 10,
+      "world_seed": 493873960
+    },
+    {
+      "id": "val_world_010",
+      "emitter_count": 50,
+      "world_seed": 1296871728
+    },
+    {
+      "id": "val_world_011",
+      "emitter_count": 44,
+      "world_seed": 100764868
+    },
+    {
+      "id": "val_world_012",
+      "emitter_count": 6,
+      "world_seed": 513778410
+    },
+    {
+      "id": "val_world_013",
+      "emitter_count": 37,
+      "world_seed": 1806559852
+    },
+    {
+      "id": "val_world_014",
+      "emitter_count": 21,
+      "world_seed": 193291453
+    },
+    {
+      "id": "val_world_015",
+      "emitter_count": 25,
+      "world_seed": 2070107970
+    },
+    {
+      "id": "val_world_016",
+      "emitter_count": 37,
+      "world_seed": 38788838
+    },
+    {
+      "id": "val_world_017",
+      "emitter_count": 18,
+      "world_seed": 1878539477
+    },
+    {
+      "id": "val_world_018",
+      "emitter_count": 25,
+      "world_seed": 1331423684
+    },
+    {
+      "id": "val_world_019",
+      "emitter_count": 50,
+      "world_seed": 462587725
+    },
+    {
+      "id": "val_world_020",
+      "emitter_count": 18,
+      "world_seed": 1838070107
+    },
+    {
+      "id": "val_world_021",
+      "emitter_count": 6,
+      "world_seed": 741632757
+    },
+    {
+      "id": "val_world_022",
+      "emitter_count": 36,
+      "world_seed": 978361481
+    },
+    {
+      "id": "val_world_023",
+      "emitter_count": 29,
+      "world_seed": 1510850392
+    },
+    {
+      "id": "val_world_024",
+      "emitter_count": 18,
+      "world_seed": 720598178
+    },
+    {
+      "id": "val_world_025",
+      "emitter_count": 41,
+      "world_seed": 1840047582
+    },
+    {
+      "id": "val_world_026",
+      "emitter_count": 49,
+      "world_seed": 1531215
+    },
+    {
+      "id": "val_world_027",
+      "emitter_count": 13,
+      "world_seed": 1656231729
+    },
+    {
+      "id": "val_world_028",
+      "emitter_count": 39,
+      "world_seed": 308304997
+    },
+    {
+      "id": "val_world_029",
+      "emitter_count": 50,
+      "world_seed": 1555827518
+    },
+    {
+      "id": "val_world_030",
+      "emitter_count": 41,
+      "world_seed": 127574755
+    },
+    {
+      "id": "val_world_031",
+      "emitter_count": 10,
+      "world_seed": 1345657142
+    },
+    {
+      "id": "val_world_032",
+      "emitter_count": 13,
+      "world_seed": 1405838780
+    },
+    {
+      "id": "val_world_033",
+      "emitter_count": 41,
+      "world_seed": 146213788
+    },
+    {
+      "id": "val_world_034",
+      "emitter_count": 41,
+      "world_seed": 708420253
+    },
+    {
+      "id": "val_world_035",
+      "emitter_count": 38,
+      "world_seed": 1349820484
+    },
+    {
+      "id": "val_world_036",
+      "emitter_count": 6,
+      "world_seed": 517460483
+    },
+    {
+      "id": "val_world_037",
+      "emitter_count": 41,
+      "world_seed": 1098850290
+    },
+    {
+      "id": "val_world_038",
+      "emitter_count": 21,
+      "world_seed": 1937579529
+    },
+    {
+      "id": "val_world_039",
+      "emitter_count": 11,
+      "world_seed": 592691794
+    },
+    {
+      "id": "val_world_040",
+      "emitter_count": 6,
+      "world_seed": 428979164
+    },
+    {
+      "id": "val_world_041",
+      "emitter_count": 38,
+      "world_seed": 1192294371
+    },
+    {
+      "id": "val_world_042",
+      "emitter_count": 19,
+      "world_seed": 747964823
+    },
+    {
+      "id": "val_world_043",
+      "emitter_count": 4,
+      "world_seed": 1054247840
+    },
+    {
+      "id": "val_world_044",
+      "emitter_count": 49,
+      "world_seed": 1131594091
+    },
+    {
+      "id": "val_world_045",
+      "emitter_count": 41,
+      "world_seed": 1480824335
+    },
+    {
+      "id": "val_world_046",
+      "emitter_count": 38,
+      "world_seed": 1141492710
+    },
+    {
+      "id": "val_world_047",
+      "emitter_count": 29,
+      "world_seed": 1512988817
+    },
+    {
+      "id": "val_world_048",
+      "emitter_count": 10,
+      "world_seed": 224395551
+    },
+    {
+      "id": "val_world_049",
+      "emitter_count": 36,
+      "world_seed": 1610029191
+    }
+  ],
+  "test_composed_worlds": [
+    {
+      "id": "test_world_000",
+      "emitter_count": 33,
+      "world_seed": 206398217
+    },
+    {
+      "id": "test_world_001",
+      "emitter_count": 37,
+      "world_seed": 707962964
+    },
+    {
+      "id": "test_world_002",
+      "emitter_count": 3,
+      "world_seed": 242289674
+    },
+    {
+      "id": "test_world_003",
+      "emitter_count": 12,
+      "world_seed": 1171917441
+    },
+    {
+      "id": "test_world_004",
+      "emitter_count": 3,
+      "world_seed": 1992690865
+    },
+    {
+      "id": "test_world_005",
+      "emitter_count": 34,
+      "world_seed": 1890541228
+    },
+    {
+      "id": "test_world_006",
+      "emitter_count": 17,
+      "world_seed": 865577713
+    },
+    {
+      "id": "test_world_007",
+      "emitter_count": 36,
+      "world_seed": 289610369
+    },
+    {
+      "id": "test_world_008",
+      "emitter_count": 40,
+      "world_seed": 406955019
+    },
+    {
+      "id": "test_world_009",
+      "emitter_count": 48,
+      "world_seed": 430837617
+    },
+    {
+      "id": "test_world_010",
+      "emitter_count": 34,
+      "world_seed": 1503667359
+    },
+    {
+      "id": "test_world_011",
+      "emitter_count": 12,
+      "world_seed": 1966793243
+    },
+    {
+      "id": "test_world_012",
+      "emitter_count": 33,
+      "world_seed": 1690668890
+    },
+    {
+      "id": "test_world_013",
+      "emitter_count": 48,
+      "world_seed": 1586286213
+    },
+    {
+      "id": "test_world_014",
+      "emitter_count": 36,
+      "world_seed": 619333376
+    },
+    {
+      "id": "test_world_015",
+      "emitter_count": 16,
+      "world_seed": 1786325204
+    },
+    {
+      "id": "test_world_016",
+      "emitter_count": 12,
+      "world_seed": 1966432148
+    },
+    {
+      "id": "test_world_017",
+      "emitter_count": 12,
+      "world_seed": 287478016
+    },
+    {
+      "id": "test_world_018",
+      "emitter_count": 37,
+      "world_seed": 422343445
+    },
+    {
+      "id": "test_world_019",
+      "emitter_count": 25,
+      "world_seed": 1495912927
+    },
+    {
+      "id": "test_world_020",
+      "emitter_count": 40,
+      "world_seed": 1477109053
+    },
+    {
+      "id": "test_world_021",
+      "emitter_count": 12,
+      "world_seed": 358274741
+    },
+    {
+      "id": "test_world_022",
+      "emitter_count": 49,
+      "world_seed": 840840513
+    },
+    {
+      "id": "test_world_023",
+      "emitter_count": 14,
+      "world_seed": 1067161441
+    },
+    {
+      "id": "test_world_024",
+      "emitter_count": 46,
+      "world_seed": 1382439833
+    },
+    {
+      "id": "test_world_025",
+      "emitter_count": 12,
+      "world_seed": 1844067248
+    },
+    {
+      "id": "test_world_026",
+      "emitter_count": 3,
+      "world_seed": 1513811504
+    },
+    {
+      "id": "test_world_027",
+      "emitter_count": 46,
+      "world_seed": 1857981390
+    },
+    {
+      "id": "test_world_028",
+      "emitter_count": 6,
+      "world_seed": 1912682342
+    },
+    {
+      "id": "test_world_029",
+      "emitter_count": 12,
+      "world_seed": 826845867
+    },
+    {
+      "id": "test_world_030",
+      "emitter_count": 46,
+      "world_seed": 1299867759
+    },
+    {
+      "id": "test_world_031",
+      "emitter_count": 3,
+      "world_seed": 1327544906
+    },
+    {
+      "id": "test_world_032",
+      "emitter_count": 12,
+      "world_seed": 1693506863
+    },
+    {
+      "id": "test_world_033",
+      "emitter_count": 27,
+      "world_seed": 689908223
+    },
+    {
+      "id": "test_world_034",
+      "emitter_count": 3,
+      "world_seed": 1047809859
+    },
+    {
+      "id": "test_world_035",
+      "emitter_count": 14,
+      "world_seed": 1591125227
+    },
+    {
+      "id": "test_world_036",
+      "emitter_count": 46,
+      "world_seed": 721820308
+    },
+    {
+      "id": "test_world_037",
+      "emitter_count": 17,
+      "world_seed": 1811253078
+    },
+    {
+      "id": "test_world_038",
+      "emitter_count": 17,
+      "world_seed": 1637246603
+    },
+    {
+      "id": "test_world_039",
+      "emitter_count": 46,
+      "world_seed": 1984689631
+    },
+    {
+      "id": "test_world_040",
+      "emitter_count": 31,
+      "world_seed": 663135586
+    },
+    {
+      "id": "test_world_041",
+      "emitter_count": 12,
+      "world_seed": 1912991140
+    },
+    {
+      "id": "test_world_042",
+      "emitter_count": 14,
+      "world_seed": 2047569992
+    },
+    {
+      "id": "test_world_043",
+      "emitter_count": 46,
+      "world_seed": 682842865
+    },
+    {
+      "id": "test_world_044",
+      "emitter_count": 27,
+      "world_seed": 383081117
+    },
+    {
+      "id": "test_world_045",
+      "emitter_count": 46,
+      "world_seed": 920405521
+    },
+    {
+      "id": "test_world_046",
+      "emitter_count": 36,
+      "world_seed": 639266380
+    },
+    {
+      "id": "test_world_047",
+      "emitter_count": 31,
+      "world_seed": 1125588045
+    },
+    {
+      "id": "test_world_048",
+      "emitter_count": 46,
+      "world_seed": 581023733
+    },
+    {
+      "id": "test_world_049",
+      "emitter_count": 13,
+      "world_seed": 1222619733
+    }
+  ],
+  "illumination_seed": 20261004,
+  "illumination_conditions": {
+    "normal": {},
+    "beam_periodic": {
+      "period_s": 2.0,
+      "duty_cycle": 0.1
+    },
+    "beam_stochastic": {
+      "mean_on_s": 0.2,
+      "mean_off_s": 1.8
+    }
+  },
+  "receiver_seed": 20261003,
+  "selection_metric": "pooled recorded opportunity interception ratio on VAL_NORMAL",
+  "test_gate": "explicit --final only; no checkpoint selection on TEST",
+  "world_mode": "emitter_recombined",
+  "count_recipe": "empirical split source emitter counts conditioned on N <= distinct source configs; no clipping; fixed before training",
+  "world_recipe_seed": 20261005,
+  "source_emitter_count_distributions": {
+    "val": [
+      72,
+      37,
+      10,
+      36,
+      21,
+      41,
+      7,
+      18,
+      11,
+      29,
+      38,
+      61,
+      25,
+      49,
+      1,
+      58,
+      37,
+      19,
+      50,
+      50,
+      4,
+      21,
+      10,
+      44,
+      6,
+      50,
+      25,
+      53,
+      41,
+      36,
+      48,
+      3,
+      58,
+      29,
+      59,
+      20,
+      30,
+      50,
+      13,
+      44,
+      38,
+      6,
+      15,
+      39,
+      60,
+      64,
+      11,
+      39,
+      44,
+      45
+    ],
+    "test": [
+      1,
+      27,
+      12,
+      14,
+      3,
+      46,
+      12,
+      43,
+      14,
+      47,
+      31,
+      48,
+      64,
+      76,
+      7,
+      25,
+      46,
+      53,
+      33,
+      3,
+      69,
+      69,
+      34,
+      40,
+      6,
+      17,
+      31,
+      60,
+      59,
+      46,
+      70,
+      40,
+      43,
+      37,
+      75,
+      54,
+      76,
+      36,
+      49,
+      58,
+      37,
+      12,
+      63,
+      55,
+      13,
+      70,
+      16,
+      68,
+      37,
+      55
+    ]
+  },
+  "schema": "vyapti_evaluation_spec_v1"
+}

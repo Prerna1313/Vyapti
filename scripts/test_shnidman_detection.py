@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
-from vyapti_simulator.tsrd.tsrd_environment import (
+from vyapti_simulator.system_b.tsrd.tsrd_environment import (
     DetectionConfig,
     ShnidmanDetectionConfig,
 )

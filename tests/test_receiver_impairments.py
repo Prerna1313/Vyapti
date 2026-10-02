@@ -3,7 +3,7 @@ tests.test_receiver_impairments
 ================================
 
 Tests for the hardware receiver impairment models in
-``vyapti_simulator.rf.receiver_impairments``:
+``vyapti_simulator.system_c.rf.receiver_impairments``:
 
   1. Phase noise (Wiener random walk on carrier phase)
   2. IQ gain imbalance (Q relative to I)
@@ -25,7 +25,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.receiver_impairments import (
+from vyapti_simulator.system_c.rf.receiver_impairments import (
     apply_phase_noise,
     apply_iq_imbalance,
     apply_dc_offset,

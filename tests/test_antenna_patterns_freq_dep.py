@@ -3,7 +3,7 @@ tests.test_antenna_patterns_freq_dep
 ====================================
 
 Tests for the frequency-dependent antenna gain models in
-``vyapti_simulator.tsrd.antenna_patterns``:
+``vyapti_simulator.system_b.tsrd.antenna_patterns``:
 
   - ``cosine_taper_antenna_gain``: cosine-shaped passband
   - ``sinc_antenna_gain``: sinc-squared roll-off with nulls
@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.tsrd.antenna_patterns import (
+from vyapti_simulator.system_b.tsrd.antenna_patterns import (
     cosine_taper_antenna_gain,
     sinc_antenna_gain,
     realistic_ew_antenna_gain,
@@ -210,13 +210,13 @@ class TestBackwardCompat:
     """The new freq-dependent helpers do not break the existing band-indexed ones."""
 
     def test_uniform_still_zero(self):
-        from vyapti_simulator.tsrd.antenna_patterns import uniform_antenna_gain
+        from vyapti_simulator.system_b.tsrd.antenna_patterns import uniform_antenna_gain
         g = uniform_antenna_gain(10)
         np.testing.assert_array_equal(g, np.zeros(10))
 
     def test_existing_helpers_unchanged(self):
         """The legacy band-indexed helpers still work."""
-        from vyapti_simulator.tsrd.antenna_patterns import (
+        from vyapti_simulator.system_b.tsrd.antenna_patterns import (
             sectorised_antenna_gain,
             realistic_antenna_gain,
         )

@@ -34,7 +34,7 @@ from vyapti_simulator.core.environment import (
     VyaptiEnv,
     SimulationConfig,
 )
-from vyapti_simulator.tsrd.tsrd_emitter import (
+from vyapti_simulator.system_b.tsrd.tsrd_emitter import (
     FREQ_MODE_TO_BEHAVIOR,
     TSRDEmitterSampler,
 )

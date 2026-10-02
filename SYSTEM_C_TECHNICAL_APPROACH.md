@@ -2,7 +2,7 @@
 
 ## 1. Overview and Motivation
 System C is our advanced RF physics stress-test layer for the Vyapti Electronic Warfare (EW) Simulator. 
-While System A and B rely on abstract, slotted time intervals and statistical detection models (e.g., a logistic function mapping SNR to Probability of Detection), **System C simulates the physical reality of the electromagnetic spectrum.**
+System A generates synthetic PDW streams and System B replays recorded TSRD PDWs using abstract, slotted detection models. **System C simulates RF/IQ propagation and CFAR detection.**
 
 The core objective of System C is to validate that our cognitive EW schedulers are learning robust strategies that work in the real physical world, rather than just exploiting mathematical artifacts of the abstract probability models in Systems A and B.
 

@@ -1,0 +1,50 @@
+{
+  "contract_version": "train250_recorded_pdw_v1",
+  "claim": "TSRD emitter-realization compositional scheduler development; synthetic cross-source arrangements, no global RF physics reconstruction",
+  "beam_and_illumination_state": "unobserved in source STARE PDWs; hidden periodic and CTMC visibility gates are applied in evaluation only",
+  "data_root": "../../Data",
+  "cache_root": "../../Data/cache/tsrd/train_250",
+  "expected_train_configs": 250,
+  "receiver": {
+    "profile": "binary_v1",
+    "detector_model": "recorded_stare_bernoulli",
+    "band_centres_mhz": "250 + 500 * band_index, band_index=0..35",
+    "passband_halfwidth_mhz": 500.0,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05,
+    "retune_time_ms": 1.0
+  },
+  "action": {
+    "band_indices": "0..35",
+    "dwell_slots": [
+      1
+    ]
+  },
+  "observation": [
+    "time_slot",
+    "selected_band",
+    "hit",
+    "retune_cost_s",
+    "dwell_elapsed_s",
+    "receiver_metadata"
+  ],
+  "reward": "detector_positive: +1 for an observed hit, 0 otherwise; no hidden truth to policy",
+  "world_sampling": "empirical TRAIN-250 emitter count; uniform distinct source configs then uniform complete emitter trace within each source; independent seeded additive ToA offsets",
+  "metrics": {
+    "conditional_pd": "true detections / selected eligible band-slot windows",
+    "true_pfa": "false alarms / selected empty band-slot windows",
+    "opportunity_interception_ratio": "true detections / all occupied recorded band-slot cells",
+    "unique_emitter_interception_rate": "intercepted eligible emitters / eligible emitters; oracle attribution, evaluation only",
+    "dead_time_fraction": "retune overhead seconds / elapsed mission seconds"
+  },
+  "world": {
+    "mode": "emitter_recombined",
+    "spatial_model": "tsrd_native",
+    "generator_version": "emitter_recombined_v2",
+    "time_offset_us": 1000000,
+    "source_config_rule": "max_one_emitter_per_source_config_per_world"
+  },
+  "schema": "vyapti_environment_spec_v1",
+  "evaluation_spec": "../evaluation/heldout_worlds.json",
+  "evaluation_mode": "source_replay"
+}

@@ -16,7 +16,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from vyapti_simulator.tsrd.paired_scan_validation import (
+from vyapti_simulator.system_b.tsrd.paired_scan_validation import (
     _groups_equal,
     _receiver_schedule,
 )

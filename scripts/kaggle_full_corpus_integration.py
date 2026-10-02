@@ -156,7 +156,7 @@ if not _on_kaggle:
     print("[kaggle] Skipping corpus loader (no corpus dir).")
     summary = None
 else:
-    from vyapti_simulator.tsrd import (
+    from vyapti_simulator.system_b.tsrd import (
         TSRDCorpusLoader,
         TSRDDataMode,
         CorpusFileDisposition,
@@ -344,7 +344,7 @@ if not _on_kaggle and not _run_synthetic:
     }
 else:
     # Imports for Options B and C
-    from vyapti_simulator.tsrd import (
+    from vyapti_simulator.system_b.tsrd import (
         DetectionConfig,
         DeinterleaverConfig,
         TSRDEnvironment,
@@ -371,18 +371,16 @@ else:
     _deint_contam_list: List[float] = []
 
     # -----------------------------------------------------------------
-    # Synthetic branch: build a single 6-emitter synthetic stream,
+    # System A branch: build a single 6-emitter synthetic stream,
     # wrap it in a TSRDEnvironment, and run the same paired episode
-    # as the TSRD path. Validates the full Options B+C pipeline
-    # without a TSRD licence.
+    # as the recorded TSRD path. Validates downstream components
+    # without claiming to evaluate on recorded TSRD.
     # -----------------------------------------------------------------
     if _run_synthetic and not _on_kaggle:
-        print("[kaggle] Starting Option B+C experiment on SYNTHETIC 6-emitter scenario...")
+        print("[kaggle] Starting synthetic System A comparison on a 6-emitter scenario...")
         experiment_start = time.time()
         try:
-            from vyapti_simulator.tsrd import (
-                default_six_emitter_scenario,
-            )
+            from vyapti_simulator.system_a.synthetic_pdw import default_six_emitter_scenario
             synthetic_stream = default_six_emitter_scenario(
                 mission_duration_s=5.0, seed=42,
             )

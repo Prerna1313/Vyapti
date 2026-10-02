@@ -3,7 +3,7 @@ tests.test_rf_simulator_engine
 ===============================
 
 Tests for the real-time RF simulation engine in
-``vyapti_simulator.rf.simulator_engine``.
+``vyapti_simulator.system_c.rf.simulator_engine``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vyapti_simulator.rf.simulator_engine import (
+from vyapti_simulator.system_c.rf.simulator_engine import (
     SimulationEngineConfig,
     SimEmitter,
     RealTimeRFSimulator,
@@ -115,7 +115,7 @@ def _dummy_waveform_fn(t, cfg, rng):
 
 class TestEmitterManagement:
     def test_add_emitter_returns_id(self):
-        from vyapti_simulator.rf.propagation import KinematicEmitter
+        from vyapti_simulator.system_c.rf.propagation import KinematicEmitter
         cfg = SimulationEngineConfig(num_ticks=10)
         sim = RealTimeRFSimulator(cfg)
         kin = KinematicEmitter(position_m=np.array([500.0, 0.0, 0.0]))
@@ -123,7 +123,7 @@ class TestEmitterManagement:
         assert eid == 0
 
     def test_add_multiple_emitters_incremental_ids(self):
-        from vyapti_simulator.rf.propagation import KinematicEmitter
+        from vyapti_simulator.system_c.rf.propagation import KinematicEmitter
         cfg = SimulationEngineConfig(num_ticks=10)
         sim = RealTimeRFSimulator(cfg)
         kin = KinematicEmitter(position_m=np.array([500.0, 0.0, 0.0]))
@@ -132,7 +132,7 @@ class TestEmitterManagement:
         assert eid1 == eid0 + 1
 
     def test_remove_emitter_found(self):
-        from vyapti_simulator.rf.propagation import KinematicEmitter
+        from vyapti_simulator.system_c.rf.propagation import KinematicEmitter
         cfg = SimulationEngineConfig(num_ticks=10)
         sim = RealTimeRFSimulator(cfg)
         kin = KinematicEmitter(position_m=np.array([500.0, 0.0, 0.0]))
@@ -188,17 +188,19 @@ class TestRunLoop:
         buf = next(sim.run())
         assert buf.shape == (5 * 10_000,)
 
-    def test_no_emitters_produces_zeros(self):
+    def test_no_emitters_produces_receiver_noise(self):
         cfg = SimulationEngineConfig(
             tick_interval_s=10e-3,
             dsp_sample_rate_hz=1e6,
             num_ticks=2,
             buffer_ticks=2,
         )
-        sim = RealTimeRFSimulator(cfg)
+        sim = RealTimeRFSimulator(cfg, rng=np.random.default_rng(13))
         buf = next(sim.run())
-        # No emitters: should be all zeros
-        np.testing.assert_allclose(buf, 0.0, atol=1e-30)
+        expected_noise_power = 2.0 * cfg.pulse_power_w / (10.0 ** (cfg.snr_db / 10.0))
+        assert float(np.mean(np.abs(buf) ** 2)) == pytest.approx(
+            expected_noise_power, rel=0.08
+        )
 
 
 # =====================================================================
@@ -227,7 +229,10 @@ class TestSimulateOffline:
         )
         rng = np.random.default_rng(0)
         result = simulate_offline([], cfg, rng=rng)
-        np.testing.assert_allclose(result, 0.0, atol=1e-30)
+        expected_noise_power = 2.0 * cfg.pulse_power_w / (10.0 ** (cfg.snr_db / 10.0))
+        assert float(np.mean(np.abs(result) ** 2)) == pytest.approx(
+            expected_noise_power, rel=0.05
+        )
 
 
 # =====================================================================
@@ -236,7 +241,7 @@ class TestSimulateOffline:
 
 class TestStatus:
     def test_status_shows_emitters(self):
-        from vyapti_simulator.rf.propagation import KinematicEmitter
+        from vyapti_simulator.system_c.rf.propagation import KinematicEmitter
         cfg = SimulationEngineConfig(num_ticks=10)
         sim = RealTimeRFSimulator(cfg)
         kin = KinematicEmitter(position_m=np.array([500.0, 0.0, 0.0]))

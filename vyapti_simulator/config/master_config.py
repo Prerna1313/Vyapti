@@ -107,7 +107,7 @@ class MasterSimulationConfig:
     # the canonical path lives on the Kaggle runtime.
     # `tsrd_corpus_dir` points at the local mirror for the
     # fixtures; the full-corpus integration is
-    # Kaggle-runnable via `vyapti_simulator.tsrd.TSRDCorpusLoader`.
+    # Kaggle-runnable via `vyapti_simulator.system_b.tsrd.TSRDCorpusLoader`.
     tsrd_corpus_dir: str = "tests/fixtures/tsrd"  # fixture mirror
     # When True, `TSRDCorpusLoader(require_manifest=True)`
     # will refuse to iterate a corpus without a

@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 
-from vyapti_simulator.tsrd.tsrd_environment import DetectionConfig
+from vyapti_simulator.core.detection_config import DetectionConfig
 
 
 # (no_detection, detection) pairs to sweep.

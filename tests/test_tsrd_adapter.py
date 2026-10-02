@@ -39,7 +39,7 @@ import numpy as np
 import pytest
 
 from vyapti_simulator.core.environment import SimulationConfig
-from vyapti_simulator.tsrd import (
+from vyapti_simulator.system_b.tsrd import (
     EXPECTED_H5_FEATURE_NAMES,
     PDW_STREAM_FIELDS,
     FREQ_MODE_TO_BEHAVIOR,
@@ -399,7 +399,7 @@ class TestObservedOccupancy:
         "observed Scan-mode occupancy, not inactive truth"
         wording as a string-guard against silent rewording.
         """
-        from vyapti_simulator.tsrd import tsrd_adapter as mod
+        from vyapti_simulator.system_b.tsrd import tsrd_adapter as mod
         src = Path(mod.__file__).read_text(encoding="utf-8")
         # Look for the substring inside the method.
         idx = src.find("def to_level1_observed_occupancy")

@@ -16,13 +16,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
-from vyapti_simulator.tsrd.antenna_patterns import (
+from vyapti_simulator.system_b.tsrd.antenna_patterns import (
     uniform_antenna_gain,
     sectorised_antenna_gain,
     realistic_antenna_gain,
     uniform_sectorised_antenna_gain,
 )
-from vyapti_simulator.tsrd.tsrd_environment import DetectionConfig
+from vyapti_simulator.core.detection_config import DetectionConfig
 
 
 def check_uniform_gain() -> dict:
@@ -78,7 +78,7 @@ def check_backward_compat() -> dict:
     """Default DetectionConfig (empty antenna_gain_db) → 0 dB per band."""
     cfg = DetectionConfig()
     # When antenna_gain_db is empty, get_band_antenna_gain returns 0.0
-    from vyapti_simulator.tsrd.tsrd_environment import TSRDEnvironment
+    from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDEnvironment
     import inspect
     # Check that default is empty array
     arr = cfg.antenna_gain_db

@@ -530,7 +530,7 @@ This is the standard EW deinterleaving order (Wiley 2006 "ELINT") adapted for sc
 When TSRD data is unavailable (e.g., Kaggle without the dataset), `SyntheticEWPDWGenerator` produces a TSRD-shaped `PDWStream` from emitter specs:
 
 ```python
-from vyapti_simulator.tsrd.synthetic_pdw_generator import (
+from vyapti_simulator.system_a.synthetic_pdw.generator import (
     SyntheticEWPDWGenerator, SyntheticEmitterSpec,
     default_two_emitter_scenario, default_six_emitter_scenario,
 )
@@ -555,7 +555,7 @@ gen = SyntheticEWPDWGenerator(specs=specs, mission_duration_s=30.0, seed=42)
 pdw = gen.generate()
 
 # Now run it through the same TSRDEnvironment pipeline
-from vyapti_simulator.tsrd import TSRDEnvironment, DetectionConfig
+from vyapti_simulator.system_b.tsrd import TSRDEnvironment, DetectionConfig
 env = TSRDEnvironment(pdw_stream=pdw, simulation_config=sim_cfg)
 ```
 
@@ -724,7 +724,7 @@ Behavior-based threat scores (agile=9–10, periodic=7, fixed=3) align with EW d
 The oracle answers: *"Given Stare-Mode ground truth, what fraction of pulses would a candidate scan policy have captured?"*
 
 ```python
-from vyapti_simulator.tsrd.scan_policy_oracle import (
+from vyapti_simulator.system_b.tsrd.scan_policy_oracle import (
     ScanPolicyOracle, DefaultScanPolicyOracle,
     build_uniform_scan_policy, evaluate_multiple_policies,
 )
@@ -785,7 +785,7 @@ A scheduler that wins on System A or B but loses on System C has learned to expl
 ### Closed-loop scheduler interface
 
 ```python
-from vyapti_simulator.rf import (
+from vyapti_simulator.system_c.rf import (
     ThreatScoreScheduler, ThreatWeights, MissionRunner,
     RealTimeRFSimulator, TSRDSpecToRFBridge, RFPipelineConfig,
     SyntheticEWPDWGenerator, default_six_emitter_scenario,
@@ -830,7 +830,7 @@ print(f"Threat score: {result.scheduler_score.threat_score:.3f}")
 ### Comparison harness
 
 ```python
-from vyapti_simulator.rf import run_comparison, summarise_results
+from vyapti_simulator.system_c.rf import run_comparison, summarise_results
 
 results = run_comparison(
     emitter_specs=specs,
@@ -849,7 +849,7 @@ print(summary)
 ### Open-loop pipeline (no scheduler)
 
 ```python
-from vyapti_simulator.rf import RFPulsePipeline, RFPipelineConfig, TSRDSpecToRFBridge
+from vyapti_simulator.system_c.rf import RFPulsePipeline, RFPipelineConfig, TSRDSpecToRFBridge
 
 specs = default_six_emitter_scenario(seed=42)
 config = RFPipelineConfig(
@@ -974,11 +974,11 @@ This runs 11 checks (C0–C10). Results from uncertified schedulers are not admi
 ### Run a System C Stress Test
 
 ```python
-from vyapti_simulator.rf import (
+from vyapti_simulator.system_c.rf import (
     RoundRobinScheduler, PriorityQueueScheduler, ThreatScoreScheduler,
     ThreatWeights, run_comparison,
 )
-from vyapti_simulator.tsrd.synthetic_pdw_generator import default_six_emitter_scenario
+from vyapti_simulator.system_a.synthetic_pdw.generator import default_six_emitter_scenario
 
 specs = default_six_emitter_scenario(seed=42)
 results = run_comparison(
