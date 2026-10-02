@@ -2,8 +2,8 @@
 
 Package layout updated: 2026-10-02. The verification entries below are dated.
 This page describes this checkout; it is the
-starting point for future code reviews. Older `GATE0_COMPLETE.md` and
-`SUMMARY_OF_CHANGES.md` are historical notes, not current certifications.
+starting point for future code reviews. Historical gate and change notes live
+under [`docs/audits/`](docs/audits/README.md) and are not current certifications.
 
 ## Verified repository facts
 
@@ -16,12 +16,12 @@ starting point for future code reviews. Older `GATE0_COMPLETE.md` and
   subset: 250 TRAIN, 50 VAL, and 50 TEST source files. `Data/scan/` retains
   29 additional SCAN files. The 6,000-file inventory below describes the
   earlier full corpus, rather than the current retained subset.
-  See [TSRD_BASELINE_2026-09-28.md](TSRD_BASELINE_2026-09-28.md) for the
+  See [TSRD_BASELINE_2026-09-28.md](docs/audits/TSRD_BASELINE_2026-09-28.md) for the
   repository baseline and [TSRD_REPLAY_CONTRACT.md](TSRD_REPLAY_CONTRACT.md)
   for the versioned recorded-PDW replay assumptions. The local content-hash
   inventory is `data_provenance/tsrd_corpus_manifest.json`; its upstream
   download revision remains unproven. The full-corpus gate and anomalies are
-  in [TSRD_READINESS_2026-09-28.md](TSRD_READINESS_2026-09-28.md).
+  in [TSRD_READINESS_2026-09-28.md](docs/audits/TSRD_READINESS_2026-09-28.md).
 - Python tests live in `tests/`. The two small HDF5 integration fixtures and
   their manifest are in `tests/fixtures/tsrd/`. Local sample folders `3/` and
   `4/` are ignored by Git and are not the complete dataset.
@@ -40,8 +40,8 @@ starting point for future code reviews. Older `GATE0_COMPLETE.md` and
 - [API_REFERENCE.md](API_REFERENCE.md): module index; source code defines the
   actual signatures.
 - [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md): local test commands.
-- [PROVENANCE.md](PROVENANCE.md): historical and current rationale; verify
-  individual claims against implementation before using them in reports.
+- [docs/audits/](docs/audits/README.md): dated dataset audits and historical
+  gate/provenance notes; verify claims against current implementation.
 
 ## Verification and limits
 

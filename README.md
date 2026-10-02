@@ -213,7 +213,7 @@ disabled by default; results using it need a separate label.
 
 ## References
 
-- **Protocol and parameter provenance:** [`PROVENANCE.md`](PROVENANCE.md)
+- **Historical audits and provenance:** [`docs/audits/`](docs/audits/README.md)
 - **TSRD:** arXiv:2602.03856, Apache-2.0
 - **Wilcoxon / Cliff's delta:** scipy.stats, Romano et al. (2006)
 - **Kaplan-Meier:** Kaplan & Meier (1958)

@@ -1,7 +1,7 @@
 # PROVENANCE - Vyapti / TSRD Option-A Integration
 
 > Historical design narrative. For the current checkout and dated checks,
-> see [REPOSITORY_STATUS.md](REPOSITORY_STATUS.md). Verify technical claims
+> see [REPOSITORY_STATUS.md](../../REPOSITORY_STATUS.md). Verify technical claims
 > below against source and tests before citing them as measured results.
 
 This document is the audit trail for the synthetic data generation used inside vyapti_simulator. It records **what** is loaded, **how** it is translated into a discrete physical baseband, **what** the simulator consumes, **what** it deliberately discards, and the strict mathematical boundaries that prevent truth leakage.

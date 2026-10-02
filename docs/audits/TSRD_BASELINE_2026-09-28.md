@@ -139,7 +139,7 @@ held-out test split.
 - The temporary `.baseline_deps/` directory containing `h5py` remains in the
   workspace and is ignored by Git. Approval review rejected its cleanup.
 
-The dated `REPOSITORY_STATUS.md` statement that the train and validation
+The dated [`REPOSITORY_STATUS.md`](../../REPOSITORY_STATUS.md) statement that the train and validation
 corpora are absent is stale for this checkout. Its earlier 583-test result is a
 historical result and was not reproduced here.
 

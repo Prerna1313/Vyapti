@@ -2,7 +2,7 @@
 
 > Historical note. This file records an earlier patch attempt; its test count
 > and implementation claims are not a current status report. See
-> [REPOSITORY_STATUS.md](REPOSITORY_STATUS.md) for the current checkout.
+> [REPOSITORY_STATUS.md](../../REPOSITORY_STATUS.md) for the current checkout.
 
 ## Changes Made
 
