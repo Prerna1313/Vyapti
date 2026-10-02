@@ -1,0 +1,60 @@
+{
+  "contract_version": "train250_recorded_pdw_v1",
+  "claim": "recorded-PDW scheduler development; no live RF or beam physics claim",
+  "beam_and_illumination_state": "unobserved in source STARE PDWs; hidden periodic and CTMC visibility gates are applied in evaluation only",
+  "data_root": "Data",
+  "cache_root": "Data/cache/tsrd/train_250",
+  "expected_train_configs": 250,
+  "policy_module": "vyapti_simulator.tsrd.policies.ucb_prior",
+  "seed": 20261002,
+  "train_episodes": 100,
+  "receiver": {
+    "profile": "binary_v1",
+    "detector_model": "recorded_stare_bernoulli",
+    "band_centres_mhz": "250 + 500 * band_index, band_index=0..35",
+    "passband_halfwidth_mhz": 500.0,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05,
+    "retune_time_ms": 1.0
+  },
+  "action": {"band_indices": "0..35", "dwell_slots": [1]},
+  "observation": ["time_slot", "selected_band", "hit", "retune_cost_s", "dwell_elapsed_s", "receiver_metadata"],
+  "reward": "detector_positive: +1 for an observed hit, 0 otherwise; no hidden truth to policy",
+  "world_sampling": "fresh composition without replacement from TRAIN-250 emitters; emitter count sampled from selected-config count distribution; seeds from one run RNG",
+  "evaluation": {
+    "expected_val_configs": 50,
+    "expected_test_configs": 50,
+    "val_config_ids": [
+      "config_2", "config_4", "config_16", "config_22", "config_41", "config_42", "config_43", "config_47", "config_53", "config_56",
+      "config_66", "config_67", "config_68", "config_74", "config_79", "config_81", "config_83", "config_86", "config_91", "config_101",
+      "config_108", "config_115", "config_120", "config_122", "config_143", "config_147", "config_150", "config_152", "config_160", "config_163",
+      "config_166", "config_169", "config_170", "config_171", "config_178", "config_181", "config_183", "config_184", "config_186", "config_193",
+      "config_196", "config_208", "config_209", "config_213", "config_217", "config_224", "config_232", "config_235", "config_236", "config_248"
+    ],
+    "test_config_ids": [
+      "config_0", "config_1", "config_3", "config_6", "config_9", "config_11", "config_19", "config_21", "config_31", "config_39",
+      "config_40", "config_41", "config_49", "config_51", "config_52", "config_53", "config_56", "config_60", "config_65", "config_68",
+      "config_71", "config_72", "config_79", "config_85", "config_87", "config_91", "config_93", "config_103", "config_106", "config_109",
+      "config_114", "config_137", "config_148", "config_150", "config_157", "config_160", "config_165", "config_168", "config_179", "config_180",
+      "config_181", "config_182", "config_186", "config_190", "config_193", "config_200", "config_205", "config_209", "config_216", "config_248"
+    ],
+    "val_composed_worlds": [],
+    "test_composed_worlds": [],
+    "illumination_seed": 20261004,
+    "illumination_conditions": {
+      "normal": {},
+      "beam_periodic": {"period_s": 2.0, "duty_cycle": 0.1},
+      "beam_stochastic": {"mean_on_s": 0.2, "mean_off_s": 1.8}
+    },
+    "receiver_seed": 20261003,
+    "selection_metric": "pooled recorded opportunity interception ratio on VAL_NORMAL",
+    "test_gate": "explicit --final only; no checkpoint selection on TEST"
+  },
+  "metrics": {
+    "conditional_pd": "true detections / selected eligible band-slot windows",
+    "true_pfa": "false alarms / selected empty band-slot windows",
+    "opportunity_interception_ratio": "true detections / all occupied recorded band-slot cells",
+    "unique_emitter_interception_rate": "intercepted eligible emitters / eligible emitters; oracle attribution, evaluation only",
+    "dead_time_fraction": "retune overhead seconds / elapsed mission seconds"
+  }
+}
