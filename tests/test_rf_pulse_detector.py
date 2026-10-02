@@ -71,7 +71,7 @@ class TestPulseDetectorBasics:
         assert pdw.pw_us.dtype == np.float32
         assert pdw.aoa_deg.dtype == np.float32
         assert pdw.amp_db.dtype == np.float32
-        assert pdw.emitter_id.dtype == np.int64
+        assert not hasattr(pdw, "emitter_id")
 
     def test_detect_pure_noise_zero_detections(self):
         """Pure noise at low amplitude yields zero detections at high CFAR."""
@@ -189,8 +189,8 @@ class TestPulseDetectorBasics:
         pdw2 = det2.detect(iq2)
         np.testing.assert_array_equal(pdw.aoa_deg, pdw2.aoa_deg)
 
-    def test_emitter_id_assigned_from_map(self):
-        """Detected pulses carry the emitter_id from the map."""
+    def test_emitter_id_excluded_despite_truth_map(self):
+        """Truth-map identity is physically absent from detector output."""
         cfg = PulseDetectorConfig(
             dsp_sample_rate_hz=1e6, tick_interval_s=1e-3,
             cfar_db=10.0, min_pulse_samples=3,
@@ -211,9 +211,9 @@ class TestPulseDetectorBasics:
             rng=rng, snr_db=25.0,
         )
         pdw = det.detect(iq)
-        # All detections should have emitter_id = 7
-        for eid in pdw.emitter_id:
-            assert int(eid) == 7
+        assert len(pdw) >= 1
+        assert not hasattr(pdw, "emitter_id")
+        assert np.all(pdw.as_unlabelled_pdw_stream().emitter_id == -1)
 
     def test_buffer_length_must_be_multiple_of_tick(self):
         """IQ buffer length must be a multiple of samples_per_tick."""

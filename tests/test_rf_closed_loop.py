@@ -229,7 +229,7 @@ class TestDetectDwell:
         )
         assert hasattr(pdws, "toa_us")
         assert hasattr(pdws, "freq_mhz")
-        assert hasattr(pdws, "emitter_id")
+        assert not hasattr(pdws, "emitter_id")
 
     def test_detect_dwell_finds_pulse(self):
         """A high-SNR pulse in the dwell band is detected."""

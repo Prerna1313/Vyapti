@@ -142,6 +142,7 @@ from .deinterleaver import (
     EmitterTrack,
 )
 from ..core.environment import SimulationConfig
+from ..core.receiver_observation import ReceiverObservation
 
 
 # =====================================================================
@@ -796,6 +797,7 @@ class TSRDEnvironment:
             "emitter_identity_excluded": True,
             "future_state_excluded": True,
         }
+        observation = ReceiverObservation.from_mapping(observation)
         self._observation_history.append(observation)
         self._previous_band = selected_band
         self._current_slot = t + 1
@@ -1262,6 +1264,7 @@ class TSRDStareEnvironment:
     def from_stare_mode(
         cls, stare_file: str, scan_file: str = None, sim_config=None, *,
         band_centres_mhz=None,
+        passband_halfwidth_mhz: float | None = None,
         receiver_profile: str = "binary_v1",
         amplitude_midpoint_db: float = -90.0,
         amplitude_scale_db: float = 5.0,
@@ -1285,6 +1288,12 @@ class TSRDStareEnvironment:
             collection_s = float(receiver.attrs["collection_time_s"])
             data = f["data"][:]
             raw_labels = np.asarray(f["labels"][:])
+        if passband_halfwidth_mhz is not None and (
+            not np.isfinite(passband_halfwidth_mhz)
+            or passband_halfwidth_mhz <= 0
+            or not np.isclose(halfwidth, passband_halfwidth_mhz)
+        ):
+            raise ValueError("Configured passband halfwidth disagrees with TSRD metadata")
         explicit_centres = (None if band_centres_mhz is None else
                             np.asarray(band_centres_mhz, dtype=np.float64))
         if explicit_centres is not None and (
@@ -1452,8 +1461,8 @@ class TSRDStareEnvironment:
         empty_indices = np.empty(0, dtype=np.intp)
         if dwell_s <= 0:
             return False, None, empty_indices
-        start_us = (slot * self._config.slot_duration_s() + retune) * 1e6
-        end_us = (slot + 1) * self._config.slot_duration_s() * 1e6
+        start_us = round((slot * self._config.slot_duration_s() + retune) * 1e6, 9)
+        end_us = round((slot + 1) * self._config.slot_duration_s() * 1e6, 9)
         lo = int(np.searchsorted(self._toa_us, start_us, side="left"))
         hi = int(np.searchsorted(self._toa_us, end_us, side="left"))
         window = self._stare_data[lo:hi]
@@ -1513,8 +1522,8 @@ class TSRDStareEnvironment:
             return False
         if self._stare_data is None:
             return bool(self._occupancy_grid[band, slot]) and retune_cost_s == 0.0
-        start_us = (slot * self._config.slot_duration_s() + retune_cost_s) * 1e6
-        end_us = (slot + 1) * self._config.slot_duration_s() * 1e6
+        start_us = round((slot * self._config.slot_duration_s() + retune_cost_s) * 1e6, 9)
+        end_us = round((slot + 1) * self._config.slot_duration_s() * 1e6, 9)
         lo = np.searchsorted(self._toa_us, start_us, side="left")
         hi = np.searchsorted(self._toa_us, end_us, side="left")
         freq = self._stare_data[lo:hi, 1]
@@ -1559,6 +1568,7 @@ class TSRDStareEnvironment:
         }
         if self._receiver_profile == "pdw_v2":
             obs["receiver_measurement"] = measurement
+        obs = ReceiverObservation.from_mapping(obs)
         self._observation_history.append(obs)
         self._current_slot += 1
         return obs, False

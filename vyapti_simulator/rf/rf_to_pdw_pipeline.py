@@ -307,7 +307,9 @@ class RFPulsePipeline:
                 emitter_map=single_emitter_map,
                 rng=self.rng,
             )
-            per_emitter_pdws.append(detector.detect(iq_buffer))
+            # Legacy TSRD containers require a label column. It is always unknown,
+            # never inferred from the synthetic input spec or detector map.
+            per_emitter_pdws.append(detector.detect(iq_buffer).as_unlabelled_pdw_stream())
 
         if not per_emitter_pdws:
             return PDWStream(

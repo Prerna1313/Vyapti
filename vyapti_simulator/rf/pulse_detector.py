@@ -4,8 +4,8 @@ vyapti_simulator.rf.pulse_detector
 
 Pulse detection on I/Q baseband buffers from ``RealTimeRFSimulator``.
 
-The detector converts complex I/Q samples → a TSRD-shaped ``PDWStream``
-(ToA, RF, PW, AoA, AMP, emitter_id) by:
+The detector converts complex I/Q samples to a label-free ``MeasuredPDWStream``
+(ToA, RF, PW, AoA, AMP) by:
 
   1. **Tick segmentation** — split the concatenated I/Q buffer into
      per-tick segments using ``samples_per_tick``.
@@ -20,13 +20,10 @@ The detector converts complex I/Q samples → a TSRD-shaped ``PDWStream``
      PW (3 dB envelope width), SNR (peak / median noise).
   6. **AoA assignment** — looked up from the per-emitter AoA map
      (``emitter_id → aoa_deg``) passed in the detector config.
-  7. **Emitter ID assignment** — from the ground-truth emitter map
-     (``emitter_id → carrier_freq_hz``) passed in the detector config.
-
-The emitter-id assignment uses ground truth because the RF engine
-outputs continuous I/Q without per-pulse emitter labels. This is
-intentional: it mirrors the TSRD path where AoA is an input
-parameter, not an estimated quantity.
+No ground-truth emitter identity is assigned or returned. AoA still uses a
+noisy simulation proxy from the emitter map, not an independent array estimator.
+Legacy TSRD consumers can request an explicit conversion with unknown labels
+(-1); source identities cannot be recovered from that conversion.
 
 References
 ----------
@@ -58,6 +55,24 @@ except ImportError:
 from ..tsrd.tsrd_adapter import PDWStream
 
 
+@dataclass(frozen=True, slots=True)
+class MeasuredPDWStream:
+    """Five measured features; ground-truth identity has no field here."""
+    toa_us: np.ndarray
+    freq_mhz: np.ndarray
+    pw_us: np.ndarray
+    aoa_deg: np.ndarray
+    amp_db: np.ndarray
+
+    def __len__(self):
+        return int(self.toa_us.size)
+
+    def as_unlabelled_pdw_stream(self) -> PDWStream:
+        """Compatibility adapter for six-field TSRD tools; every label is unknown."""
+        return PDWStream(self.toa_us, self.freq_mhz, self.pw_us, self.aoa_deg,
+                         self.amp_db, np.full(len(self), -1, dtype=np.int64))
+
+
 # =====================================================================
 # Configuration
 # =====================================================================
@@ -77,8 +92,9 @@ class PulseDetectorConfig:
     Cell-averaging CFAR with ``cfar_train_cells`` training cells on
     each side of the test cell and ``cfar_guard_cells`` guard cells
     adjacent to the test cell (excluded from the noise estimate).
-    The threshold is ``noise_power + cfar_db`` where noise_power
-    is the geometric mean of the training-cell powers.
+    The implementation averages the matched-filter magnitude in the training
+    cells and multiplies it by ``10 ** (cfar_db / 10)``. This legacy gain
+    convention is not a calibrated target-Pfa CA-CFAR power threshold.
 
     Waveform
     --------
@@ -120,7 +136,7 @@ class PulseDetectorConfig:
 class BaseDetector(ABC):
     """Abstract base class for all RF pulse detectors."""
     @abstractmethod
-    def detect(self, iq_buffer: np.ndarray) -> PDWStream:
+    def detect(self, iq_buffer: np.ndarray) -> MeasuredPDWStream:
         pass
 
 class CFARMatchedFilterDetector(BaseDetector):
@@ -133,7 +149,7 @@ class CFARMatchedFilterDetector(BaseDetector):
         Detector parameters.
     emitter_map : Dict[int, EmitterInfo]
         Maps ``emitter_id`` → ``EmitterInfo(carrier_freq_hz, aoa_deg)``.
-        Used for AoA assignment and emitter-ID labelling of detected
+        Used for simulated AoA assignment, never identity labelling of detected
         pulses. The map is stored by reference; update it between
         calls if the emitter set changes.
     rng : np.random.Generator, optional
@@ -179,7 +195,7 @@ class CFARMatchedFilterDetector(BaseDetector):
     # ------------------------------------------------------------------
     # Public API — full-buffer (batch / open-loop)
     # ------------------------------------------------------------------
-    def detect(self, iq_buffer: np.ndarray) -> PDWStream:
+    def detect(self, iq_buffer: np.ndarray) -> MeasuredPDWStream:
         """
         Detect pulses in an I/Q buffer and return a ``PDWStream``.
 
@@ -193,7 +209,7 @@ class CFARMatchedFilterDetector(BaseDetector):
         -------
         PDWStream
             Detected pulses with fields: ``toa_us``, ``freq_mhz``,
-            ``pw_us``, ``aoa_deg``, ``amp_db``, ``emitter_id``.
+            ``pw_us``, ``aoa_deg``, ``amp_db``. Identity is excluded.
             Sorted by ToA. Empty arrays on no detections.
         """
         cfg = self.config
@@ -215,7 +231,6 @@ class CFARMatchedFilterDetector(BaseDetector):
         all_pw_us: List[float] = []
         all_aoa: List[float] = []
         all_amp_db: List[float] = []
-        all_eid: List[int] = []
 
         for tick in range(n_ticks):
             start = tick * spt
@@ -230,16 +245,14 @@ class CFARMatchedFilterDetector(BaseDetector):
                 all_pw_us.append(float(p.pw_sec) * 1e6)
                 all_aoa.append(float(p.aoa_deg))
                 all_amp_db.append(float(p.amp_db))
-                all_eid.append(int(p.emitter_id))
 
         if not all_toa_us:
-            return PDWStream(
+            return MeasuredPDWStream(
                 toa_us=np.zeros(0, dtype=np.float32),
                 freq_mhz=np.zeros(0, dtype=np.float32),
                 pw_us=np.zeros(0, dtype=np.float32),
                 aoa_deg=np.zeros(0, dtype=np.float32),
                 amp_db=np.zeros(0, dtype=np.float32),
-                emitter_id=np.zeros(0, dtype=np.int64),
             )
 
         # Sort by ToA
@@ -249,15 +262,13 @@ class CFARMatchedFilterDetector(BaseDetector):
         pw_arr = np.asarray(all_pw_us, dtype=np.float64)[order]
         aoa_arr = np.asarray(all_aoa, dtype=np.float64)[order]
         amp_arr = np.asarray(all_amp_db, dtype=np.float64)[order]
-        eid_arr = np.asarray(all_eid, dtype=np.int64)[order]
 
-        return PDWStream(
+        return MeasuredPDWStream(
             toa_us=toa_arr.astype(np.float32),
             freq_mhz=freq_arr.astype(np.float32),
             pw_us=pw_arr.astype(np.float32),
             aoa_deg=aoa_arr.astype(np.float32),
             amp_db=amp_arr.astype(np.float32),
-            emitter_id=eid_arr,
         )
 
     # ------------------------------------------------------------------
@@ -271,7 +282,7 @@ class CFARMatchedFilterDetector(BaseDetector):
         freq_center_hz: Optional[float] = None,
         aoa_center_deg: Optional[float] = None,
         aoa_window_deg: Optional[float] = None,
-    ) -> PDWStream:
+    ) -> MeasuredPDWStream:
         """
         Detect pulses in one dwell's I/Q slice (closed-loop mode).
 
@@ -349,7 +360,7 @@ class CFARMatchedFilterDetector(BaseDetector):
                         continue
                 filtered_map[eid] = info
 
-        # Temporarily swap the emitter map so _lookup_emitter uses the
+        # Temporarily swap the emitter map so the simulated AoA lookup uses the
         # filtered set. Restore the original afterwards.
         original_map = self.emitter_map
         try:
@@ -369,7 +380,7 @@ class CFARMatchedFilterDetector(BaseDetector):
         # window (and AoA window when set) even if an emitter wasn't in
         # the map. This catches agile emitters whose frequency happens
         # to be inside the band, and excludes noise peaks labeled as
-        # emitter_id=-1 when the AoA filter is active.
+        # an unavailable AoA when the AoA filter is active.
         freq_start = float(freq_start_hz)
         freq_end = float(freq_end_hz)
         aoa_filter_active = (
@@ -394,22 +405,20 @@ class CFARMatchedFilterDetector(BaseDetector):
         ], dtype=bool)
 
         if not mask.any():
-            return PDWStream(
+            return MeasuredPDWStream(
                 toa_us=np.zeros(0, dtype=np.float32),
                 freq_mhz=np.zeros(0, dtype=np.float32),
                 pw_us=np.zeros(0, dtype=np.float32),
                 aoa_deg=np.zeros(0, dtype=np.float32),
                 amp_db=np.zeros(0, dtype=np.float32),
-                emitter_id=np.zeros(0, dtype=np.int64),
             )
 
-        return PDWStream(
+        return MeasuredPDWStream(
             toa_us=result.toa_us[mask],
             freq_mhz=result.freq_mhz[mask],
             pw_us=result.pw_us[mask],
             aoa_deg=result.aoa_deg[mask],
             amp_db=result.amp_db[mask],
-            emitter_id=result.emitter_id[mask],
         )
 
     # ------------------------------------------------------------------
@@ -471,13 +480,13 @@ class CFARMatchedFilterDetector(BaseDetector):
             # RF: from phase slope across the peak region
             rf_hz = self._estimate_frequency(tick_iq, pk_idx, cfg)
 
-            # AoA and emitter ID: ground-truth lookup
-            aoa_deg, emitter_id = self._lookup_emitter(rf_hz)
+            # No emitter identity is assigned. AoA is a documented simulation proxy.
+            aoa_deg, aoa_available = self._lookup_aoa(rf_hz)
 
             # CRLB-inspired stochastic AoA error model
             # Error std scales as k / sqrt(SNR_linear). Model is approximate
             # near 10 dB where the true CRLB itself becomes less reliable.
-            if emitter_id >= 0:
+            if aoa_available:
                 k_deg = 5.0
                 sigma_deg = k_deg / np.sqrt(max(snr_linear, 1.0))
                 aoa_deg += float(self.rng.normal(0.0, sigma_deg))
@@ -489,7 +498,6 @@ class CFARMatchedFilterDetector(BaseDetector):
                 pw_sec=pw_sec,
                 aoa_deg=aoa_deg,
                 amp_db=amp_db,
-                emitter_id=emitter_id,
             ))
 
         return pulses
@@ -684,16 +692,16 @@ class CFARMatchedFilterDetector(BaseDetector):
     # ------------------------------------------------------------------
     # AoA / emitter ID lookup
     # ------------------------------------------------------------------
-    def _lookup_emitter(self, freq_hz: float) -> Tuple[float, int]:
+    def _lookup_aoa(self, freq_hz: float) -> Tuple[float, bool]:
         """
-        Look up the AoA and emitter ID for a detected pulse.
+        Look up a simulated AoA proxy without assigning an emitter ID.
 
         Uses the frequency to find the closest matching emitter in
         the emitter map. This is the ground-truth assignment —
         the RF engine has no independent emitter-ID signal.
         """
         if not self.emitter_map:
-            return 0.0, -1
+            return 0.0, False
         # Find the emitter with the closest carrier frequency
         best_eid = -1
         best_delta = float("inf")
@@ -703,9 +711,9 @@ class CFARMatchedFilterDetector(BaseDetector):
                 best_delta = delta
                 best_eid = eid
         if best_eid < 0:
-            return 0.0, -1
+            return 0.0, False
         info = self.emitter_map[best_eid]
-        return float(info.aoa_deg), int(best_eid)
+        return float(info.aoa_deg), True
 
     def update_emitter_map(self, emitter_map: Dict[int, "EmitterInfo"]) -> None:
         """Replace the current emitter map."""
@@ -723,7 +731,6 @@ class DetectedPulse:
     pw_sec: float
     aoa_deg: float
     amp_db: float
-    emitter_id: int
 
 
 @dataclass

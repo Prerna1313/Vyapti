@@ -49,6 +49,7 @@ from __future__ import annotations
 from typing import List, Dict, Optional, Protocol, Any, Sequence
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 
 
 # =====================================================================
@@ -91,6 +92,8 @@ PDW_FEATURE_KEYS = frozenset({
 #: Names known to denote hidden truth. Retained for a precise error message
 #: when one of them appears; the whitelist above is what actually enforces.
 FORBIDDEN_OBSERVATION_KEYS = frozenset({
+    "truth", "emitter_id", "source_config_id", "source_label", "pool_id",
+    "future_frequency", "beam_state", "illumination_state",
     "true_emitter_state", "hidden_truth", "hidden_truth_grid", "ground_truth_band",
     "true_activity", "emitter_identity", "emitter_label", "actual_period",
     "hopping_sequence", "future_transmission", "future_state", "complete_occupancy",
@@ -248,15 +251,15 @@ class BaseScheduler(ABC):
             for measurement in measurements:
                 if measurement is None:
                     continue
-                if not isinstance(measurement, dict) or set(measurement) != PDW_MEASUREMENT_KEYS:
+                if not isinstance(measurement, Mapping) or set(measurement) != PDW_MEASUREMENT_KEYS:
                     raise ValueError("Invalid receiver measurement fields")
                 count = measurement["pulse_count"]
                 pdws = measurement["pdws"]
                 if (not isinstance(count, int) or isinstance(count, bool) or count < 1
-                        or not isinstance(pdws, list) or not 1 <= len(pdws) <= count):
+                        or not isinstance(pdws, (list, tuple)) or not 1 <= len(pdws) <= count):
                     raise ValueError("Invalid measured PDW count")
                 for pdw in pdws:
-                    if (not isinstance(pdw, dict) or set(pdw) != PDW_FEATURE_KEYS
+                    if (not isinstance(pdw, Mapping) or set(pdw) != PDW_FEATURE_KEYS
                             or any(not isinstance(value, (int, float))
                                    or not math.isfinite(value) for value in pdw.values())):
                         raise ValueError("Invalid measured PDW fields")

@@ -907,6 +907,13 @@ class MissionRunner:
                     aoa_center_deg=dwell.aoa_center_deg,
                     aoa_window_deg=dwell.aoa_window_deg,
                 )
+                if hasattr(pdws, "as_unlabelled_pdw_stream"):
+                    pdws = pdws.as_unlabelled_pdw_stream()
+                else:
+                    # Compatibility for custom detectors: labels never enter state.
+                    pdws = PDWStream(pdws.toa_us, pdws.freq_mhz, pdws.pw_us,
+                                     pdws.aoa_deg, pdws.amp_db,
+                                     np.full(len(pdws), -1, dtype=np.int64))
             except Exception as e:
                 if not getattr(self, 'resilience', False):
                     raise
@@ -944,7 +951,6 @@ class MissionRunner:
                 # pulses into the MissionState's all_detections list, causing the
                 # scorecard to grade 0.0% because it had an empty list of tracks!
                 for i in range(len(shifted.toa_us)):
-                    eid = int(shifted.emitter_id[i])
                     freq = float(shifted.freq_mhz[i]) * 1e6
                     aoa = float(shifted.aoa_deg[i])
                     pw = float(shifted.pw_us[i])
@@ -953,7 +959,8 @@ class MissionRunner:
 
                     found = False
                     for trk in state.all_detections:
-                        if trk.emitter_id == eid and eid >= 0:
+                        aoa_delta = abs((trk.aoa_deg - aoa + 180.0) % 360.0 - 180.0)
+                        if abs(trk.freq_hz - freq) <= 5e6 and aoa_delta <= 10.0:
                             trk.detection_count += 1
                             trk.confirmation_count += 1
                             trk.last_detection_us = max(trk.last_detection_us, toa)
@@ -962,7 +969,8 @@ class MissionRunner:
 
                     if not found:
                         state.all_detections.append(TrackedEmitter(
-                            emitter_id=eid,
+                            # Receiver-local track number, unrelated to source IDs.
+                            emitter_id=len(state.all_detections),
                             freq_hz=freq,
                             aoa_deg=aoa,
                             pw_us=pw,

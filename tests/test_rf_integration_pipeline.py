@@ -245,7 +245,7 @@ class TestRFPulsePipeline:
         # Pulses are sorted by ToA
         assert np.all(np.diff(pdw.toa_us.astype(np.float64)) >= 0.0)
         # All pulses have the right emitter_id
-        assert np.all(pdw.emitter_id == 0)
+        assert np.all(pdw.emitter_id == -1)
         # All pulses have the right AoA
         # Current AoA is temporary truth-derived behaviour; it will be removed in Gate 3 (measurement-only receiver).
         # We test deterministic replay instead of an exact nominal match.
@@ -305,8 +305,8 @@ class TestRFPulsePipeline:
         )
         pdw = pipeline.run()
         # Two emitter IDs
-        unique_ids = set(int(x) for x in np.unique(pdw.emitter_id))
-        assert unique_ids.issuperset({0, 1})
+        assert len(pdw) > 0
+        assert np.all(pdw.emitter_id == -1)
         # Pulses sorted by ToA
         assert np.all(np.diff(pdw.toa_us.astype(np.float64)) >= 0.0)
 

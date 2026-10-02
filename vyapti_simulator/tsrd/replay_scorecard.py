@@ -97,8 +97,8 @@ def score_recorded_replay(
                 and int(step.observation["time_slot"]) == expected_slot):
             raise ValueError("TSRD trajectory must cover each slot exactly once in order")
         retune_s = float(step.observation.get("retune_cost_s", 0.0))
-        start_us = (slot * slot_s + retune_s) * 1e6
-        end_us = (slot + 1) * slot_s * 1e6
+        start_us = round((slot * slot_s + retune_s) * 1e6, 9)
+        end_us = round((slot + 1) * slot_s * 1e6, 9)
         lo = int(np.searchsorted(toa, start_us, side="left"))
         hi = int(np.searchsorted(toa, end_us, side="left"))
         matching = np.abs(freq[lo:hi] - centres[band]) <= halfwidth

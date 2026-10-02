@@ -43,6 +43,7 @@ import numpy as np
 from typing import Union, List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from .receiver_observation import ReceiverObservation
 
 # NOTE on the frequency<->band / time<->slot mapping helpers in
 # `vyapti_simulator.core.mapping`:
@@ -806,6 +807,7 @@ class VyaptiEnv:
             "emitter_identity_excluded": True,
             "future_state_excluded": True,
         }
+        observation = ReceiverObservation.from_mapping(observation)
         self.observation_history.append(observation)
 
         self._previous_band = selected_band

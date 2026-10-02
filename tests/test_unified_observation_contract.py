@@ -327,8 +327,11 @@ class TestSchemaIdentity:
         env.reset(seed=7)
         obs, _ = env.step(5)
 
-        # Values must be JSON-serialisable (or NaN for empty cells)
-        for k, v in obs.items():
+        # Live observations are immutable records. Explicit serialization
+        # produces plain nested JSON data without exposing hidden fields.
+        serialized = obs.to_dict()
+        json.dumps(serialized, allow_nan=False)
+        for k, v in serialized.items():
             assert isinstance(v, (bool, int, float, str, dict, list, type(None))), (
                 f"Non-serialisable value at key {k}: {type(v)}"
             )

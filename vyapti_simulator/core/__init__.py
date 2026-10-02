@@ -19,6 +19,7 @@ from .mapping import (
     slot_start_seconds,
 )
 from .receiver import ReceiverPhysicsConfig, ReceiverModel
+from .receiver_observation import ReceiverObservation, ReceiverMetadata, ReceiverMeasurement, MeasuredPDW
 from .scheduler_interface import (
     SchedulerInterface,
     BaseScheduler,
@@ -72,6 +73,10 @@ __all__ = [
     # receiver
     "ReceiverPhysicsConfig",
     "ReceiverModel",
+    "ReceiverObservation",
+    "ReceiverMetadata",
+    "ReceiverMeasurement",
+    "MeasuredPDW",
     # scheduler contract
     "SchedulerInterface",
     "BaseScheduler",

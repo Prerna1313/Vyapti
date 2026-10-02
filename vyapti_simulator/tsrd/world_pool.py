@@ -27,6 +27,7 @@ class TSRDTrainWorldPool:
 
     def __init__(
         self, corpus_root: str | Path, *, band_centres_mhz=None,
+        passband_halfwidth_mhz: float | None = None,
         receiver_profile: str = "binary_v1", amplitude_midpoint_db: float = -90.0,
         amplitude_scale_db: float = 5.0, max_observed_pdws: int = 32,
         detection_probability: float = 1.0,
@@ -52,6 +53,7 @@ class TSRDTrainWorldPool:
         anchor = TSRDStareEnvironment.from_stare_mode(
             str(pairs[0][0]), str(pairs[0][1]) if pairs[0][1] is not None else None,
             band_centres_mhz=self.explicit_centres_mhz,
+            passband_halfwidth_mhz=passband_halfwidth_mhz,
             **self.receiver_profile_options,
             detection_probability=detection_probability,
             false_alarm_probability=false_alarm_probability,
