@@ -51,8 +51,9 @@ def _belief_state(elapsed_slots=0):
 
 def test_belief_mcts_uses_resolved_train250_calibration_and_environment_dwells():
     setup = _resolved_setup()
-    assert setup["algorithm"]["settings"]["mcts_simulations"] == 256
-    assert setup["algorithm"]["settings"]["mcts_horizon"] == 6
+    assert setup["algorithm"]["settings"]["mcts_simulations"] == 128
+    assert setup["algorithm"]["settings"]["mcts_horizon"] == 4
+    assert setup["algorithm"]["settings"]["mcts_uct_c"] == 1.25
     assert setup["algorithm"]["settings"]["prior_active_probability"] == 0.3426563254340138
     assert setup["algorithm"]["settings"]["inactive_to_active_probability"] == 0.022195484398616423
     assert setup["algorithm"]["settings"]["active_to_active_probability"] == 0.9575318615765981

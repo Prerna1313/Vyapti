@@ -639,7 +639,7 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             written.append(figure)
             run_config = json.loads((run / "config.json").read_text(encoding="utf-8"))
             algorithm_name = run_config.get("algorithm", {}).get("name")
-            if algorithm_name in {"ucb1", "round_robin", "belief_ucb", "belief_mcts"}:
+            if algorithm_name in {"ucb1", "round_robin", "belief_ucb", "belief_mcts", "contextual_thompson"}:
                 world_log = path.parent / "per_world.jsonl"
                 world_rows = [json.loads(line) for line in world_log.read_text(encoding="utf-8").splitlines()]
                 diagnostic_rows = [row for row in world_rows if row.get("policy_diagnostics")]

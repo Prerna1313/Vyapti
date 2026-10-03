@@ -7,8 +7,8 @@
   "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
   "settings": {
     "description": "Truth-hidden belief-state MCTS with causal TRAIN-250 HMM belief, causal periodicity, and a Bayesian model of the shared environment reward.",
-    "mcts_simulations": 256,
-    "mcts_horizon": 6,
+    "mcts_simulations": 128,
+    "mcts_horizon": 4,
     "mcts_uct_c": 1.25,
     "mcts_rollout_epsilon": 0.0,
     "warmup_actions": 72,

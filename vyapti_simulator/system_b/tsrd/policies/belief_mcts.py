@@ -236,12 +236,12 @@ CONTEXT_DIM = 55
 #
 # Reference search budget. It is not a real-time latency guarantee; measure
 # planning time on the intended hardware before choosing a training budget.
-DEFAULT_SIMULATIONS = 256
+DEFAULT_SIMULATIONS = 128
 
 # Number of future scheduling decisions considered in each simulation.
 #
-# With 50/100 ms native dwells this represents roughly 300-600 ms.
-DEFAULT_HORIZON = 6
+# With 50/100 ms native dwells this represents roughly 200-400 ms.
+DEFAULT_HORIZON = 4
 
 # UCT exploration coefficient.
 #

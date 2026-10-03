@@ -132,6 +132,11 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
         if dwell_profile is None:
             raise ValueError("belief_mcts requires the environment's native dwell profile")
         settings["native_dwell_slots"] = deepcopy(dwell_profile)
+    if spec.get("name") == "contextual_thompson":
+        dwell_profile = config.get("action", {}).get("dwell_slots_by_band")
+        if dwell_profile is None:
+            raise ValueError("contextual_thompson requires the environment's native dwell profile")
+        settings["native_dwell_slots"] = deepcopy(dwell_profile)
     if spec.get("api") == "legacy_episode":
         reward_bounds = settings.pop("reward_bounds", None)
         if settings:

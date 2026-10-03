@@ -1,0 +1,21 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "contextual_thompson",
+  "module": "vyapti_simulator.system_b.tsrd.policies.contextual_thompson",
+  "api": "public_transitions",
+  "checkpoint_extension": ".pt",
+  "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
+  "settings": {
+    "description": "Linear Gaussian contextual Thompson Sampling with receiver-only TRAIN-250 HMM belief and causal periodicity; learns from the shared environment reward.",
+    "prior_precision": 1.0,
+    "thompson_sampling_scale": 0.05,
+    "reward_noise_std": 0.01,
+    "warmup_actions": 72,
+    "periodicity_history": 32,
+    "periodicity_tolerance_fraction": 0.15,
+    "sample_in_evaluation": true,
+    "base_slot_seconds": 0.05,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05
+  }
+}

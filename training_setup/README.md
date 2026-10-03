@@ -246,7 +246,7 @@ their belief-derived probabilities. The selected branch is deepened while
 the other receives a one-step causal rollout; per-episode planning latency is
 written to the algorithm update log and evaluation world records.
 
-The first serious experiment uses 256 simulations and a six-decision
+The default experiment uses 128 simulations and a four-decision
 horizon. Measure planning latency on the intended hardware. For a budget
 ablation, compare 128, 256, 512, and 1024 simulations on the same frozen VAL
 catalog before making performance claims.
@@ -257,6 +257,22 @@ python -m scripts.training.train --environment training_setup/environments/train
 
 Evaluate candidate checkpoints on VAL_NORMAL, freeze the selected checkpoint,
 then run the final TEST conditions as for PPO-LSTM and SAC.
+
+### Contextual Thompson Sampling
+
+`contextual_thompson` is a separate trainable linear-Gaussian Thompson
+Sampling policy. It uses a 46-feature causal context with TRAIN-250 HMM
+belief and receiver-hit periodicity cues. Its posterior learns from the
+unchanged shared `transition.reward`; it does not add an intrinsic reward.
+The shared setup injects calibrated HMM values and the environment's exact
+native dwell vector.
+
+```powershell
+python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/contextual_thompson.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/contextual_thompson
+```
+
+The run follows the normal checkpoint and frozen-world VAL/TEST workflow.
+Evaluation reports its per-world band counts alongside the standard metrics.
 
 ### Belief-UCB
 
