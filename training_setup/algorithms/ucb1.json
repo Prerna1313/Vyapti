@@ -1,0 +1,10 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "ucb1",
+  "module": "vyapti_simulator.system_b.tsrd.policies.classical_ucb1",
+  "api": "public_transitions",
+  "settings": {
+    "exploration_coefficient": 1.4142135623730951,
+    "reward_bounds": [-0.01, 1.0]
+  }
+}

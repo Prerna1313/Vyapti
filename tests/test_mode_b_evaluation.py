@@ -58,13 +58,15 @@ def _setup(tmp_path):
     evaluation["analysis_protocol_spec"] = str(ROOT / "training_setup/evaluation/mode_b_protocol.json")
     for split in ("val", "test"):
         evaluation[f"expected_{split}_configs"] = 1
+        evaluation[f"expected_{split}_worlds"] = 1
         evaluation[f"{split}_config_ids"] = ["config_9"]
         evaluation[f"{split}_composed_worlds"] = [
             {"id": f"{split}_world_000", "source_config_ids": ["config_9"], "emitter_count": 1, "world_seed": 17}]
     env_path = tmp_path / "environment.json"
     _write(env_path, environment)
     _write(tmp_path / "heldout.json", evaluation)
-    algorithm = json.loads((ROOT / "training_setup/algorithms/ucb_prior.json").read_text())
+    algorithm = {"schema": "vyapti_algorithm_spec_v1", "name": "runner_fixture",
+        "module": "tests.fixtures.ucb_runner_fixture", "api": "public_transitions", "settings": {}}
     paths = []
     for name in ("first", "second"):
         path = tmp_path / (name + ".json")
@@ -148,10 +150,12 @@ def test_optional_predictions_and_train_only_agility_are_integrated(tmp_path, mo
     assert len(set(regimes)) == 1
     assert not (run / "eval/test").exists()
     figures = plot_run(run)
-    assert len(figures) == 10
+    assert len(figures) == 11
     assert all(path.is_file() and path.stat().st_size > 0 for path in figures)
     assert len([path for path in figures if path.name.endswith("_ttfi_cdf.png")]) == 3
     assert len([path for path in figures if path.name.endswith("_agility.png")]) == 3
+    assert (run / "eval/val/spatial_agility_matrix.json").is_file()
+    assert len([path for path in figures if path.name.endswith("_spatial_agility_matrix.png")]) == 1
 
 
 def test_pilot_runs_three_seeds_pairs_worlds_and_keeps_test_sealed(tmp_path):

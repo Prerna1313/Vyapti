@@ -387,7 +387,7 @@ def write_runtime_manifest(
         "receiver_profile": receiver_profile,
         "detector_model": ("recorded_stare_bernoulli" if receiver_profile == "binary_v1"
                            else "recorded_pdw_amplitude_logistic"),
-        "false_alarm_model": "bernoulli_per_empty_selected_base_look",
+        "false_alarm_model": "bernoulli_per_truth_empty_detector_evaluation_opportunity",
         "cfar_active": False,
         "detection_probability": float(detection_probability),
         "false_alarm_probability": float(false_alarm_probability),
@@ -395,9 +395,10 @@ def write_runtime_manifest(
         "training_seed": training_seed,
         "algorithm": algorithm_details,
         "training_budget": training_budget,
-        "checkpointing": checkpointing,
         "evaluation_analysis": analysis_details,
     }
+    if checkpointing is not None:
+        payload["checkpointing"] = checkpointing
     temporary = target.with_name(target.name + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     temporary.replace(target)

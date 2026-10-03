@@ -9,7 +9,7 @@ import pytest
 @pytest.mark.parametrize("module_name", [
     "vyapti_simulator.system_b.tsrd.tsrd_environment",
     "vyapti_simulator.system_b.tsrd.train250_cache",
-    "vyapti_simulator.system_b.tsrd.policies.ucb_prior",
+    "vyapti_simulator.system_b.tsrd.policies.classical_ucb1",
     "vyapti_simulator.system_c.rf.pulse_detector",
     "vyapti_simulator.system_c.rf.simulator_engine",
     "vyapti_simulator.system_c.emitters.emitter_models",

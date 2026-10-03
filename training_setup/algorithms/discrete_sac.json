@@ -1,0 +1,30 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "discrete_sac",
+  "module": "vyapti_simulator.system_b.tsrd.policies.discrete_sac",
+  "api": "public_transitions",
+  "checkpoint_extension": ".pt",
+  "settings": {
+    "description": "Discrete SAC with twin critics, automatic entropy temperature, and receiver-only factorized two-state occupancy belief features.",
+    "replay_capacity": 500000,
+    "warmup_actions": 5000,
+    "batch_size": 256,
+    "update_every_actions": 1,
+    "updates_per_action": 1,
+    "hidden_units": 256,
+    "actor_learning_rate": 0.0003,
+    "critic_learning_rate": 0.0003,
+    "temperature_learning_rate": 0.0003,
+    "gamma_per_base_slot": 0.997,
+    "target_update_tau": 0.005,
+    "target_entropy_fraction": 0.98,
+    "initial_alpha": 0.2,
+    "base_slot_seconds": 0.05,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05,
+    "inactive_to_active_probability": 0.05,
+    "active_to_active_probability": 0.9,
+    "device": "auto",
+    "cpu_threads": 1
+  }
+}

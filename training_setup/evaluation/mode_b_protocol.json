@@ -34,9 +34,10 @@
   "training_reward": {
     "name": "truth_based_intercept_utility_v2",
     "equation": "N_new/E - (U_before/E)*(dwell_seconds + 0.0003*switch)/30 - lambda_fa*(F_t/N_empty_t)*(dwell_seconds + 0.0003*switch)/30",
-    "new_intercept_utility": "N_new / E; credit at most the strongest-amplitude emitter in each positive occupied binary_v1 base-slot look; deduplicate first interceptions across the episode",
-    "elapsed_cost": "(unresolved emitters before action / eligible emitters) * (dwell seconds + band-change retune seconds) / 30 seconds",
-    "false_alarm_cost": "lambda_fa * (false-positive empty base-slot looks / empty base-slot opportunities) * (dwell + retune) / 30 seconds; zero when there are no empty opportunities",
+    "new_intercept_utility": "N_new / E; credit at most the strongest-amplitude emitter in each positive occupied detector-evaluation opportunity; deduplicate first interceptions across the episode",
+    "elapsed_cost": "(unresolved eligible emitters whose first opportunity slot is earlier than the action start / eligible emitters) * (actual dwell seconds + band-change retune seconds) / 30 seconds",
+    "false_alarm_cost": "lambda_FA * (false-positive truth-empty detector-evaluation opportunities / truth-empty detector-evaluation opportunities) * (actual dwell + retune) / 30 seconds; zero when there are no truth-empty opportunities",
+    "detector_evaluation_granularity": "one binary receiver result per 50 ms base step; a 100 ms dwell has two opportunities",
     "lambda_fa": 1.0,
     "retune_dead_time_s": 0.0003,
     "truth_channel": "scalar reward only; no emitter identity or hidden truth in observation"
@@ -82,5 +83,17 @@
     "seed_variability_reported_separately": true
   },
   "conditions": ["normal", "beam_periodic", "beam_stochastic"],
-  "test_policy": "evaluate_once_after_checkpoint_and_analysis_are_frozen"
+  "spatial_frequency_cross_stratification": {
+    "enabled": true,
+    "dimensions": ["illumination_condition", "train_derived_frequency_agility_regime"],
+    "frequency_regimes": ["low", "medium", "high"],
+    "report": "condition-by-regime OIR and unique-emitter interception summaries with world IDs",
+    "illumination_interpretation": "controlled visibility stress overlay on recorded STARE PDWs; source beam state and physical emission truth are unavailable"
+  },
+  "heldout_world_reconstruction": {
+    "storage": "recipes, source-file SHA-256 values, seeds, visibility-mask SHA-256 values, and replay signatures only",
+    "rebuild_check": "verify source hashes, recipe, receiver and illumination seeds, visibility mask, and deterministic replay signature before policy execution",
+    "train_storage": "generate one newly seeded world per episode and discard after episode"
+  },
+  "test_policy": "evaluate_once_after_policy_or_algorithm_and_analysis_are_frozen"
 }

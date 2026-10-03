@@ -1,7 +1,9 @@
 {
   "expected_val_configs": 50,
+  "expected_val_worlds": 50,
   "analysis_protocol_spec": "mode_b_protocol.json",
   "expected_test_configs": 50,
+  "expected_test_worlds": 50,
   "val_config_ids": [
     "config_2",
     "config_4",
@@ -622,6 +624,7 @@
       "mean_off_s": 1.8
     }
   },
+  "require_frozen_world_catalog": true,
   "receiver_seed": 20261003,
   "selection_metric": "pooled recorded opportunity interception ratio on VAL_NORMAL",
   "test_gate": "explicit --final only; no checkpoint selection on TEST",

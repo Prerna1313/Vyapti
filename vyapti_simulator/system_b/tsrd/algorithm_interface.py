@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from copy import deepcopy
 import importlib
+import json
 import math
 import hashlib
 from pathlib import Path
@@ -50,7 +51,6 @@ class Algorithm(Protocol):
     def select_action(self, state: PublicState, *, training: bool) -> int: ...
     def observe(self, transition: PublicTransition, *, training: bool) -> None: ...
     def end_episode(self, *, training: bool) -> dict | None: ...
-    def save(self, path: Path) -> None: ...
 
 
 class LegacyEpisodeAdapter:
@@ -130,7 +130,7 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
         algorithm = factory(bands=bands, seed=seed, settings=settings, checkpoint=checkpoint)
     else:
         raise ValueError("Algorithm api must be public_transitions or legacy_episode")
-    for method in ("reset_episode", "select_action", "observe", "end_episode", "save"):
+    for method in ("reset_episode", "select_action", "observe", "end_episode"):
         if not callable(getattr(algorithm, method, None)):
             raise ValueError(f"Algorithm is missing {method}")
     return algorithm
@@ -145,3 +145,10 @@ def algorithm_provenance(config: dict) -> dict:
         path = Path(source).resolve()
         spec["adapter_source"] = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     return spec
+
+
+def algorithm_fingerprint(config: dict) -> str:
+    """Content identity for policy code/settings when no weights are saved."""
+    provenance = algorithm_provenance(config)
+    encoded = json.dumps(provenance, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

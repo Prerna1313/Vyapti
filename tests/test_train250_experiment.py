@@ -9,7 +9,9 @@ import numpy as np
 import pytest
 
 from tests.test_train250_cache import _small_pool
+from vyapti_simulator.system_b.tsrd.checkpoints import freeze_selection
 from vyapti_simulator.system_b.tsrd.experiment import _evaluation_ids, evaluate, plot_run, train
+from vyapti_simulator.system_b.tsrd.frozen_world_catalog import load_world_catalog
 from vyapti_simulator.system_b.tsrd.train250_cache import compose_heldout_world
 from vyapti_simulator.system_b.tsrd.tsrd_adapter import stare_pulse_occupancy
 from vyapti_simulator.system_b.tsrd.tsrd_environment import TSRDStareEnvironment
@@ -19,10 +21,13 @@ from vyapti_simulator.system_b.tsrd.training_setup import resolve_setup
 def _legacy_template():
     root = Path(__file__).parents[1] / "training_setup"
     config = resolve_setup(root / "environments/train250_source_replay.json",
-                           root / "algorithms/ucb_prior.json", seed=20261002,
+                           root / "algorithms/ucb1.json", seed=20261002,
                            episodes=100, checkpoint_every=25)
+    config["algorithm"] = {"name": "runner_fixture", "module": "tests.fixtures.ucb_runner_fixture",
+                           "api": "public_transitions", "settings": {}}
     # Legacy replay compatibility: earlier saved runs had no selection record.
     config["checkpoint_selection_required"] = False
+    config.pop("val_selection_required", None)
     config.pop("checkpointing")
     return config
 
@@ -38,9 +43,11 @@ def test_mode_b_runs_only_frozen_compositions_and_keeps_test_reserved(tmp_path):
     config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2, train_episodes=1)
     config["world"] = {"mode": "emitter_recombined", "spatial_model": "tsrd_native", "time_offset_us": 12345}
     config["evaluation"]["world_mode"] = "emitter_recombined"
+    config["evaluation"]["require_frozen_world_catalog"] = True
     for split in ("val", "test"):
         config["evaluation"][f"{split}_config_ids"] = ["config_9"]
         config["evaluation"][f"expected_{split}_configs"] = 1
+        config["evaluation"][f"expected_{split}_worlds"] = 1
         config["evaluation"][f"{split}_composed_worlds"] = [
             {"id": f"{split}_world_000", "source_config_ids": ["config_9"],
              "world_seed": 23, "emitter_count": 1}]
@@ -48,6 +55,10 @@ def test_mode_b_runs_only_frozen_compositions_and_keeps_test_reserved(tmp_path):
     config_path.write_text(json.dumps(config))
     run = tmp_path / "run"
     train(config_path, run)
+    catalog, _ = load_world_catalog(run, json.loads((run / "status.json").read_text())["config_sha256"])
+    assert catalog["policy_evaluation_performed"] is False
+    assert len(catalog["splits"]["val"]["worlds"]) == 1
+    assert len(catalog["splits"]["test"]["worlds"]) == 1
     reports = evaluate(run, "val", condition="all")
     assert set(reports["conditions"]) == {"normal", "beam_periodic", "beam_stochastic"}
     sources = []
@@ -55,6 +66,7 @@ def test_mode_b_runs_only_frozen_compositions_and_keeps_test_reserved(tmp_path):
         worlds = [json.loads(row) for row in (run / "eval/val" / condition / "per_world.jsonl").read_text().splitlines()]
         assert len(worlds) == 1
         assert worlds[0]["kind"] == "composed_heldout"
+        assert worlds[0]["frozen_world_identity_sha256"]
         assert abs(worlds[0]["sources"][0]["time_offset_us"]) <= 12345
         sources.append(worlds[0]["sources"])
     assert sources[0] == sources[1] == sources[2]
@@ -113,6 +125,58 @@ def test_training_and_fixed_validation_are_reproducible(tmp_path):
         run / "eval/val/normal/worlds.json").read_text()
     with pytest.raises(FileExistsError):
         evaluate(run, "val")
+
+
+def test_ucb1_online_baseline_skips_pretraining_and_saves_plottable_diagnostics(tmp_path):
+    data, cache = _small_pool(tmp_path)
+    fixture = Path(__file__).parent / "fixtures/tsrd/config_0_stare.h5"
+    val = data / "stare/val_stare/config_9.h5"
+    val.parent.mkdir(parents=True)
+    shutil.copyfile(fixture, val)
+    test = data / "stare/test_stare/config_9.h5"
+    test.parent.mkdir(parents=True)
+    shutil.copyfile(fixture, test)
+    config = _legacy_template()
+    config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2,
+                  train_episodes=0, execution_mode="online_baseline")
+    config["algorithm"] = {"name": "ucb1", "module": "vyapti_simulator.system_b.tsrd.policies.classical_ucb1",
+                           "api": "public_transitions", "settings": {
+                               "exploration_coefficient": 1.4142135623730951,
+                               "reward_bounds": [-0.01, 1.0]}}
+    config.pop("checkpoint_file", None)
+    config["evaluation"]["val_config_ids"] = ["config_9"]
+    config["evaluation"]["expected_val_configs"] = 1
+    config["evaluation"]["test_config_ids"] = ["config_9"]
+    config["evaluation"]["expected_test_configs"] = 1
+    run = tmp_path / "runs/ucb1-online"
+    initialized_run = train(config, run)
+    assert initialized_run == run.resolve()
+    status = json.loads((run / "status.json").read_text())
+    assert status["execution_mode"] == "online_baseline"
+    assert status["completed_episodes"] == 0
+    assert not (run / "train/episodes.jsonl").exists()
+    assert not (run / "checkpoints").exists()
+
+    report = evaluate(run, "val")
+    assert report["policy_type"] == "online_baseline"
+    assert report["policy_sha256"]
+    assert "checkpoint_file" not in report
+    row = json.loads((run / "eval/val/normal/per_world.jsonl").read_text().splitlines()[0])
+    diagnostic = row["policy_diagnostics"]
+    assert diagnostic["statistics_reset_each_world"] is True
+    assert diagnostic["total_decisions"] == sum(diagnostic["band_selection_counts"])
+    assert len(diagnostic["band_selection_counts"]) == 36
+    assert report["summary"]["worlds"] == 1
+    figures = plot_run(run)
+    assert any(path.name == "val_ucb1_band_counts.png" for path in figures)
+    assert any(path.name == "val_ucb1_band_counts_by_world.png" for path in figures)
+    assert any(path.name == "val_ucb1_reward_components.png" for path in figures)
+    selection = freeze_selection(run, baseline=True)
+    assert selection["artifact_type"] == "online_baseline"
+    assert selection["policy_sha256"] == report["policy_sha256"]
+    test_report = evaluate(run, "test", final=True)
+    assert test_report["split"] == "test"
+    assert not (run / "eval/test/checkpoints").exists()
 
 
 def test_composed_heldout_world_is_deterministic_and_split_bound(tmp_path):

@@ -3,6 +3,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from .algorithm_interface import algorithm_fingerprint
+
 
 def file_hash(path):
     digest = hashlib.sha256()
@@ -61,12 +63,13 @@ def resolve_checkpoint(run, config, status, name=None):
 
 def evaluation_directory(run, config, name, split, condition):
     root = Path(run) / "eval" / split
-    if name != config.get("checkpoint_file", "final.json"):
+    if name is not None and name != config.get("checkpoint_file", "final.json"):
         root = root / "checkpoints" / Path(name).stem
     return root / condition
 
 
-def freeze_selection(run_dir, name, *, reason="Selected using frozen VAL_NORMAL results"):
+def freeze_selection(run_dir, name=None, *, baseline=False,
+                     reason="Selected using frozen VAL_NORMAL results"):
     run = Path(run_dir).resolve()
     config_path = run / "config.json"
     config = json.loads(config_path.read_text())
@@ -76,18 +79,44 @@ def freeze_selection(run_dir, name, *, reason="Selected using frozen VAL_NORMAL 
     target = run / "selection.json"
     if target.exists():
         raise FileExistsError(target)
-    checkpoint, digest = resolve_checkpoint(run, config, status, name)
-    summary_path = evaluation_directory(run, config, checkpoint.name, "val", "normal") / "summary.json"
+    is_baseline = config.get("execution_mode") == "online_baseline"
+    if is_baseline:
+        if not baseline or name is not None:
+            raise ValueError("An online baseline selection uses --baseline and has no checkpoint")
+        digest = algorithm_fingerprint(config)
+        if status.get("algorithm_sha256") != digest:
+            raise ValueError("Online baseline algorithm changed after run initialization")
+        artifact_dir = evaluation_directory(run, config, None, "val", "normal")
+        report_key = "policy_sha256"
+    else:
+        if baseline or name is None:
+            raise ValueError("A trained policy selection requires a checkpoint filename")
+        checkpoint, digest = resolve_checkpoint(run, config, status, name)
+        artifact_dir = evaluation_directory(run, config, checkpoint.name, "val", "normal")
+        report_key = "checkpoint_sha256"
+    summary_path = artifact_dir / "summary.json"
     report = json.loads(summary_path.read_text())
-    if report["split"] != "val" or report["condition"] != "normal" or report["checkpoint_sha256"] != digest:
-        raise ValueError("Selection needs this checkpoint's completed VAL_NORMAL report")
+    if (report["split"] != "val" or report["condition"] != "normal"
+            or report.get(report_key) != digest):
+        raise ValueError("Selection needs the policy's completed VAL_NORMAL report")
     metric = report["summary"]["opportunity_interception_ratio"]
     if metric is None:
         raise ValueError("VAL selection metric is unavailable")
-    selection = {"checkpoint_file": checkpoint.name, "checkpoint_sha256": digest,
+    selection = {"artifact_type": "online_baseline" if is_baseline else "checkpoint",
                  "config_sha256": status["config_sha256"], "reason": reason,
                  "metric": "VAL_NORMAL.opportunity_interception_ratio", "value": metric,
                  "validation_summary_sha256": file_hash(summary_path)}
+    if config.get("evaluation", {}).get("require_frozen_world_catalog"):
+        catalog_path = run / "frozen_world_catalog.json"
+        if not catalog_path.is_file():
+            raise ValueError("Freeze VAL/TEST world recipes and hashes before selecting a run")
+        from .frozen_world_catalog import load_world_catalog
+        load_world_catalog(run, status["config_sha256"])
+        selection["frozen_world_catalog_sha256"] = file_hash(catalog_path)
+    if is_baseline:
+        selection.update(algorithm_name=config.get("algorithm", {}).get("name"), policy_sha256=digest)
+    else:
+        selection.update(checkpoint_file=checkpoint.name, checkpoint_sha256=digest)
     with target.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(selection, indent=2) + "\n")
     return selection

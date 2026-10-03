@@ -12,9 +12,10 @@ from tests.test_train250_cache import _small_pool
 from vyapti_simulator.system_b.tsrd.algorithm_interface import PublicState, PublicTransition
 from vyapti_simulator.system_b.tsrd.checkpoints import freeze_selection
 from vyapti_simulator.system_b.tsrd.experiment import (
-    _strongest_emitter_in_selected_window, evaluate, load_contract, train,
+    _strongest_emitter_in_selected_window, _emitters_with_prior_opportunity,
+    evaluate, load_contract, train,
 )
-from vyapti_simulator.system_b.tsrd.training_setup import resolve_plan, resolve_setup
+from vyapti_simulator.system_b.tsrd.training_setup import resolve_setup
 
 
 ROOT = Path(__file__).parents[1] / "training_setup"
@@ -23,8 +24,10 @@ ROOT = Path(__file__).parents[1] / "training_setup"
 def test_environment_has_no_algorithm_and_heldout_recipes_are_shared():
     environment = json.loads((ROOT / "environments/train250_composed.json").read_text())
     assert not set(environment).intersection({"policy_module", "algorithm", "train_episodes", "seed", "neural_policy"})
-    config = resolve_plan(ROOT / "plans/ucb_pipeline_check.json")
-    assert config["algorithm"]["name"] == "ucb_prior"
+    config = resolve_setup(ROOT / "environments/train250_composed.json",
+                           ROOT / "algorithms/ucb1.json", seed=20261002,
+                           episodes=100, checkpoint_every=25)
+    assert config["algorithm"]["name"] == "ucb1"
     assert len(config["evaluation"]["val_composed_worlds"]) == 50
     assert len(config["evaluation"]["test_composed_worlds"]) == 50
     for split in ("val", "test"):
@@ -54,6 +57,12 @@ def test_binary_cell_hit_truth_credit_selects_only_strongest_emitter():
         receiver_geometry=(np.asarray([100.0]), 10.0),
     )
     assert _strongest_emitter_in_selected_window(world, 0, 0, 0.0) == 22
+
+
+def test_unresolved_elapsed_cost_excludes_emitters_without_prior_opportunity():
+    first_slots = {10: 0, 20: 3, 30: 8}
+    assert _emitters_with_prior_opportunity(first_slots, 3) == {10}
+    assert _emitters_with_prior_opportunity(first_slots, 4) == {10, 20}
 
 
 def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(tmp_path, monkeypatch):
@@ -103,7 +112,9 @@ def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(
         directory = data / "stare" / f"{split}_stare"
         directory.mkdir(parents=True)
         shutil.copyfile(fixture, directory / "config_9.h5")
-    config = resolve_plan(ROOT / "plans/ucb_pipeline_check.json")
+    config = resolve_setup(ROOT / "environments/train250_composed.json",
+                           ROOT / "algorithms/ucb1.json", seed=20261002,
+                           episodes=100, checkpoint_every=25)
     config.update(data_root=str(data), cache_root=str(cache), expected_train_configs=2, train_episodes=3)
     config["checkpointing"]["interval_episodes"] = 1
     config["algorithm"] = {"name": "replay_fixture", "module": module.__name__, "api": "public_transitions", "settings": {"update_every": 7}}
@@ -170,5 +181,5 @@ def test_off_policy_adapter_gets_transitions_and_checkpoint_selection_is_frozen(
 
 def test_run_budget_and_checkpoint_interval_must_be_explicit():
     with pytest.raises(ValueError, match="positive"):
-        resolve_setup(ROOT / "environments/train250_composed.json", ROOT / "algorithms/ucb_prior.json",
+        resolve_setup(ROOT / "environments/train250_composed.json", ROOT / "algorithms/ucb1.json",
                       seed=42, episodes=100, checkpoint_every=0)

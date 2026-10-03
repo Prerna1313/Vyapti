@@ -36,16 +36,23 @@ N_new / E
 ```
 
 `E` is the count of eligible emitters with an in-scope pulse opportunity in
-the hidden world, independent of scheduler observations. `U_before` is the
-number of those emitters not intercepted before the action. A binary-v1 hit is
-cell-level, so the reward credits at most one emitter per positive occupied
-50 ms look: the emitter with the strongest recorded in-band pulse in that
-look. First interceptions are deduplicated over the episode. `dwell` is the
-actual 50/100 ms action dwell, shortened at the mission end. `switch` is one
+the hidden world, independent of scheduler observations. `U_before` counts
+eligible, unresolved emitters whose first in-scope opportunity slot is
+strictly earlier than the action start. An emitter whose first opportunity is
+in the current action or later does not accrue elapsed cost yet. A binary-v1
+hit is cell-level, so the reward credits at most one emitter per positive
+occupied detector-evaluation opportunity: the emitter with the strongest
+recorded in-band pulse in that opportunity. First interceptions are
+deduplicated over the episode. `dwell` is the actual 50/100 ms action dwell,
+shortened at the mission end. `switch` is one
 when the band changes and zero otherwise; the first selection has no switch
-cost. `F_t` counts positive detections in empty selected base-slot windows,
-and `N_empty_t` counts empty selected windows. The false-alarm term is zero
-when `N_empty_t` is zero; otherwise it uses the observed false-alarm fraction.
+cost. `F_t` counts positive detections in truth-empty detector-evaluation
+opportunities, and `N_empty_t` counts truth-empty detector-evaluation
+opportunities. The receiver currently produces one binary result per 50 ms
+base step, so a 100 ms dwell contributes two opportunities. The false-alarm
+term is zero when `N_empty_t` is zero; otherwise it uses the observed
+false-alarm fraction. The false-alarm fraction is multiplied by the same
+elapsed-time factor shown in the formula.
 `lambda_FA` is frozen at 1.0.
 
 Thus, 30 s of unresolved dwell accumulates one normalized mission-time unit,
@@ -60,9 +67,9 @@ All held-out source IDs, composed-world recipes, receiver seeds, and
 illumination seeds are fixed in
 `training_setup/evaluation/heldout_worlds.json`. Every algorithm and training
 seed must replay identical world recipes and receiver seeds. VAL is available
-for model selection. TEST remains sealed until algorithms, checkpoints,
-hyperparameters, and analysis are frozen; then run the selected configuration
-once with `--final`.
+for model selection. TEST remains sealed until each trainable policy checkpoint
+or checkpoint-free algorithm identity, its settings, and analysis are frozen;
+then run the selected configuration once with `--final`.
 
 Because there are only 50 VAL source files, do not call a subset DEV-VAL and
 the same overlapping set FINAL-VAL. Use the fixed 50-world VAL set for
