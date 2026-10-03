@@ -108,6 +108,22 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
     if not callable(factory):
         raise ValueError("Algorithm module must export create")
     settings = deepcopy(spec.get("settings", {}))
+    # Belief-UCB evaluates the receiver-only value of an action. Supply the
+    # resolved environment timing here so its per-second scores cannot drift
+    # from the dwell schedule used by the runner.
+    if spec.get("name") == "belief_ucb":
+        action = config.get("action", {})
+        receiver = config.get("receiver", {})
+        dwell_profile = action.get("dwell_slots_by_band")
+        if dwell_profile is not None:
+            settings["dwell_slots_by_band"] = deepcopy(dwell_profile)
+        if "base_slot_duration_ms" in receiver:
+            settings["base_slot_seconds"] = float(receiver["base_slot_duration_ms"]) / 1000.0
+        if "mission_duration_s" in receiver:
+            settings["mission_duration_s"] = float(receiver["mission_duration_s"])
+        retune_ms = receiver.get("band_change_retune_time_ms", receiver.get("retune_time_ms"))
+        if retune_ms is not None:
+            settings["band_change_retune_time_s"] = float(retune_ms) / 1000.0
     if spec.get("api") == "legacy_episode":
         reward_bounds = settings.pop("reward_bounds", None)
         if settings:
@@ -144,6 +160,17 @@ def algorithm_provenance(config: dict) -> dict:
     if source is not None and Path(source).is_file():
         path = Path(source).resolve()
         spec["adapter_source"] = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    calibration = config.get("belief_model_calibration")
+    if calibration is not None:
+        calibration_source = config.get("setup_sources", {}).get("belief_model", {})
+        spec["belief_model_calibration"] = {
+            "calibration_id": calibration["calibration_id"],
+            "source_sha256": calibration_source.get("sha256"),
+            "source_pool_fingerprint": calibration["source"]["source_pool_fingerprint"],
+            "prior_active_probability": calibration["prior_active_probability"],
+            "inactive_to_active_probability": calibration["inactive_to_active_probability"],
+            "active_to_active_probability": calibration["active_to_active_probability"],
+        }
     return spec
 
 

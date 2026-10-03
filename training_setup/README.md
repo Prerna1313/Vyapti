@@ -4,6 +4,31 @@ This folder contains shared experiment specifications. Results are grouped by
 algorithm under `runs/`; UCB1 uses `runs/ucb1only/` and trainable Discrete SAC
 uses `runs/discrete_sac/`.
 
+## Shared TRAIN-derived HMM calibration
+
+PPO-LSTM, Discrete SAC, periodic-belief Discrete SAC, and Belief-UCB resolve
+their HMM prior and transition probabilities from
+`belief_models/train250_observed_band_hmm.json`. The calibration uses only the
+selected 250 TRAIN STARE files. A band-slot is active when at least one
+recorded pulse falls in that 50 ms slot and within the 500 MHz half-width of a
+receiver band centre. It pools adjacent-slot counts across all bands and
+configs and applies Jeffreys Beta(1/2, 1/2) smoothing. Emitter labels, VAL, and
+TEST are not used. These are observed recorded-pulse occupancy statistics;
+they are not a claim about latent transmitter or beam-state transition laws.
+
+Reproduce the calibration from the local TRAIN data with:
+
+```powershell
+python -m scripts.training.calibrate_train250_hmm --data-root Data --cache-root Data/cache/tsrd/train_250
+```
+
+The resolved HMM parameters are `P01=0.02219548`, `P11=0.95753186`, and
+`prior_active=0.34265633`. The setup resolver fingerprints and stores the
+calibration artifact in each new run's `config.json` and `runtime_manifest.json`.
+Runs initialized before this calibration keep their recorded parameter values;
+they must be reinitialized and retrained for a paired comparison using this
+shared belief model.
+
 ```text
 training_setup/
   environments/train250_composed.json       TRAIN-250 world and receiver contract
@@ -183,6 +208,44 @@ python -m scripts.evaluation.plot_run --run runs/ppo_lstm
 For selection among scheduled checkpoints, evaluate each indexed `.pt` file
 on VAL_NORMAL as shown in the Discrete SAC instructions. PPO-LSTM has no
 prediction head, so its prediction metrics are omitted.
+
+### Discrete SAC with belief and periodicity
+
+This policy is registered in
+`training_setup/algorithms/discrete_sac_belief_periodic.json` and implements
+the same public transition interface as the other trainable policies. It
+builds causal HMM belief, staleness, periodicity score/confidence, previous
+band, and remaining-time features from receiver observations. The common
+runner still owns worlds, reward, held-out evaluation, and metrics.
+
+```powershell
+python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/discrete_sac_belief_periodic.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/discrete_sac_belief_periodic
+```
+
+The run, checkpoints, receiver logs, per-world scorecards, and plots are saved
+under `runs/discrete_sac_belief_periodic/`. Select a checkpoint using
+VAL_NORMAL, freeze that selection, then run the final TEST conditions using
+the same evaluation commands as the other learned policies. HMM transition
+probabilities are explicit engineering priors, not measured TSRD activity
+statistics.
+
+### Belief-UCB
+
+Belief-UCB is a no-pretraining online baseline, separate from classical UCB1.
+It chooses a band using the receiver-only predicted HIT probability plus a
+visit-count exploration bonus. The first experiment uses `exploration_c=0.25`
+and warms up by visiting every band once. It updates its HMM belief from the
+aggregate receiver HIT/MISS and actual one- or two-slot dwell; it does not use
+the scalar reward to select actions. The HMM transition probabilities are
+explicit engineering assumptions, not TSRD-estimated activity statistics.
+
+```powershell
+python -m scripts.evaluation.initialize_belief_ucb --run runs/belief_ucb
+python -m scripts.evaluation.evaluate --run runs/belief_ucb --split val --condition normal
+python -m scripts.evaluation.freeze_selection --run runs/belief_ucb --baseline --reason "Pre-registered Belief-UCB baseline"
+python -m scripts.evaluation.evaluate --run runs/belief_ucb --split test --condition all --final
+python -m scripts.evaluation.plot_run --run runs/belief_ucb
+```
 
 ### Round Robin
 

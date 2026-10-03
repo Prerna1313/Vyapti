@@ -1,0 +1,15 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "belief_ucb",
+  "module": "vyapti_simulator.system_b.tsrd.policies.belief_ucb",
+  "api": "public_transitions",
+  "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
+  "settings": {
+    "description": "Receiver-only aggregate-HMM hit probability plus UCB-style visit-count exploration; does not learn from scalar reward.",
+    "exploration_c": 0.25,
+    "warm_start_all_bands": true,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05,
+    "base_slot_seconds": 0.05
+  }
+}

@@ -56,10 +56,38 @@ def resolve_setup(environment_path, algorithm_path, *, seed: int, episodes: int,
         else:
             for recipe in result["evaluation"].get(f"{split}_composed_worlds", []):
                 recipe.setdefault("source_config_ids", list(result["evaluation"][f"{split}_config_ids"]))
-    result["algorithm"] = {key: value for key, value in algorithm.items() if key != "schema"}
+    belief_model = None
+    belief_model_source = None
+    belief_model_spec = algorithm.get("belief_model_spec")
+    if belief_model_spec is not None:
+        if not isinstance(belief_model_spec, str) or not belief_model_spec:
+            raise ValueError("belief_model_spec must be a relative calibration JSON path")
+        belief_path = (algorithm_path.parent / belief_model_spec).resolve()
+        belief_model, belief_model_source = _read(belief_path)
+        if belief_model.get("schema") != "vyapti_band_activity_hmm_calibration_v1":
+            raise ValueError("Unknown band-activity HMM calibration schema")
+        probability_fields = (
+            "prior_active_probability",
+            "inactive_to_active_probability",
+            "active_to_active_probability",
+        )
+        for field in probability_fields:
+            value = float(belief_model[field])
+            if not 0.0 < value < 1.0:
+                raise ValueError(f"HMM calibration {field} must be in (0, 1)")
+    result["algorithm"] = {
+        key: value for key, value in algorithm.items()
+        if key not in ("schema", "belief_model_spec")
+    }
+    if belief_model is not None:
+        settings = result["algorithm"].setdefault("settings", {})
+        for field in ("prior_active_probability", "inactive_to_active_probability",
+                      "active_to_active_probability"):
+            settings[field] = float(belief_model[field])
+        result["belief_model_calibration"] = belief_model
     if algorithm.get("name") == "ppo_lstm" and execution_mode == "training":
         result["algorithm"].setdefault("settings", {})["training_episodes_target"] = int(episodes)
-    if algorithm.get("name") in {"discrete_sac", "ppo_lstm"}:
+    if algorithm.get("name") in {"discrete_sac", "ppo_lstm", "belief_ucb"}:
         policy_settings = algorithm.get("settings", {})
         receiver = result["receiver"]
         paired_values = (
@@ -74,6 +102,8 @@ def resolve_setup(environment_path, algorithm_path, *, seed: int, episodes: int,
     result.update(seed=int(seed), train_episodes=int(episodes), execution_mode=execution_mode,
                   setup_sources={"environment": env_source, "evaluation": eval_source, "algorithm": algo_source},
                   val_selection_required=True)
+    if belief_model_source is not None:
+        result["setup_sources"]["belief_model"] = belief_model_source
     if execution_mode == "training":
         result.update(checkpoint_file="final" + extension,
                       checkpointing={"interval_episodes": int(checkpoint_every), "save_initial": bool(save_initial)})

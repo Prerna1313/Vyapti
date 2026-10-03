@@ -4,6 +4,7 @@
   "module": "vyapti_simulator.system_b.tsrd.policies.ppo_lstm",
   "api": "public_transitions",
   "checkpoint_extension": ".pt",
+  "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
   "settings": {
     "description": "Recurrent PPO with receiver-only aggregate-HMM belief and causal periodicity features.",
     "hidden_units": 256,
@@ -23,9 +24,6 @@
     "base_slot_seconds": 0.05,
     "detection_probability": 0.9,
     "false_alarm_probability": 0.05,
-    "inactive_to_active_probability": 0.05,
-    "active_to_active_probability": 0.9,
-    "prior_active_probability": 0.5,
     "device": "auto",
     "cpu_threads": 1
   }
