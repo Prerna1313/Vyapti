@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from collections.abc import Callable
 
 from .evaluation_illumination import IlluminationSettings, apply_evaluation_illumination
 from .train250_cache import compose_heldout_world
@@ -45,7 +46,78 @@ def _receiver_options(config: dict) -> dict:
     }
 
 
-def freeze_world_catalog(run_dir: str | Path) -> dict:
+def _valid_catalog_hash(catalog: dict) -> bool:
+    if catalog.get("schema") != CATALOG_SCHEMA:
+        return False
+    recorded_hash = catalog.get("catalog_sha256")
+    payload = dict(catalog)
+    payload.pop("catalog_sha256", None)
+    return recorded_hash == _object_hash(payload)
+
+
+def _same_world_contract(left: dict, right: dict) -> bool:
+    """Compare inputs that define frozen worlds, independent of the policy."""
+    return (
+        Path(left["data_root"]).resolve() == Path(right["data_root"]).resolve()
+        and left.get("receiver") == right.get("receiver")
+        and left.get("world", {}) == right.get("world", {})
+        and left.get("evaluation") == right.get("evaluation")
+    )
+
+
+def _catalog_matches_config(catalog: dict, config: dict) -> bool:
+    evaluation = config["evaluation"]
+    if (catalog.get("generator_version") != GENERATOR_VERSION
+            or catalog.get("world_settings") != config.get("world", {})
+            or catalog.get("receiver_settings") != config.get("receiver")
+            or catalog.get("conditions") != evaluation.get("illumination_conditions", {"normal": {}})):
+        return False
+    for split in ("val", "test"):
+        split_record = catalog.get("splits", {}).get(split, {})
+        config_ids = list(evaluation[f"{split}_config_ids"])
+        recipes = evaluation.get(f"{split}_composed_worlds", [])
+        if split_record.get("source_config_ids") != config_ids:
+            return False
+        if set(split_record.get("worlds", {})) != {recipe["id"] for recipe in recipes}:
+            return False
+        for recipe in recipes:
+            world = split_record["worlds"].get(recipe["id"], {})
+            if world.get("recipe") != recipe:
+                return False
+    return True
+
+
+def _reuse_compatible_catalog(run: Path, config: dict, config_sha256: str) -> dict | None:
+    for sibling in sorted(run.parent.iterdir()):
+        if sibling == run or not sibling.is_dir():
+            continue
+        sibling_config_path = sibling / "config.json"
+        sibling_catalog_path = sibling / CATALOG_NAME
+        if not sibling_config_path.is_file() or not sibling_catalog_path.is_file():
+            continue
+        try:
+            sibling_config = json.loads(sibling_config_path.read_text(encoding="utf-8"))
+            catalog = json.loads(sibling_catalog_path.read_text(encoding="utf-8"))
+            if (catalog.get("config_sha256") != _file_hash(sibling_config_path)
+                    or not _valid_catalog_hash(catalog)
+                    or not _same_world_contract(config, sibling_config)
+                    or not _catalog_matches_config(catalog, sibling_config)
+                    or not _catalog_matches_config(catalog, config)):
+                continue
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+
+        reused_from_hash = catalog["catalog_sha256"]
+        catalog = dict(catalog)
+        catalog["config_sha256"] = config_sha256
+        catalog["reused_from_catalog_sha256"] = reused_from_hash
+        catalog["catalog_sha256"] = _object_hash({k: v for k, v in catalog.items()
+                                                    if k != "catalog_sha256"})
+        return catalog
+    return None
+
+
+def freeze_world_catalog(run_dir: str | Path, *, progress: Callable[[str], None] | None = None) -> dict:
     """Rebuild and fingerprint every frozen held-out recipe without running a policy."""
     run = Path(run_dir).resolve()
     config_path = run / "config.json"
@@ -54,7 +126,21 @@ def freeze_world_catalog(run_dir: str | Path) -> dict:
         raise ValueError("Frozen world catalogs require emitter_recombined held-out worlds")
     target = run / CATALOG_NAME
     if target.exists():
-        raise FileExistsError(target)
+        existing, _ = load_world_catalog(run, _file_hash(config_path))
+        if progress:
+            progress(f"Using this run's existing frozen catalog: {target}")
+        return existing
+
+    config_sha256 = _file_hash(config_path)
+    reusable = _reuse_compatible_catalog(run, config, config_sha256)
+    if reusable is not None:
+        if progress:
+            progress("Found a matching frozen catalog from another algorithm run; reusing its verified world recipes.")
+        with target.open("x", encoding="utf-8") as stream:
+            stream.write(json.dumps(reusable, indent=2, allow_nan=False) + "\n")
+        if progress:
+            progress(f"Wrote reusable catalog for this run: {target}")
+        return reusable
 
     data_root = Path(config["data_root"]).resolve()
     receiver_seed_base = int(config["evaluation"]["receiver_seed"])
@@ -65,6 +151,9 @@ def freeze_world_catalog(run_dir: str | Path) -> dict:
     time_offset_us = int(world_settings.get("time_offset_us", DEFAULT_TIME_OFFSET_US))
     splits = {}
 
+    completed_worlds = 0
+    total_worlds = sum(len(config["evaluation"].get(f"{split}_composed_worlds", []))
+                       for split in ("val", "test"))
     for split in ("val", "test"):
         config_ids = list(config["evaluation"][f"{split}_config_ids"])
         expected_count = config["evaluation"].get(f"expected_{split}_configs")
@@ -125,6 +214,9 @@ def freeze_world_catalog(run_dir: str | Path) -> dict:
                 "source_file_sha256": {key: source_hashes[key] for key in source_ids},
                 "conditions": condition_records,
             }
+            completed_worlds += 1
+            if progress and (completed_worlds % 10 == 0 or completed_worlds == total_worlds):
+                progress(f"Rebuilt {completed_worlds}/{total_worlds} frozen worlds ({split.upper()} through {world_id}).")
         splits[split] = {
             "source_config_ids": config_ids,
             "source_pool_sha256": pool_hash,
@@ -137,7 +229,7 @@ def freeze_world_catalog(run_dir: str | Path) -> dict:
         "policy_evaluation_performed": False,
         "world_storage": "recipe_and_hash_only; worlds are deterministically rebuilt",
         "train_world_storage": "generate_per_episode_then_discard",
-        "config_sha256": _file_hash(config_path),
+        "config_sha256": config_sha256,
         "generator_version": GENERATOR_VERSION,
         "world_settings": world_settings,
         "receiver_settings": config["receiver"],
@@ -157,10 +249,7 @@ def load_world_catalog(run_dir: str | Path, config_sha256: str) -> tuple[dict, s
     catalog = json.loads(path.read_text(encoding="utf-8"))
     if catalog.get("schema") != CATALOG_SCHEMA or catalog.get("config_sha256") != config_sha256:
         raise ValueError("Frozen world catalog belongs to a different config or schema")
-    recorded_hash = catalog.get("catalog_sha256")
-    payload = dict(catalog)
-    payload.pop("catalog_sha256", None)
-    if recorded_hash != _object_hash(payload):
+    if not _valid_catalog_hash(catalog):
         raise ValueError("Frozen world catalog was modified after creation")
     return catalog, _file_hash(path)
 

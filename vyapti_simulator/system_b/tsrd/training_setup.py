@@ -57,18 +57,20 @@ def resolve_setup(environment_path, algorithm_path, *, seed: int, episodes: int,
             for recipe in result["evaluation"].get(f"{split}_composed_worlds", []):
                 recipe.setdefault("source_config_ids", list(result["evaluation"][f"{split}_config_ids"]))
     result["algorithm"] = {key: value for key, value in algorithm.items() if key != "schema"}
-    if algorithm.get("name") == "discrete_sac":
-        sac_settings = algorithm.get("settings", {})
+    if algorithm.get("name") == "ppo_lstm" and execution_mode == "training":
+        result["algorithm"].setdefault("settings", {})["training_episodes_target"] = int(episodes)
+    if algorithm.get("name") in {"discrete_sac", "ppo_lstm"}:
+        policy_settings = algorithm.get("settings", {})
         receiver = result["receiver"]
         paired_values = (
             ("detection_probability", receiver.get("detection_probability")),
             ("false_alarm_probability", receiver.get("false_alarm_probability")),
         )
         for setting_name, receiver_value in paired_values:
-            if receiver_value is None or float(sac_settings.get(setting_name, float("nan"))) != float(receiver_value):
-                raise ValueError(f"Discrete SAC {setting_name} must match the frozen receiver operating point")
-        if float(sac_settings.get("base_slot_seconds", float("nan"))) != float(receiver["base_slot_duration_ms"]) / 1000:
-            raise ValueError("Discrete SAC base_slot_seconds must match the receiver's base slot")
+            if receiver_value is None or float(policy_settings.get(setting_name, float("nan"))) != float(receiver_value):
+                raise ValueError(f"{algorithm['name']} {setting_name} must match the frozen receiver operating point")
+        if float(policy_settings.get("base_slot_seconds", float("nan"))) != float(receiver["base_slot_duration_ms"]) / 1000:
+            raise ValueError(f"{algorithm['name']} base_slot_seconds must match the receiver's base slot")
     result.update(seed=int(seed), train_episodes=int(episodes), execution_mode=execution_mode,
                   setup_sources={"environment": env_source, "evaluation": eval_source, "algorithm": algo_source},
                   val_selection_required=True)

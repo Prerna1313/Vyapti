@@ -325,8 +325,17 @@ def train(config_path: str | Path | dict, run_dir: str | Path, *, agility_refere
         validate_train_reference(agility_reference, cache)
         if agility_reference["channel_width_mhz"] != config["analysis_protocol"]["frequency_agility"].get("channel_width_mhz", 500.0):
             raise ValueError("Agility channel width differs from the frozen protocol")
-    policy = create_algorithm(config, bands=pool.config.band_count, seed=int(config["seed"]))
     execution_mode = config.get("execution_mode", "training")
+    algorithm = config.get("algorithm", {})
+    if algorithm.get("name") == "ppo_lstm" and execution_mode == "training":
+        config = dict(config)
+        config["algorithm"] = dict(algorithm)
+        config["algorithm"]["settings"] = dict(algorithm.get("settings", {}))
+        target = config["algorithm"]["settings"].get("training_episodes_target")
+        if target is not None and int(target) != int(config["train_episodes"]):
+            raise ValueError("PPO-LSTM learning-rate schedule must match train_episodes")
+        config["algorithm"]["settings"]["training_episodes_target"] = int(config["train_episodes"])
+    policy = create_algorithm(config, bands=pool.config.band_count, seed=int(config["seed"]))
     if execution_mode == "training" and not callable(getattr(policy, "save", None)):
         raise ValueError("Training algorithms must implement save(path)")
     run.mkdir(parents=True)
@@ -574,6 +583,23 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             fig.savefig(path, dpi=150)
             plt.close(fig)
             written.append(path)
+        ppo_keys = ("mean_policy_loss", "mean_value_loss", "mean_entropy", "mean_kl", "mean_clip_fraction")
+        if updates and any(key in updates[-1].get("diagnostics", {}) for key in ppo_keys):
+            fig, axis = plt.subplots(figsize=(9, 5))
+            for key in ppo_keys:
+                points = [(row["episode"] + 1, row["diagnostics"][key]) for row in updates
+                          if key in row.get("diagnostics", {})]
+                if points:
+                    axis.plot([p[0] for p in points], [p[1] for p in points],
+                              label=key.removeprefix("mean_").replace("_", " "))
+            axis.set(xlabel="Training episode", ylabel="PPO statistic",
+                     title="PPO-LSTM policy and value update metrics")
+            axis.legend()
+            fig.tight_layout()
+            path = output / "train_ppo_lstm_metrics.png"
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            written.append(path)
     for split in ("val", "test"):
         for path in sorted((run / "eval" / split).rglob("summary.json")):
             report = json.loads(path.read_text(encoding="utf-8"))
@@ -597,7 +623,8 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             plt.close(fig)
             written.append(figure)
             run_config = json.loads((run / "config.json").read_text(encoding="utf-8"))
-            if run_config.get("algorithm", {}).get("name") == "ucb1":
+            algorithm_name = run_config.get("algorithm", {}).get("name")
+            if algorithm_name in {"ucb1", "round_robin"}:
                 world_log = path.parent / "per_world.jsonl"
                 world_rows = [json.loads(line) for line in world_log.read_text(encoding="utf-8").splitlines()]
                 diagnostic_rows = [row for row in world_rows if row.get("policy_diagnostics")]
@@ -609,9 +636,9 @@ def plot_run(run_dir: str | Path) -> list[Path]:
                     errors = counts.std(axis=0, ddof=1) if len(counts) > 1 else np.zeros(counts.shape[1])
                     axis.bar(np.arange(counts.shape[1]), centers, yerr=errors, capsize=2)
                     axis.set(xlabel="Band index", ylabel="Selections per world",
-                             title=f"{report['label']} UCB1 band selections (mean ± SD)")
+                             title=f"{report['label']} {algorithm_name.replace('_', ' ')} band selections (mean ± SD)")
                     fig.tight_layout()
-                    figure = output / f"{split}{suffix}_ucb1_band_counts.png"
+                    figure = output / f"{split}{suffix}_{algorithm_name}_band_counts.png"
                     fig.savefig(figure, dpi=150)
                     plt.close(fig)
                     written.append(figure)
@@ -619,10 +646,10 @@ def plot_run(run_dir: str | Path) -> list[Path]:
                     fig, axis = plt.subplots(figsize=(12, 7))
                     image = axis.imshow(counts, aspect="auto", interpolation="nearest", cmap="viridis")
                     axis.set(xlabel="Band index", ylabel="World index",
-                             title=f"{report['label']} UCB1 per-world band selections")
+                             title=f"{report['label']} {algorithm_name.replace('_', ' ')} per-world band selections")
                     fig.colorbar(image, ax=axis, label="Decision count")
                     fig.tight_layout()
-                    figure = output / f"{split}{suffix}_ucb1_band_counts_by_world.png"
+                    figure = output / f"{split}{suffix}_{algorithm_name}_band_counts_by_world.png"
                     fig.savefig(figure, dpi=150)
                     plt.close(fig)
                     written.append(figure)
@@ -658,14 +685,15 @@ def plot_run(run_dir: str | Path) -> list[Path]:
                             axis.plot(np.arange(window, window + max_length), mean[:, column], label=label)
                         axis.set(xlabel="Band decision within world (25-decision rolling mean)",
                                  ylabel="Reward contribution",
-                                 title=f"{report['label']} UCB1 online reward components")
+                                 title=f"{report['label']} {algorithm_name.replace('_', ' ')} online reward components")
                         axis.legend()
                         fig.tight_layout()
-                        figure = output / f"{split}{suffix}_ucb1_reward_components.png"
+                        figure = output / f"{split}{suffix}_{algorithm_name}_reward_components.png"
                         fig.savefig(figure, dpi=150)
                         plt.close(fig)
                         written.append(figure)
-            if run_config.get("algorithm", {}).get("name") == "discrete_sac":
+            if run_config.get("algorithm", {}).get("name") in {"discrete_sac", "ppo_lstm"}:
+                algorithm_name = run_config["algorithm"]["name"]
                 world_log = path.parent / "per_world.jsonl"
                 world_rows = [json.loads(line) for line in world_log.read_text(encoding="utf-8").splitlines()]
                 diagnostic_rows = [row for row in world_rows if row.get("policy_diagnostics")]
@@ -675,9 +703,9 @@ def plot_run(run_dir: str | Path) -> list[Path]:
                     fig, axis = plt.subplots(figsize=(11, 4.5))
                     axis.bar(np.arange(counts.shape[1]), counts.mean(axis=0))
                     axis.set(xlabel="Band index", ylabel="Selections per world",
-                             title=f"{report['label']} Discrete SAC band selections")
+                             title=f"{report['label']} {algorithm_name.replace('_', ' ')} band selections")
                     fig.tight_layout()
-                    figure = output / f"{split}{suffix}_discrete_sac_band_counts.png"
+                    figure = output / f"{split}{suffix}_{algorithm_name}_band_counts.png"
                     fig.savefig(figure, dpi=150)
                     plt.close(fig)
                     written.append(figure)

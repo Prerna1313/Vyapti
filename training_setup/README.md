@@ -149,6 +149,61 @@ TEST summaries, per-world scorecards, complete step logs, oracle comparisons,
 and plots use the same runner layout as UCB1. This policy has no prediction
 head, so prediction metrics are omitted by the existing conditional rule.
 
+### Recurrent PPO-LSTM
+
+PPO-LSTM uses the same public `PublicTransition` interface and shared runner as
+SAC. It keeps a recurrent state within each episode and resets it at the next
+world. Its 181 policy features combine a receiver-only aggregate-HMM belief,
+staleness, causal periodicity cues from observed aggregate hits, previous band,
+and mission time remaining. The PPO update uses the runner's scalar reward;
+held-out scoring and checkpoint selection remain in the common evaluator.
+
+The HMM uses explicit configurable priors (`P(inactive→active)=0.05`,
+`P(active→active)=0.90`, initial activity 0.5). These are engineering
+assumptions, not estimated TSRD transition statistics. As with SAC, a dwell's
+single aggregate HIT/NO-HIT is filtered exactly over the latent base-slot
+transitions. The linear learning-rate schedule uses the configured training-episode
+budget, so it decays across the actual run even though mixed 50/100 ms dwell
+changes the number of band decisions per episode.
+
+```powershell
+python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/ppo_lstm.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/ppo_lstm
+```
+
+Evaluate the saved checkpoints on VAL_NORMAL, select the highest pooled OIR,
+freeze that checkpoint, and run all TEST conditions:
+
+```powershell
+python -m scripts.evaluation.evaluate --run runs/ppo_lstm --checkpoint final.pt --split val --condition normal
+python -m scripts.evaluation.freeze_selection --run runs/ppo_lstm --checkpoint final.pt --reason "PPO-LSTM checkpoint selected by VAL_NORMAL OIR"
+python -m scripts.evaluation.evaluate --run runs/ppo_lstm --split test --condition all --final
+python -m scripts.evaluation.plot_run --run runs/ppo_lstm
+```
+
+For selection among scheduled checkpoints, evaluate each indexed `.pt` file
+on VAL_NORMAL as shown in the Discrete SAC instructions. PPO-LSTM has no
+prediction head, so its prediction metrics are omitted.
+
+### Round Robin
+
+Round Robin is a fixed online control with no learned weights. It visits bands
+in order (0 through 35, then wraps), restarting at band 0 for each world. The
+shared runner records its scorecards, per-world selections, reward components,
+and plots under `runs/round_robin/`.
+
+It does not need VAL for training or checkpoint selection. The evaluation
+protocol still requires one VAL_NORMAL replay and a frozen baseline record
+before revealing TEST. This is an audit gate; it does not tune Round Robin.
+Then run all three TEST conditions once:
+
+```powershell
+python -m scripts.evaluation.initialize_round_robin --run runs/round_robin
+python -m scripts.evaluation.evaluate --run runs/round_robin --split val --condition normal
+python -m scripts.evaluation.freeze_selection --run runs/round_robin --baseline --reason "Pre-registered Round Robin baseline"
+python -m scripts.evaluation.evaluate --run runs/round_robin --split test --condition all --final
+python -m scripts.evaluation.plot_run --run runs/round_robin
+```
+
 Keep world seeds, interaction budgets, receiver settings, held-out worlds, and
 metrics matched when comparing algorithms. See
 [`docs/protocols/mode-b-evaluation.md`](../docs/protocols/mode-b-evaluation.md)
@@ -157,6 +212,8 @@ TRAIN-derived frequency-agility strata.
 ## Frozen-world recipes and combined stress reporting
 
 Run initialization writes `runs/ucb1only/frozen_world_catalog.json`. It contains only recipes, source-file hashes, seeds, illumination-mask hashes, and replay signatures. It does not save full worlds or run the policy on TEST. TRAIN worlds are generated per episode and discarded.
+
+Other algorithm runs with the same data path, world and receiver settings, VAL/TEST recipes, seeds, and illumination conditions reuse this verified catalog. The freeze command reports reuse immediately; when it must build a new catalog, it prints progress every 10 worlds. A run with changed world-defining settings gets its own catalog.
 
 The conditions are `normal`, `beam_periodic`, and `beam_stochastic`. Each condition is also stratified into low, medium, and high frequency agility using thresholds fit on TRAIN. `spatial_agility_matrix.json` and `plots/{split}_spatial_agility_matrix.png` report the combined condition-by-agility results. Beam conditions are controlled visibility overlays on recorded STARE PDWs because the source data does not contain physical beam-state truth.
 

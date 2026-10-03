@@ -1,0 +1,9 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "round_robin",
+  "module": "vyapti_simulator.system_b.tsrd.policies.round_robin",
+  "api": "public_transitions",
+  "settings": {
+    "start_band": 0
+  }
+}

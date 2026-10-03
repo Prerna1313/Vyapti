@@ -1,0 +1,32 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "ppo_lstm",
+  "module": "vyapti_simulator.system_b.tsrd.policies.ppo_lstm",
+  "api": "public_transitions",
+  "checkpoint_extension": ".pt",
+  "settings": {
+    "description": "Recurrent PPO with receiver-only aggregate-HMM belief and causal periodicity features.",
+    "hidden_units": 256,
+    "learning_rate": 0.0002,
+    "gamma_per_base_slot": 0.997,
+    "gae_lambda_per_base_slot": 0.98,
+    "clip_epsilon": 0.2,
+    "value_clip_epsilon": 0.2,
+    "entropy_coefficient": 0.005,
+    "value_coefficient": 0.5,
+    "max_grad_norm": 0.5,
+    "ppo_epochs": 5,
+    "target_kl": 0.03,
+    "bptt_chunk": 128,
+    "sequence_minibatch": 8,
+    "periodicity_history": 32,
+    "base_slot_seconds": 0.05,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05,
+    "inactive_to_active_probability": 0.05,
+    "active_to_active_probability": 0.9,
+    "prior_active_probability": 0.5,
+    "device": "auto",
+    "cpu_threads": 1
+  }
+}
