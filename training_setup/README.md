@@ -122,11 +122,10 @@ fresh output directory. Final TEST is a separate
 command for the frozen selected algorithm. The suite reports seed variation
 separately from paired world CIs and prevents a second TEST run.
 
-The existing `runs/ucb-mode-b-001` has one final checkpoint after 100 episodes
-and 60,000 receiver decisions. It contains band look/hit counts, not neural
-weights. Its budget was a pipeline exercise, with no intermediate checkpoint
-comparison or completed VAL summary. It is not a selected scientific result.
-This refactor does not manufacture missing historical checkpoints.
+The earlier `runs/ucb-mode-b-001` checkpoint and outputs used the obsolete v1
+reward and have been removed. No UCB checkpoint currently exists. Train a fresh
+UCB run under the v2 contract before evaluating it; the 100-episode pipeline
+plan is only a smoke test and makes no convergence or model-selection claim.
 
 ## Environment and evidence boundaries
 
