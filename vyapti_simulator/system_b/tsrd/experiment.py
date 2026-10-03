@@ -373,9 +373,15 @@ def train(config_path: str | Path | dict, run_dir: str | Path, *, agility_refere
         if schedule.get("save_initial", False):
             save_checkpoint(run, policy, "initial" + extension, episodes=0, steps=0, kind="initial")
         for episode in range(int(config["train_episodes"])):
+            if episode == 0:
+                print(f"[TRAIN] starting {int(config['train_episodes'])} episodes; sampling first world",
+                      flush=True)
             count = int(rng.choice(distribution))
             seed = int(rng.integers(1, np.iinfo(np.int32).max))
             world, sources = pool.sample_world(seed, count)
+            if episode == 0:
+                print(f"[TRAIN] first world ready (emitters={count}); starting episode 1",
+                      flush=True)
             world.reset(seed=seed)
             trajectory, reward, reward_components = _run_episode(
                 world, policy, training=True, episode=episode,
@@ -400,9 +406,10 @@ def train(config_path: str | Path | dict, run_dir: str | Path, *, agility_refere
                 save_checkpoint(run, policy, f"episode_{episode + 1:06d}" + extension,
                                 episodes=episode + 1, steps=status["completed_receiver_steps"], kind="scheduled")
             _json(run / "status.json", status)
-            print(f"[TRAIN] episode {episode + 1}/{int(config['train_episodes'])} "
-                  f"receiver_steps={status['completed_receiver_steps']} "
-                  f"reward={reward:.6f} elapsed={elapsed_s / 60.0:.1f} min", flush=True)
+            if episode == 0 or (episode + 1) % 10 == 0 or episode + 1 == int(config["train_episodes"]):
+                print(f"[TRAIN] completed {episode + 1}/{int(config['train_episodes'])} episodes "
+                      f"receiver_steps={status['completed_receiver_steps']} "
+                      f"reward={reward:.6f} elapsed={elapsed_s / 60.0:.1f} min", flush=True)
         if execution_mode == "training":
             record = save_checkpoint(run, policy, config.get("checkpoint_file", "final.json"),
                                      episodes=status["completed_episodes"], steps=status["completed_receiver_steps"], kind="final")
