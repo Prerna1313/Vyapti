@@ -101,7 +101,8 @@ def algorithm_spec(config: dict) -> dict:
             "settings": {}}
 
 
-def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | None = None):
+def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | None = None,
+                     restore_rng: bool = True):
     spec = algorithm_spec(config)
     module = importlib.import_module(spec["module"])
     factory = getattr(module, "create", None)
@@ -156,7 +157,11 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
             raise ValueError("A legacy policy used with v2 must implement observe_reward")
         algorithm = LegacyEpisodeAdapter(legacy_policy, reward_bounds=reward_bounds)
     elif spec.get("api") == "public_transitions":
-        algorithm = factory(bands=bands, seed=seed, settings=settings, checkpoint=checkpoint)
+        if spec.get("name") == "contextual_thompson":
+            algorithm = factory(bands=bands, seed=seed, settings=settings,
+                                checkpoint=checkpoint, restore_rng=restore_rng)
+        else:
+            algorithm = factory(bands=bands, seed=seed, settings=settings, checkpoint=checkpoint)
     else:
         raise ValueError("Algorithm api must be public_transitions or legacy_episode")
     for method in ("reset_episode", "select_action", "observe", "end_episode"):

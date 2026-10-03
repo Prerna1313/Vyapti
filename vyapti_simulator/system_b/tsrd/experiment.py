@@ -1023,7 +1023,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                 visibility_mask_sha256=illumination["visibility_mask_sha256"],
                 replay_signature=world.replay_signature())
         _json(target / "world_logs" / f"{config_id}.json", illumination)
-        policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path)
+        policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path,
+                                  restore_rng=False)
         predictions = []
         trajectory, _, reward_components = _run_episode(
             world, policy, training=False, episode=index, log_path=target / "steps.jsonl",
@@ -1077,7 +1078,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                 visibility_mask_sha256=illumination["visibility_mask_sha256"],
                 replay_signature=world.replay_signature())
         _json(target / "world_logs" / f"{recipe['id']}.json", illumination)
-        policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path)
+        policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path,
+                                  restore_rng=False)
         predictions = []
         trajectory, _, reward_components = _run_episode(
             world, policy, training=False, episode=len(ids) + offset,

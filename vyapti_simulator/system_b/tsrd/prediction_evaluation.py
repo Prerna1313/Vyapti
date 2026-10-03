@@ -6,6 +6,17 @@ import numpy as np
 
 def collect_prediction(policy, state, *, bands):
     result = {"decision_slot": state.time_slot - 1, "target_slot": state.time_slot}
+    output_hook = getattr(policy, "prediction_output", None)
+    explicit = output_hook(state) if callable(output_hook) else None
+    if explicit is not None:
+        if not isinstance(explicit, dict):
+            raise ValueError("prediction_output must return a dict")
+        recurrence_eta = explicit.get("predicted_observed_hit_recurrence_eta_s")
+        if recurrence_eta is not None:
+            recurrence_eta = float(recurrence_eta)
+            if not np.isfinite(recurrence_eta) or recurrence_eta < 0.0:
+                raise ValueError("Predicted observed-HIT recurrence ETA must be finite and nonnegative")
+            result["predicted_observed_hit_recurrence_eta_s"] = recurrence_eta
     hook = getattr(policy, "predict_band_activity", None)
     probabilities = hook(state) if callable(hook) else None
     if probabilities is not None:

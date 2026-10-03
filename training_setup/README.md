@@ -261,8 +261,10 @@ then run the final TEST conditions as for PPO-LSTM and SAC.
 ### Contextual Thompson Sampling
 
 `contextual_thompson` is a separate trainable linear-Gaussian Thompson
-Sampling policy. It uses a 46-feature causal context with TRAIN-250 HMM
-belief and receiver-hit periodicity cues. Its posterior learns from the
+Sampling policy. It uses a 50-feature causal context with TRAIN-250 HMM
+belief, observed-HIT recurrence cues, and candidate-dependent deadline
+interactions. The recurrence cue reflects receiver observations and does not
+identify an emitter scan period. Its posterior learns from the
 unchanged shared `transition.reward`; it does not add an intrinsic reward.
 The shared setup injects calibrated HMM values and the environment's exact
 native dwell vector.
@@ -273,6 +275,13 @@ python -m scripts.training.train --environment training_setup/environments/train
 
 The run follows the normal checkpoint and frozen-world VAL/TEST workflow.
 Evaluation reports its per-world band counts alongside the standard metrics.
+The baseline uses literal posterior sampling (`thompson_sampling_scale=1.0`);
+keep that setting configurable for TRAIN/VAL-only scale comparisons.
+Evaluation logs may include a causal ETA to the next observed-HIT recurrence.
+That cue is not an emitter-intercept-time prediction. The shared evaluator
+therefore does not score it as intercept error; a comparable intercept target
+must be frozen before reporting that metric. OIR-ratio prediction is deferred
+until its target and scoring rule are specified.
 
 ### Belief-UCB
 

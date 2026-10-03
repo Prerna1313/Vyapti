@@ -115,9 +115,11 @@ Current TRAIN-250 pooled calibration:
 
 These are TRAIN-250 calibration values, not universal TSRD constants.
 
-PERIODICITY
------------
-Periodicity is inferred only from previously observed receiver HIT events.
+OBSERVED-HIT RECURRENCE CUE
+---------------------------
+The recurrence cue is inferred only from previously observed receiver HITs.
+It describes regularity in the receiver's observations and does not identify
+the emitter's true scan or beam period.
 
 A HIT observed during a 2-slot dwell is timestamped at the dwell end because
 the public scheduler observation does not expose the exact within-dwell
@@ -202,7 +204,9 @@ DEFAULT_PRIOR_PRECISION = 1.0
 #
 # This controls how strongly Thompson sampling explores.
 # It is a tunable algorithm parameter, not a literature constant.
-DEFAULT_TS_SCALE = 0.05
+# 1.0 = literal Gaussian posterior sampling.
+# Values < 1.0 = tempered Thompson sampling heuristic.
+DEFAULT_TS_SCALE = 1.0
 
 # Reward-noise standard deviation in the Bayesian linear model.
 #
@@ -232,16 +236,17 @@ DEFAULT_PERIODICITY_TOLERANCE = 0.15
 # 1                   current active belief
 # 1                   predicted active belief after dwell
 # 1                   aggregate HIT probability
-# 1                   periodicity score
-# 1                   periodicity confidence
+# 1                   observed-HIT recurrence score
+# 1                   observed-HIT recurrence confidence
 # 1                   staleness
 # 1                   remaining mission fraction
 # 1                   normalized dwell
 # 1                   switch indicator
+# 4                   candidate-dependent deadline interactions
 #
-# total = 46
+# total = 50
 #
-CONTEXT_DIM = 46
+CONTEXT_DIM = 50
 
 
 # =============================================================================
@@ -666,9 +671,11 @@ class TwoStateHMMBelief:
 
 class CausalPeriodicity:
     """
-    Dwell-level causal periodicity estimator.
+    Causal observed-HIT recurrence estimator.
 
-    Only receiver-observed positive events are used.
+    The score measures regularity and phase in previously observed receiver
+    HITs. It is an observation-recurrence cue; it does NOT identify an
+    emitter's true scan or beam period.
 
     No hidden transmission timestamps are available to the policy.
 
@@ -858,6 +865,25 @@ class CausalPeriodicity:
 
         return scores, confidence
 
+    def predict_next_observed_hit_slot(self, now_slot: int) -> int | None:
+        """Forecast HIT recurrence from past receiver events, not emitter truth."""
+        forecasts = []
+        for history in self.events:
+            if len(history) < 3:
+                continue
+            gaps = np.diff(np.asarray(history, dtype=np.float64))
+            gaps = gaps[gaps >= 1.0]
+            if len(gaps) < 2:
+                continue
+            period = float(np.median(gaps))
+            if period < 1.0:
+                continue
+            forecast = float(history[-1]) + period
+            if forecast < now_slot:
+                forecast += math.ceil((now_slot - forecast) / period) * period
+            forecasts.append(int(round(forecast)))
+        return min(forecasts) if forecasts else None
+
 
 # =============================================================================
 # CAUSAL EPISODE STATE
@@ -1012,7 +1038,9 @@ class CausalState:
             )
 
             # --------------------------------------------------------------
-            # 46-D context
+            # 50-D context. Keep global remaining time for interpretation,
+            # then add candidate-dependent interactions so the shared linear
+            # model can distinguish actions as the deadline approaches.
             # --------------------------------------------------------------
 
             x = np.zeros(
@@ -1075,6 +1103,16 @@ class CausalState:
 
             # 11. Candidate switch
             x[cursor] = switch_indicator
+            cursor += 1
+
+            # 12-15. Candidate-specific deadline interactions
+            x[cursor] = predicted_belief * remaining
+            cursor += 1
+            x[cursor] = aggregate_hit_prob * remaining
+            cursor += 1
+            x[cursor] = staleness * remaining
+            cursor += 1
+            x[cursor] = float(period_score[band]) * remaining
             cursor += 1
 
             if cursor != CONTEXT_DIM:
@@ -1511,7 +1549,7 @@ class ContextualThompsonBeliefPeriodicityPolicy:
 
     FORMAT = (
         "vyapti_contextual_thompson_"
-        "belief_periodic_v1"
+        "belief_periodic_v2"
     )
 
     ALGORITHM_NAME = (
@@ -1524,6 +1562,7 @@ class ContextualThompsonBeliefPeriodicityPolicy:
         seed: int,
         settings: dict[str, Any],
         checkpoint=None,
+        restore_rng: bool = True,
     ) -> None:
 
         if int(bands) != N_BANDS:
@@ -1877,7 +1916,8 @@ class ContextualThompsonBeliefPeriodicityPolicy:
 
         if checkpoint is not None:
             self._load(
-                checkpoint
+                checkpoint,
+                restore_rng=restore_rng,
             )
 
     # ------------------------------------------------------------------
@@ -2058,6 +2098,24 @@ class ContextualThompsonBeliefPeriodicityPolicy:
         }
 
         return action
+
+    def predict_observed_hit_recurrence_eta(self, public_state) -> float | None:
+        """Return observed-HIT recurrence ETA in seconds, if available."""
+        if int(public_state.time_slot) != int(self.state.elapsed_slots):
+            raise RuntimeError("Prediction state clock differs from CTS belief clock")
+        next_slot = self.state.periodicity.predict_next_observed_hit_slot(
+            int(public_state.time_slot)
+        )
+        if next_slot is None:
+            return None
+        return max(0.0, (next_slot - int(public_state.time_slot)) * BASE_SLOT_SECONDS)
+
+    def prediction_output(self, public_state) -> dict[str, float]:
+        """Optional recurrence forecast; no interception target is implied."""
+        eta = self.predict_observed_hit_recurrence_eta(public_state)
+        if eta is None:
+            return {}
+        return {"predicted_observed_hit_recurrence_eta_s": float(eta)}
 
     # ------------------------------------------------------------------
     # Transition consumption
@@ -2256,6 +2314,8 @@ class ContextualThompsonBeliefPeriodicityPolicy:
         return {
             "algorithm": self.ALGORITHM_NAME,
 
+            "policy_seed": int(self.seed),
+
             "episode_decisions": int(
                 self.episode_decisions
             ),
@@ -2393,6 +2453,8 @@ class ContextualThompsonBeliefPeriodicityPolicy:
     def _load(
         self,
         path,
+        *,
+        restore_rng: bool = True,
     ) -> None:
 
         payload = torch.load(
@@ -2535,7 +2597,7 @@ class ContextualThompsonBeliefPeriodicityPolicy:
 
         self.training_band_visits = visits.copy()
 
-        if "rng_state" in payload:
+        if restore_rng and "rng_state" in payload:
             self.rng.bit_generator.state = (
                 payload["rng_state"]
             )
@@ -2551,6 +2613,7 @@ def create(
     seed: int,
     settings: dict,
     checkpoint=None,
+    restore_rng: bool = True,
 ):
     """
     Required shared-runner factory.
@@ -2561,4 +2624,5 @@ def create(
         seed=seed,
         settings=settings,
         checkpoint=checkpoint,
+        restore_rng=restore_rng,
     )
