@@ -101,10 +101,12 @@ the scalar reward.
 
 Its HMM transition values (`P(inactive→active)=0.05`,
 `P(active→active)=0.90`) are explicit engineering priors, not measured TSRD
-statistics. A dwell returns one aggregate binary result in this runner, so the
-belief update uses the corresponding at-least-one-hit probability over its
-50/100 ms duration. These state assumptions do not change the reward or the
-evaluation scorecards.
+statistics. The runner returns one aggregate binary result per dwell: HIT if
+any 50 ms receiver evaluation was positive, otherwise NO-HIT. SAC applies an
+exact two-state forward filter over each hidden base-slot transition and
+conditions the end-of-dwell belief on that aggregate result. It does not
+receive the internal per-slot detector outcomes. These state assumptions do
+not change the reward or the evaluation scorecards.
 
 Start a full run with the configured 400,000-action-scale settings. With the
 runner's episode-based budget, 800 TRAIN episodes give approximately 400,000
@@ -130,14 +132,13 @@ foreach ($checkpoint in $checkpoints) {
 }
 ```
 
-Choose the checkpoint with the highest pooled OIR in its VAL `summary.json`.
-Then evaluate the selected checkpoint on the two beam conditions, freeze it,
-and run sealed TEST. For example, if `final.pt` wins:
+Choose the checkpoint with the highest pooled OIR in its VAL_NORMAL
+`summary.json`. Freeze that checkpoint, then run the sealed TEST set on all
+three conditions. Beam VAL runs are optional diagnostics and are not required
+for the current selection rule. For example, if `final.pt` wins:
 
 ```powershell
 python -m scripts.evaluation.evaluate --run runs/discrete_sac --checkpoint final.pt --split val --condition normal
-python -m scripts.evaluation.evaluate --run runs/discrete_sac --checkpoint final.pt --split val --condition beam_periodic
-python -m scripts.evaluation.evaluate --run runs/discrete_sac --checkpoint final.pt --split val --condition beam_stochastic
 python -m scripts.evaluation.freeze_selection --run runs/discrete_sac --checkpoint final.pt --reason "Discrete SAC checkpoint selected after VAL"
 python -m scripts.evaluation.evaluate --run runs/discrete_sac --split test --condition all --final
 python -m scripts.evaluation.plot_run --run runs/discrete_sac
