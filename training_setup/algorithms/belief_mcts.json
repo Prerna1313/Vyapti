@@ -1,0 +1,23 @@
+{
+  "schema": "vyapti_algorithm_spec_v1",
+  "name": "belief_mcts",
+  "module": "vyapti_simulator.system_b.tsrd.policies.belief_mcts",
+  "api": "public_transitions",
+  "checkpoint_extension": ".pt",
+  "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
+  "settings": {
+    "description": "Truth-hidden belief-state MCTS with causal TRAIN-250 HMM belief, causal periodicity, and a Bayesian model of the shared environment reward.",
+    "mcts_simulations": 256,
+    "mcts_horizon": 6,
+    "mcts_uct_c": 1.25,
+    "mcts_rollout_epsilon": 0.0,
+    "warmup_actions": 72,
+    "reward_prior_precision": 1.0,
+    "reward_noise_std": 0.01,
+    "periodicity_history": 32,
+    "periodicity_tolerance_fraction": 0.15,
+    "base_slot_seconds": 0.05,
+    "detection_probability": 0.9,
+    "false_alarm_probability": 0.05
+  }
+}

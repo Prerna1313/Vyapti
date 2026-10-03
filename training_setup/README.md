@@ -229,6 +229,35 @@ the same evaluation commands as the other learned policies. HMM transition
 probabilities are explicit engineering priors, not measured TSRD activity
 statistics.
 
+### Belief-state MCTS
+
+Belief-MCTS is a separate trainable algorithm. It keeps the supplied short-
+horizon MCTS, UCT selection, causal HMM and periodicity state, and Bayesian
+linear reward model. Hypothetical branches sample only aggregate HIT/MISS
+from the receiver-only belief; the model learns from the real shared
+`transition.reward`. It does not query hidden worlds or alter the reward.
+The environment supplies its exact native dwell profile, and the HMM uses
+the shared TRAIN-250 calibration artifact.
+
+The reward-model input has 55 causal features: the original 46 receiver and
+belief features plus candidate visit/hit history and global decision, time,
+reward, and hit history. MCTS weights HIT and MISS continuation values by
+their belief-derived probabilities. The selected branch is deepened while
+the other receives a one-step causal rollout; per-episode planning latency is
+written to the algorithm update log and evaluation world records.
+
+The first serious experiment uses 256 simulations and a six-decision
+horizon. Measure planning latency on the intended hardware. For a budget
+ablation, compare 128, 256, 512, and 1024 simulations on the same frozen VAL
+catalog before making performance claims.
+
+```powershell
+python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/belief_mcts.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/belief_mcts
+```
+
+Evaluate candidate checkpoints on VAL_NORMAL, freeze the selected checkpoint,
+then run the final TEST conditions as for PPO-LSTM and SAC.
+
 ### Belief-UCB
 
 Belief-UCB is a no-pretraining online baseline, separate from classical UCB1.

@@ -124,6 +124,14 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
         retune_ms = receiver.get("band_change_retune_time_ms", receiver.get("retune_time_ms"))
         if retune_ms is not None:
             settings["band_change_retune_time_s"] = float(retune_ms) / 1000.0
+    # Belief-MCTS uses native band dwell lengths inside hypothetical branches.
+    # Always take them from the resolved environment contract, not a copied
+    # vector in an algorithm file.
+    if spec.get("name") == "belief_mcts":
+        dwell_profile = config.get("action", {}).get("dwell_slots_by_band")
+        if dwell_profile is None:
+            raise ValueError("belief_mcts requires the environment's native dwell profile")
+        settings["native_dwell_slots"] = deepcopy(dwell_profile)
     if spec.get("api") == "legacy_episode":
         reward_bounds = settings.pop("reward_bounds", None)
         if settings:

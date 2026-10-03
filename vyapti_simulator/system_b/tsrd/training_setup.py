@@ -87,7 +87,7 @@ def resolve_setup(environment_path, algorithm_path, *, seed: int, episodes: int,
         result["belief_model_calibration"] = belief_model
     if algorithm.get("name") == "ppo_lstm" and execution_mode == "training":
         result["algorithm"].setdefault("settings", {})["training_episodes_target"] = int(episodes)
-    if algorithm.get("name") in {"discrete_sac", "ppo_lstm", "belief_ucb"}:
+    if algorithm.get("name") in {"discrete_sac", "ppo_lstm", "belief_ucb", "belief_mcts"}:
         policy_settings = algorithm.get("settings", {})
         receiver = result["receiver"]
         paired_values = (

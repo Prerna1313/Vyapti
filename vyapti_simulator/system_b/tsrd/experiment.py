@@ -583,6 +583,21 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             fig.savefig(path, dpi=150)
             plt.close(fig)
             written.append(path)
+        mcts_points = [
+            (row["episode"] + 1, row["diagnostics"]["reward_model_parameter_norm"])
+            for row in updates
+            if "reward_model_parameter_norm" in row.get("diagnostics", {})
+        ]
+        if mcts_points:
+            fig, axis = plt.subplots(figsize=(8, 4))
+            axis.plot([point[0] for point in mcts_points], [point[1] for point in mcts_points])
+            axis.set(xlabel="Training episode", ylabel="Reward-model parameter norm",
+                     title="Belief-MCTS Bayesian reward-model progress")
+            fig.tight_layout()
+            path = output / "train_belief_mcts_reward_model.png"
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            written.append(path)
         ppo_keys = ("mean_policy_loss", "mean_value_loss", "mean_entropy", "mean_kl", "mean_clip_fraction")
         if updates and any(key in updates[-1].get("diagnostics", {}) for key in ppo_keys):
             fig, axis = plt.subplots(figsize=(9, 5))
@@ -624,7 +639,7 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             written.append(figure)
             run_config = json.loads((run / "config.json").read_text(encoding="utf-8"))
             algorithm_name = run_config.get("algorithm", {}).get("name")
-            if algorithm_name in {"ucb1", "round_robin", "belief_ucb"}:
+            if algorithm_name in {"ucb1", "round_robin", "belief_ucb", "belief_mcts"}:
                 world_log = path.parent / "per_world.jsonl"
                 world_rows = [json.loads(line) for line in world_log.read_text(encoding="utf-8").splitlines()]
                 diagnostic_rows = [row for row in world_rows if row.get("policy_diagnostics")]
