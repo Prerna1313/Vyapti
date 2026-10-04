@@ -396,7 +396,7 @@ pilot and checkpoint selection.
 
 `recurrent_distributional_dqn` is a trainable, single-learner recurrent
 distributional Double-Dueling DQN with NoisyNet exploration. It uses the
-shared 253-feature receiver-only state, calibrated TRAIN-250 HMM, native
+shared 325-feature receiver-only state, calibrated TRAIN-250 HMM, native
 one/two-slot dwell schedule, environment-owned reward, and common train/VAL/
 TEST runner. Its prioritized replay assigns priorities to sequence starts,
 stores terminal successor observations, and pads/masks shorter windows at
@@ -405,20 +405,27 @@ burn-in steps followed by 64 learning positions and five-step targets, so
 initial and terminal decisions can receive loss. The target network updates
 every 1,000 learner updates (about every 125 episodes at eight updates per
 episode); monitor TD error and VAL progress before changing that interval.
+Replay learning begins only after eight stored episodes each contain at least
+101 decisions and at least 128 sequence starts are available. PER beta moves
+from 0.6 to 1.0 across 480,000 receiver base steps. Evaluation reports
+receiver-derived visit counts and recent hit rates alongside spectrum
+coverage diagnostics.
 It is R2D2/Rainbow-inspired, not a distributed or paper-exact R2D2
 implementation. Evaluation uses fixed midpoint IQN quantiles, disables
 NoisyNet noise, and selects the action with the highest mean Q value. The
 frozen quantile cosine basis uses frequencies 1 through 64 for this run.
 
-Train a fresh run; the v2 checkpoint identity intentionally rejects older
-checkpoints:
+Train a fresh run; the non-versioned checkpoint identity and 325-D schema
+reject the earlier 253-D checkpoints:
 
 ```powershell
 python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/recurrent_distributional_dqn.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/recurrent_distributional_dqn
 ```
 
-Freeze this run's recipes, evaluate saved checkpoints on VAL_NORMAL, select
-the highest pooled OIR, then run all TEST conditions and generate plots:
+Freeze this run's recipes and evaluate saved checkpoints on the same VAL_NORMAL
+worlds. Select by unique-emitter interception, restricted-mean TTFI, 90% band
+coverage rate, the deadline curve, OIR, then environment reward; Pd/Pfa are
+receiver sanity checks. Run TEST only after selection is frozen:
 
 ```powershell
 python -m scripts.evaluation.freeze_worlds --run runs/recurrent_distributional_dqn
@@ -426,7 +433,7 @@ python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --
 python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint episode_000400.pt
 python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint episode_000600.pt
 python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint final.pt
-python -m scripts.evaluation.freeze_selection --run runs/recurrent_distributional_dqn --checkpoint episode_000400.pt --reason "Selected by highest VAL_NORMAL pooled OIR"
+python -m scripts.evaluation.freeze_selection --run runs/recurrent_distributional_dqn --checkpoint episode_000400.pt --reason "Selected by the registered VAL metric priority"
 python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split test --condition all --final
 python -m scripts.evaluation.plot_run --run runs/recurrent_distributional_dqn
 ```

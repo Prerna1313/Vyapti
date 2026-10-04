@@ -676,6 +676,25 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             fig.savefig(path, dpi=150)
             plt.close(fig)
             written.append(path)
+        dqn_keys = ("mean_loss", "mean_td_error", "mean_grad_norm", "mean_q_value",
+                    "mean_target_value", "mean_per_beta")
+        if updates and any(key in updates[-1].get("diagnostics", {}) for key in dqn_keys):
+            fig, axis = plt.subplots(figsize=(10, 5))
+            for key in dqn_keys:
+                points = [(row["episode"] + 1, row["diagnostics"][key]) for row in updates
+                          if key in row.get("diagnostics", {})
+                          and np.isfinite(row["diagnostics"][key])]
+                if points:
+                    axis.plot([point[0] for point in points], [point[1] for point in points],
+                              label=key.removeprefix("mean_").replace("_", " "))
+            axis.set(xlabel="Training episode", ylabel="DQN training diagnostic",
+                     title="Recurrent distributional DQN training diagnostics")
+            axis.legend()
+            fig.tight_layout()
+            path = output / "train_recurrent_distributional_dqn_metrics.png"
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            written.append(path)
     for split in ("val", "test"):
         for path in sorted((run / "eval" / split).rglob("summary.json")):
             report = json.loads(path.read_text(encoding="utf-8"))
@@ -700,7 +719,8 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             written.append(figure)
             run_config = json.loads((run / "config.json").read_text(encoding="utf-8"))
             algorithm_name = run_config.get("algorithm", {}).get("name")
-            if algorithm_name in {"ucb1", "round_robin", "belief_ucb", "belief_mcts", "contextual_thompson"}:
+            if algorithm_name in {"ucb1", "round_robin", "belief_ucb", "belief_mcts",
+                                  "contextual_thompson", "recurrent_distributional_dqn"}:
                 world_log = path.parent / "per_world.jsonl"
                 world_rows = [json.loads(line) for line in world_log.read_text(encoding="utf-8").splitlines()]
                 diagnostic_rows = [row for row in world_rows if row.get("policy_diagnostics")]
@@ -1267,6 +1287,44 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                 ])) if any(row.get("mean_rolling_coverage") is not None for row in diagnostic_rows) else None,
                 "revisit_interval_distribution_s": report["summary"][
                     "revisit_interval_distribution_s"],
+            }
+        reward_total = float(sum(row.get("policy_reward_total", 0.0) for row in world_rows))
+        decisions = int(sum(row.get("policy_reward_decisions", 0) for row in world_rows))
+        base_steps = int(sum(row.get("policy_reward_receiver_steps", 0) for row in world_rows))
+        report["summary"].update({
+            "policy_reward_total": reward_total,
+            "policy_reward_per_decision": reward_total / decisions if decisions else None,
+            "policy_reward_per_receiver_base_step": reward_total / base_steps if base_steps else None,
+        })
+    if config.get("algorithm", {}).get("module", "").endswith(
+            ".recurrent_distributional_dqn"):
+        world_rows = [json.loads(line) for line in (target / "per_world.jsonl").read_text(
+            encoding="utf-8").splitlines()]
+        diagnostic_rows = [row["policy_diagnostics"] for row in world_rows
+                           if isinstance(row.get("policy_diagnostics"), dict)]
+        if diagnostic_rows:
+            counts = np.sum([np.asarray(row["band_selection_counts"], dtype=np.int64)
+                             for row in diagnostic_rows], axis=0)
+            total_actions = max(int(np.sum(counts)), 1)
+            ranked = np.sort(counts)[::-1]
+            report["policy_diagnostics"] = {
+                "worlds_with_diagnostics": len(diagnostic_rows),
+                "action_histogram_per_band": counts.astype(int).tolist(),
+                "fraction_top_1_pooled": float(ranked[:1].sum() / total_actions),
+                "fraction_top_3_pooled": float(ranked[:3].sum() / total_actions),
+                "fraction_top_5_pooled": float(ranked[:5].sum() / total_actions),
+                "mean_unique_bands_visited": float(np.mean(
+                    [row["unique_bands_visited"] for row in diagnostic_rows])),
+                "mean_never_visited_bands": float(np.mean(
+                    [row["never_visited_bands"] for row in diagnostic_rows])),
+                "mean_staleness_slots": float(np.mean(
+                    [row["mean_staleness_slots"] for row in diagnostic_rows])),
+                "maximum_staleness_slots": float(np.mean(
+                    [row["maximum_staleness_slots"] for row in diagnostic_rows])),
+                "mean_recent_hit_rate": float(np.mean(
+                    [row["mean_recent_hit_rate"] for row in diagnostic_rows])),
+                "max_recent_hit_rate": float(np.mean(
+                    [row["max_recent_hit_rate"] for row in diagnostic_rows])),
             }
         reward_total = float(sum(row.get("policy_reward_total", 0.0) for row in world_rows))
         decisions = int(sum(row.get("policy_reward_decisions", 0) for row in world_rows))

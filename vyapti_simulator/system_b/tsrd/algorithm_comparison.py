@@ -9,7 +9,7 @@ import numpy as np
 
 from .training_setup import resolve_setup
 from .experiment import train, evaluate, _json, _hash
-from .checkpoints import evaluation_directory, freeze_selection
+from .checkpoints import checkpoint_selection_key, evaluation_directory, freeze_selection
 from .frequency_agility import fit_train_reference
 from .evaluation_statistics import paired_world_bootstrap, summarize_training_seeds
 
@@ -149,18 +149,22 @@ def run_comparison(environment, algorithm_paths, output, *, stage, episodes, che
                 train(config, run, agility_reference=reference)
                 checkpoints = _read(run / "checkpoints/index.json")["checkpoints"]
                 candidates = []
+                algorithm_module = config["algorithm"]["module"]
                 for checkpoint in checkpoints:
                     if checkpoint["kind"] == "initial":
                         continue
                     result = evaluate(run, "val", checkpoint=checkpoint["file"], condition="normal")
-                    value = result["summary"]["opportunity_interception_ratio"]
-                    if value is not None:
-                        candidates.append((value, checkpoint["file"]))
+                    key = checkpoint_selection_key(algorithm_module, result)
+                    if np.isfinite(key[0]):
+                        candidates.append((key, checkpoint["file"]))
                 if not candidates:
-                    raise ValueError("VAL has no defined OIR for checkpoint selection")
-                # Deterministic tie-break; the selection record explains it.
-                _, chosen = sorted(candidates, key=lambda row: (-row[0], row[1]))[0]
-                selection = freeze_selection(run, chosen, reason="Maximum frozen VAL_NORMAL pooled OIR; filename tie-break")
+                    raise ValueError("VAL has no defined primary checkpoint-selection metric")
+                # Keep the tie-break aligned with freeze_selection's sorted report scan.
+                _, chosen = max(sorted(candidates, key=lambda row: row[1]), key=lambda row: row[0])
+                selection = freeze_selection(
+                    run, chosen,
+                    reason="Selected using the registered VAL_NORMAL metric priority; filename tie-break",
+                )
                 for condition in protocol["conditions"]:
                     if condition != "normal":
                         evaluate(run, "val", checkpoint=chosen, condition=condition)

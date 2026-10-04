@@ -94,6 +94,39 @@ def _ppo_lstm_selection_key(report):
     )
 
 
+def _recurrent_dqn_selection_key(report):
+    """DQN VAL preference: discovery, time, coverage, deadlines, OIR, reward."""
+    summary = report.get("summary", {})
+    ttfi = summary.get("source_relative_ttfi", {})
+    deadlines = summary.get("interception_by_deadline", {}).get("interception_rate", {})
+
+    def higher(value):
+        return float(value) if value is not None else float("-inf")
+
+    def lower(value):
+        return -float(value) if value is not None else float("-inf")
+
+    return (
+        higher(summary.get("unique_emitter_interception_rate")),
+        lower(ttfi.get("km_restricted_mean_ms")),
+        higher(summary.get("fraction_worlds_reaching_90pct_band_coverage")),
+        *(higher(deadlines.get(deadline)) for deadline in
+          ("5s", "10s", "15s", "20s", "25s", "30s")),
+        higher(summary.get("opportunity_interception_ratio")),
+        higher(summary.get("policy_reward_per_decision")),
+    )
+
+
+def checkpoint_selection_key(algorithm_module, report):
+    """Return the checkpoint ranking key used by both freeze and comparison."""
+    if algorithm_module.endswith(".recurrent_distributional_dqn"):
+        return _recurrent_dqn_selection_key(report)
+    if algorithm_module.endswith(".ppo_lstm_receiver_only"):
+        return _ppo_lstm_selection_key(report)
+    value = report.get("summary", {}).get("opportunity_interception_ratio")
+    return (float(value) if value is not None else float("-inf"),)
+
+
 def freeze_selection(run_dir, name=None, *, baseline=False,
                      reason="Selected using frozen VAL_NORMAL results"):
     run = Path(run_dir).resolve()
@@ -127,7 +160,9 @@ def freeze_selection(run_dir, name=None, *, baseline=False,
         raise ValueError("Selection needs the policy's completed VAL_NORMAL report")
     is_ppo_lstm_receiver_only = config.get("algorithm", {}).get("module", "").endswith(
         ".ppo_lstm_receiver_only")
-    if is_ppo_lstm_receiver_only:
+    is_recurrent_dqn = config.get("algorithm", {}).get("module", "").endswith(
+        ".recurrent_distributional_dqn")
+    if is_ppo_lstm_receiver_only or is_recurrent_dqn:
         summary = report["summary"]
         candidate_reports = []
         for candidate_path in sorted((run / "eval" / "val").rglob("summary.json")):
@@ -137,16 +172,19 @@ def freeze_selection(run_dir, name=None, *, baseline=False,
                     and candidate.get("checkpoint_file")):
                 candidate_reports.append(candidate)
         if candidate_reports:
-            best_report = max(candidate_reports, key=_ppo_lstm_selection_key)
-            if _ppo_lstm_selection_key(report) != _ppo_lstm_selection_key(best_report):
+            selection_key = lambda candidate: checkpoint_selection_key(
+                config["algorithm"]["module"], candidate)
+            best_report = max(candidate_reports, key=selection_key)
+            if selection_key(report) != selection_key(best_report):
                 raise ValueError(
-                    "PPO-LSTM receiver-only selection must follow the configured VAL metric priority; "
+                    "Trained-policy selection must follow the configured VAL metric priority; "
                     f"best evaluated checkpoint is {best_report['checkpoint_file']}"
                 )
         ttfi = summary.get("source_relative_ttfi", {})
         metrics = {
             "unique_emitter_interception_rate": summary.get("unique_emitter_interception_rate"),
             "restricted_mean_ttfi_ms": ttfi.get("km_restricted_mean_ms"),
+            "median_ttfi_ms": ttfi.get("km_median_ms"),
             "censored_fraction": ttfi.get("censored_fraction"),
             "mean_rolling_coverage": summary.get("mean_rolling_coverage"),
             "worlds_reaching_90pct_band_coverage": summary.get("worlds_reaching_90pct_band_coverage"),
@@ -175,21 +213,25 @@ def freeze_selection(run_dir, name=None, *, baseline=False,
                  "config_sha256": status["config_sha256"], "reason": reason,
                  "metric": selection_metric, "value": selection_value,
                  "validation_summary_sha256": file_hash(summary_path)}
-    if is_ppo_lstm_receiver_only:
+    if is_ppo_lstm_receiver_only or is_recurrent_dqn:
+        selection_key = lambda candidate: checkpoint_selection_key(
+            config["algorithm"]["module"], candidate)
         selection["validation_metrics"] = metrics
         selection["evaluated_checkpoint_priority_order"] = [
             candidate["checkpoint_file"] for candidate in sorted(
-                candidate_reports, key=_ppo_lstm_selection_key, reverse=True)
+                candidate_reports, key=selection_key, reverse=True)
         ]
-        selection["selection_priority"] = [
-            "unique_emitter_interception_rate:max",
-            "restricted_mean_ttfi_ms:min",
-            "censored_fraction:min",
-            "mean_rolling_coverage:max",
-            "worlds_reaching_90pct_band_coverage:max",
-            "opportunity_interception_ratio:max",
-            "policy_reward_per_decision:max",
-        ]
+        selection["selection_priority"] = (
+            ["unique_emitter_interception_rate:max", "restricted_mean_ttfi_ms:min",
+             "fraction_worlds_reaching_90pct_band_coverage:max",
+             "interception_by_deadline.5s_to_30s:max_in_order",
+             "opportunity_interception_ratio:max", "policy_reward_per_decision:max"]
+            if is_recurrent_dqn else
+            ["unique_emitter_interception_rate:max", "restricted_mean_ttfi_ms:min",
+             "censored_fraction:min", "mean_rolling_coverage:max",
+             "worlds_reaching_90pct_band_coverage:max", "opportunity_interception_ratio:max",
+             "policy_reward_per_decision:max"]
+        )
     if config.get("evaluation", {}).get("require_frozen_world_catalog"):
         catalog_path = run / "frozen_world_catalog.json"
         if not catalog_path.is_file():

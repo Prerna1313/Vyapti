@@ -26,10 +26,11 @@ Vyapti protocol
 - Policy input is receiver-causal only.
 - Environment-owned reward is used ONLY as the RL learning target; reward is
   never fed back as a policy observation.
-- Observation schema: 253 dimensions:
+- Observation schema: 325 dimensions:
     belief(36) + staleness(36) + periodicity(36) + periodicity_confidence(36)
     + previous_action_one_hot(36) + remaining_time(1)
     + native_dwell(36) + time_since_observed_hit(36)
+    + visit_count_norm(36) + recent_hit_rate(36)
 - Evaluation is deterministic greedy (argmax mean Q) by default.
 
 Important naming note
@@ -64,10 +65,13 @@ from ..algorithm_interface import PublicTransition
 N_BANDS = 36
 MISSION_SECONDS = 30.0
 BASE_SLOT_SECONDS = 0.050
-OBS_DIM = 253
+OBS_DIM = 325
 HIDDEN = 256
+RECENT_HIT_WINDOW = 8
+MIN_REPLAY_EPISODES = 8
+TRAINING_BASE_STEP_TARGET = 480_000
 
-# RL hyperparameters: conservative starting point for a 253-D, 36-action,
+# RL hyperparameters: conservative starting point for a 325-D, 36-action,
 # partially-observed recurrent value learner.
 LEARNING_RATE = 1e-4
 GAMMA_BASE = 0.997
@@ -101,8 +105,8 @@ WARMUP_ACTIONS = 5_000
 # Deterministic evaluation default.
 EVAL_MODE = "greedy"
 
-OBSERVATION_SCHEMA = "receiver_belief_periodicity_dwell_hit_history_v2"
-CHECKPOINT_FORMAT = "vyapti_recurrent_distributional_dqn_v2"
+OBSERVATION_SCHEMA = "receiver_belief_periodicity_dwell_hit_history"
+CHECKPOINT_FORMAT = "vyapti_recurrent_distributional_dqn"
 REWARD_MODE = "truth_based_intercept_utility_v2"
 
 
@@ -167,11 +171,12 @@ class SequencePrioritizedReplay:
         # Reference every possible learning-window start at the configured
         # stride, including both episode boundaries for direct loss coverage.
         max_start = episode.steps - 1
-        starts = list(range(0, max_start + 1, self.sequence_stride))
-        if starts[-1] != max_start:
-            starts.append(max_start)
-        for start in starts:
-            self.sequence_refs.append(SequenceRef(episode, start, 1.0))
+        if max_start >= 0:
+            starts = list(range(0, max_start + 1, self.sequence_stride))
+            if not starts or starts[-1] != max_start:
+                starts.append(max_start)
+            for start in starts:
+                self.sequence_refs.append(SequenceRef(episode, start, 1.0))
         while self.episodes and self.total_steps > self.capacity_steps:
             old = self.episodes.popleft()
             self.total_steps -= old.steps
@@ -421,6 +426,9 @@ class RecurrentDistributionalDQNPolicy:
         self.min_replay_sequences = int(
             self.settings.get("min_replay_sequences", MIN_REPLAY_SEQUENCES)
         )
+        self.min_replay_episodes = int(
+            self.settings.get("min_replay_episodes", MIN_REPLAY_EPISODES)
+        )
         self.updates_per_episode = int(
             self.settings.get("updates_per_episode", UPDATES_PER_EPISODE)
         )
@@ -445,6 +453,12 @@ class RecurrentDistributionalDQNPolicy:
         self.noisy_sigma0 = float(self.settings.get("noisy_sigma0", NOISY_SIGMA0))
         self.warmup_actions = int(self.settings.get("warmup_actions", WARMUP_ACTIONS))
         self.sequence_stride = int(self.settings.get("sequence_stride", 8))
+        self.recent_hit_window = int(
+            self.settings.get("recent_hit_window", RECENT_HIT_WINDOW)
+        )
+        self.training_base_step_target = int(
+            self.settings.get("training_base_step_target", TRAINING_BASE_STEP_TARGET)
+        )
 
         self.p01 = float(self.settings.get("inactive_to_active_probability", 0.02220))
         self.p11 = float(self.settings.get("active_to_active_probability", 0.95753))
@@ -460,12 +474,16 @@ class RecurrentDistributionalDQNPolicy:
         self.native_dwell_slots = self._validate_dwell_profile(
             self.settings["native_dwell_slots"]
         )
+        self.sweep_slots = int(np.sum(self.native_dwell_slots))
         self.native_dwell_feature = self.native_dwell_slots.astype(np.float32) / 2.0
+        self.observation_dim = OBS_DIM
 
         if self.hidden_size < 1 or self.n_step < 1:
             raise ValueError("hidden_units and n_step must be positive")
         if (self.batch_size < 1 or self.learning_sequence < 1 or self.burn_in < 0
-                or self.min_replay_sequences < 1 or self.sequence_stride < 1
+                or self.min_replay_sequences < 1 or self.min_replay_episodes < 1
+                or self.sequence_stride < 1 or self.recent_hit_window < 1
+                or self.training_base_step_target < 1
                 or self.n_quantiles < 1 or self.n_target_quantiles < 1
                 or self.quantile_embed_dim < 1 or not math.isfinite(self.quantile_huber_k)
                 or self.quantile_huber_k <= 0 or not math.isfinite(self.noisy_sigma0)
@@ -508,6 +526,7 @@ class RecurrentDistributionalDQNPolicy:
         )
 
         self.total_actions = 0
+        self.total_receiver_base_steps = 0
         self.total_updates = 0
         self.completed_training_episodes = 0
         self.evaluation_action_mode = EVAL_MODE
@@ -565,9 +584,15 @@ class RecurrentDistributionalDQNPolicy:
         self._episode_rewards: list[float] = []
         self._episode_gammas: list[float] = []
         self._episode_dones: list[float] = []
+        self.episode_base_steps = 0
         self.episode_reward = 0.0
         self.episode_decisions = 0
         self.band_selection_counts = np.zeros(self.bands, dtype=np.int64)
+        self.recent_hit_history = [
+            deque(maxlen=self.recent_hit_window) for _ in range(self.bands)
+        ]
+        self._raw_staleness_slot_history: list[np.ndarray] = []
+        self._recent_hit_rate_history: list[np.ndarray] = []
         self._training_episode = bool(training)
         self._last_losses: dict[str, float] = {}
 
@@ -602,13 +627,23 @@ class RecurrentDistributionalDQNPolicy:
             confidence[band] = np.float32(certainty)
         return periodicity, confidence
 
-    def _features(self, slot: int) -> np.ndarray:
-        staleness = np.where(
+    def _raw_staleness_slots(self, slot: int) -> np.ndarray:
+        """Unclipped diagnostic age; unseen bands age from the episode start."""
+        return np.where(
             self.last_visit_end >= 0,
-            (slot - self.last_visit_end) / 600.0,
-            1.0,
+            np.maximum(int(slot) - self.last_visit_end, 0),
+            max(int(slot), 0),
+        ).astype(np.int64)
+
+    def _features(self, slot: int) -> np.ndarray:
+        raw_staleness = np.where(
+            self.last_visit_end >= 0,
+            slot - self.last_visit_end,
+            4 * self.sweep_slots,
         )
-        staleness = np.clip(staleness, 0.0, 1.0).astype(np.float32)
+        staleness = np.clip(
+            raw_staleness / float(4 * self.sweep_slots), 0.0, 1.0,
+        ).astype(np.float32)
 
         periodicity, confidence = self._periodicity_features(slot)
 
@@ -628,6 +663,16 @@ class RecurrentDistributionalDQNPolicy:
         ).astype(np.float32)
         time_since_hit = np.clip(time_since_hit, 0.0, 1.0)
 
+        total_visits = max(int(self.episode_decisions), 1)
+        visit_count_norm = np.clip(
+            self.band_selection_counts.astype(np.float32) / float(total_visits),
+            0.0, 1.0,
+        )
+        recent_hit_rate = np.zeros(self.bands, dtype=np.float32)
+        for band, history in enumerate(self.recent_hit_history):
+            if history:
+                recent_hit_rate[band] = np.float32(np.mean(history))
+
         features = np.concatenate(
             (
                 self.belief.astype(np.float32),
@@ -638,6 +683,8 @@ class RecurrentDistributionalDQNPolicy:
                 remaining,
                 self.native_dwell_feature,
                 time_since_hit,
+                visit_count_norm,
+                recent_hit_rate,
             )
         )
         if features.shape != (OBS_DIM,) or not np.all(np.isfinite(features)):
@@ -697,6 +744,8 @@ class RecurrentDistributionalDQNPolicy:
             )
 
         features = self._features(slot)
+        self._raw_staleness_slot_history.append(self._raw_staleness_slots(slot))
+        self._recent_hit_rate_history.append(features[8 * self.bands + 1:9 * self.bands + 1].copy())
         self.model.train(bool(training))
         q_values = self._q_values_from_current_state(features, training=training)
 
@@ -735,6 +784,8 @@ class RecurrentDistributionalDQNPolicy:
                 del times[:-self.period_history]
             self.last_hit_slot[band] = end_slot
 
+        self.recent_hit_history[band].append(1.0 if hit else 0.0)
+
         self.last_visit_end[band] = end_slot
         self.previous_action = band
         self.elapsed_slots = end_slot
@@ -765,6 +816,8 @@ class RecurrentDistributionalDQNPolicy:
         self.episode_reward += reward
 
         if training:
+            self.total_receiver_base_steps += slots
+            self.episode_base_steps += slots
             self._episode_obs.append(self._pending["features"])
             self._episode_actions.append(int(transition.action))
             self._episode_rewards.append(reward)
@@ -797,9 +850,10 @@ class RecurrentDistributionalDQNPolicy:
         )
 
     def _current_per_beta(self) -> float:
-        # Warm from beta_start to 1 as training progresses through a 400k-action run.
-        denom = max(float(self.settings.get("training_action_target", 400_000)), 1.0)
-        frac = np.clip(self.total_actions / denom, 0.0, 1.0)
+        denom = max(float(self.settings.get(
+            "training_base_step_target", TRAINING_BASE_STEP_TARGET,
+        )), 1.0)
+        frac = np.clip(self.total_receiver_base_steps / denom, 0.0, 1.0)
         return float(self.per_beta_start + frac * (self.per_beta_end - self.per_beta_start))
 
     def _sample_sequences(self):
@@ -1007,10 +1061,10 @@ class RecurrentDistributionalDQNPolicy:
 
         return {
             "loss": float(loss.item()),
-            "mean_td_abs": float(priority_values.mean()),
+            "td_error": float(priority_values.mean()),
             "grad_norm": grad_norm,
-            "q_mean": float(current_quantiles.mean().item()),
-            "target_mean": float(target_quantiles.mean().item()),
+            "q_value": float(current_quantiles.mean().item()),
+            "target_value": float(target_quantiles.mean().item()),
             "per_beta": float(self._current_per_beta()),
         }
 
@@ -1019,14 +1073,19 @@ class RecurrentDistributionalDQNPolicy:
         if ep is not None:
             self.replay.add(ep)
 
+        minimum_steps = self.burn_in + self.learning_sequence + self.n_step
+        eligible_episodes = sum(
+            1 for episode in self.replay.episodes if episode.steps >= minimum_steps
+        )
         eligible_sequences = len(self.replay.sequence_refs)
-        if eligible_sequences < self.min_replay_sequences:
+        if (eligible_episodes < self.min_replay_episodes
+                or eligible_sequences < self.min_replay_sequences):
             return {
                 "loss": float("nan"),
-                "mean_td_abs": float("nan"),
+                "td_error": float("nan"),
                 "grad_norm": float("nan"),
-                "q_mean": float("nan"),
-                "target_mean": float("nan"),
+                "q_value": float("nan"),
+                "target_value": float("nan"),
                 "per_beta": float(self._current_per_beta()),
             }
 
@@ -1047,18 +1106,47 @@ class RecurrentDistributionalDQNPolicy:
         else:
             self._last_losses = {}
 
+        selection_counts = self.band_selection_counts
+        total_selections = int(selection_counts.sum())
+        top_counts = np.sort(selection_counts)[::-1]
+        staleness = (np.asarray(self._raw_staleness_slot_history, dtype=np.int64)
+                     if self._raw_staleness_slot_history else np.empty((0, self.bands), dtype=np.int64))
+        # Include the post-action terminal state so ages accumulated during the
+        # final dwell are visible in the episode-level diagnostic.
+        staleness = np.concatenate(
+            (staleness, self._raw_staleness_slots(self.elapsed_slots)[None, :]), axis=0,
+        )
+        recent_hits = (np.asarray(self._recent_hit_rate_history, dtype=np.float32)
+                       if self._recent_hit_rate_history else np.empty((0, self.bands), dtype=np.float32))
         return {
             "algorithm": "recurrent_distributional_dqn",
             "algorithm_family": "R2D2/Rainbow-inspired recurrent value-based RL",
             "training_updates": int(bool(self._last_losses and np.isfinite(next(iter(self._last_losses.values()))))) * self.updates_per_episode,
             "total_training_actions": int(self.total_actions),
+            "total_policy_decisions": int(self.total_actions),
+            "total_receiver_base_steps": int(self.total_receiver_base_steps),
             "completed_training_episodes": int(self.completed_training_episodes),
             "episode_decisions": int(self.episode_decisions),
+            "episode_base_steps": int(self.elapsed_slots),
             "episode_reward": float(self.episode_reward),
             "replay_steps": int(len(self.replay)),
             "replay_episodes": int(self.replay.num_episodes),
             "replay_sequences": int(len(self.replay.sequence_refs)),
             "band_selection_counts": self.band_selection_counts.tolist(),
+            "unique_bands_visited": int(np.count_nonzero(selection_counts)),
+            "top_1_action_concentration": float(top_counts[:1].sum() / max(total_selections, 1)),
+            "top_3_action_concentration": float(top_counts[:3].sum() / max(total_selections, 1)),
+            "top_5_action_concentration": float(top_counts[:5].sum() / max(total_selections, 1)),
+            "never_visited_bands": int(np.sum(selection_counts == 0)),
+            "mean_staleness_slots": float(np.mean(staleness)),
+            "maximum_staleness_slots": int(np.max(staleness)),
+            "mean_recent_hit_rate": (
+                float(np.mean(recent_hits)) if recent_hits.size else 0.0
+            ),
+            "max_recent_hit_rate": (
+                float(np.max(recent_hits)) if recent_hits.size else 0.0
+            ),
+            "per_beta": float(self._current_per_beta()),
             **{f"mean_{k}": v for k, v in self._last_losses.items()},
         }
 
@@ -1076,12 +1164,15 @@ class RecurrentDistributionalDQNPolicy:
             "target_model": self.target_model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "total_actions": self.total_actions,
+            "total_receiver_base_steps": self.total_receiver_base_steps,
             "total_updates": self.total_updates,
             "completed_training_episodes": self.completed_training_episodes,
             "rng_state": self.rng.bit_generator.state,
         }
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        torch.save(payload, Path(path))
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as stream:
+            torch.save(payload, stream)
 
     def _load(self, path: Path) -> None:
         payload = torch.load(path, map_location=self.device, weights_only=False)
@@ -1096,6 +1187,7 @@ class RecurrentDistributionalDQNPolicy:
         self.target_model.eval()
         self.optimizer.load_state_dict(payload["optimizer"])
         self.total_actions = int(payload.get("total_actions", 0))
+        self.total_receiver_base_steps = int(payload.get("total_receiver_base_steps", 0))
         self.total_updates = int(payload.get("total_updates", 0))
         self.completed_training_episodes = int(payload.get("completed_training_episodes", 0))
         if "rng_state" in payload:
@@ -1124,6 +1216,7 @@ def manifest() -> dict[str, Any]:
         "batch_size": BATCH_SIZE,
         "replay_capacity_steps": REPLAY_CAPACITY_STEPS,
         "min_replay_sequences": MIN_REPLAY_SEQUENCES,
+        "min_replay_episodes": MIN_REPLAY_EPISODES,
         "updates_per_episode": UPDATES_PER_EPISODE,
         "burn_in": BURN_IN,
         "learning_sequence": LEARNING_SEQUENCE,
@@ -1136,6 +1229,8 @@ def manifest() -> dict[str, Any]:
         "n_target_quantiles": N_TARGET_QUANTILES,
         "noisy_exploration": True,
         "warmup_actions": WARMUP_ACTIONS,
+        "training_base_step_target": TRAINING_BASE_STEP_TARGET,
+        "recent_hit_window": RECENT_HIT_WINDOW,
         "observation_schema": OBSERVATION_SCHEMA,
         "reward_mode": REWARD_MODE,
         "reward_in_policy_observation": False,
