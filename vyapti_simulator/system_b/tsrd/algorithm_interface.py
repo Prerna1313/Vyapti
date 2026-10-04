@@ -17,6 +17,16 @@ from typing import Protocol
 from vyapti_simulator.core.receiver_observation import ReceiverObservation
 
 
+# Exact source transitions that add evaluation-time action sampling only.
+# They preserve training action selection, model initialization, and checkpoints.
+_EVALUATION_ONLY_SOURCE_COMPATIBILITY = {
+    "discrete_sac": {
+        ("9a0ae779b9b66231fdfecbef9daf5d5069a163235852b90cd8bc21bbdc74779e",
+         "84bade76c4f701ff2f69a61a0a31e3429b549724ff93c0cb0f6cdc6e3d778e75")
+    },
+}
+
+
 @dataclass(frozen=True, slots=True)
 class PublicState:
     time_slot: int
@@ -102,7 +112,8 @@ def algorithm_spec(config: dict) -> dict:
 
 
 def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | None = None,
-                     restore_rng: bool = True):
+                     restore_rng: bool = True, evaluation_action_mode: str = "greedy",
+                     action_seed: int | None = None):
     spec = algorithm_spec(config)
     module = importlib.import_module(spec["module"])
     factory = getattr(module, "create", None)
@@ -133,6 +144,10 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
         if dwell_profile is None:
             raise ValueError("belief_mcts requires the environment's native dwell profile")
         settings["native_dwell_slots"] = deepcopy(dwell_profile)
+    if spec.get("name") == "ppo_lstm":
+        dwell_profile = config.get("action", {}).get("dwell_slots_by_band")
+        if dwell_profile is not None:
+            settings["native_dwell_slots"] = deepcopy(dwell_profile)
     if spec.get("name") == "contextual_thompson":
         dwell_profile = config.get("action", {}).get("dwell_slots_by_band")
         if dwell_profile is None:
@@ -167,6 +182,13 @@ def create_algorithm(config: dict, *, bands: int, seed: int, checkpoint: Path | 
     for method in ("reset_episode", "select_action", "observe", "end_episode"):
         if not callable(getattr(algorithm, method, None)):
             raise ValueError(f"Algorithm is missing {method}")
+    if evaluation_action_mode != "greedy":
+        if spec.get("name") not in {"ppo_lstm", "discrete_sac"}:
+            raise ValueError("Sampled evaluation is currently supported only for ppo_lstm and discrete_sac")
+        setter = getattr(algorithm, "set_evaluation_action_mode", None)
+        if not callable(setter):
+            raise ValueError(f"{spec.get('name')} does not support sampled evaluation")
+        setter(evaluation_action_mode, action_seed)
     return algorithm
 
 
@@ -190,6 +212,23 @@ def algorithm_provenance(config: dict) -> dict:
             "active_to_active_probability": calibration["active_to_active_probability"],
         }
     return spec
+
+
+def algorithm_provenance_matches(config: dict, recorded: dict) -> bool:
+    """Match run provenance independent of machine paths and audited eval-only edits."""
+    current = algorithm_provenance(config)
+    recorded_normalized = deepcopy(recorded)
+    current_normalized = deepcopy(current)
+    recorded_source = recorded_normalized.pop("adapter_source", None)
+    current_source = current_normalized.pop("adapter_source", None)
+    if recorded_normalized != current_normalized:
+        return False
+    if not isinstance(recorded_source, dict) or not isinstance(current_source, dict):
+        return recorded_source == current_source
+    old_digest = recorded_source.get("sha256")
+    new_digest = current_source.get("sha256")
+    name = algorithm_spec(config).get("name")
+    return old_digest == new_digest or (old_digest, new_digest) in _EVALUATION_ONLY_SOURCE_COMPATIBILITY.get(name, set())
 
 
 def algorithm_fingerprint(config: dict) -> str:

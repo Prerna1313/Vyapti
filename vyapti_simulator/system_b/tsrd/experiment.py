@@ -23,7 +23,7 @@ from .train250_cache import (
 )
 from .world_composer import WorldComposer, GENERATOR_VERSION, DEFAULT_TIME_OFFSET_US
 from .algorithm_interface import (
-    PublicState, PublicTransition, create_algorithm, algorithm_provenance,
+    PublicState, PublicTransition, create_algorithm, algorithm_provenance, algorithm_provenance_matches,
     algorithm_fingerprint,
 )
 from .checkpoints import save_checkpoint, resolve_checkpoint, evaluation_directory, safe_name
@@ -832,19 +832,28 @@ def plot_run(run_dir: str | Path) -> list[Path]:
 
 
 def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
-             condition: str = "normal", checkpoint: str | None = None) -> dict:
+             condition: str = "normal", checkpoint: str | None = None,
+             action_mode: str = "greedy", action_seed: int = 20261004,
+             data_root: str | Path | None = None) -> dict:
     """Evaluate a frozen checkpoint or fixed online baseline on held-out worlds."""
     if split not in {"val", "test"} or (split == "test" and not final):
         raise ValueError("TEST requires explicit final=True; split must be val or test")
+    if action_mode not in {"greedy", "sampled"} or type(action_seed) is not int or action_seed < 0:
+        raise ValueError("action_mode must be greedy or sampled, and action_seed must be nonnegative")
     run = Path(run_dir).resolve()
     config = load_contract(run / "config.json")
     baseline = config.get("execution_mode") == "online_baseline"
+    algorithm_name = config.get("algorithm", {}).get("name")
+    if action_mode == "sampled" and (baseline or algorithm_name not in {"ppo_lstm", "discrete_sac"}):
+        raise ValueError("Sampled evaluation is currently supported only for PPO-LSTM and plain Discrete SAC")
     if baseline and checkpoint is not None:
         raise ValueError("The online baseline has no checkpoint")
     conditions = config["evaluation"].get("illumination_conditions", {"normal": {}})
     if condition == "all":
         condition_reports = {
-            name: evaluate(run, split, final=final, condition=name, checkpoint=checkpoint) for name in conditions
+            name: evaluate(run, split, final=final, condition=name, checkpoint=checkpoint,
+                           action_mode=action_mode, action_seed=action_seed,
+                           data_root=data_root) for name in conditions
         }
         matrix = {
             spatial_condition: {
@@ -853,13 +862,18 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
             }
             for spatial_condition, report in condition_reports.items()
         }
-        combined = {"split": split, "primary_metric": "opportunity_interception_ratio",
+        combined = {"split": split, "action_mode": action_mode,
+                    "action_seed_base": action_seed if action_mode == "sampled" else None,
+                    "primary_metric": "opportunity_interception_ratio",
                     "spatial_condition_by_train_derived_frequency_agility": matrix,
                     "conditions": condition_reports}
         if config["evaluation"].get("require_frozen_world_catalog"):
             _, catalog_sha256 = load_world_catalog(run, _hash(run / "config.json"))
             combined["frozen_world_catalog_sha256"] = catalog_sha256
-            _json(run / "eval" / split / "spatial_agility_matrix.json", {
+            matrix_root = (run / "eval" / split if action_mode == "greedy" else
+                           run / "eval" / split / "action_modes" / action_mode / f"seed_{action_seed}")
+            matrix_root.mkdir(parents=True, exist_ok=True)
+            _json(matrix_root / "spatial_agility_matrix.json", {
                 key: value for key, value in combined.items() if key != "conditions"})
         return combined
     if condition not in conditions:
@@ -872,7 +886,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         raise ValueError("Training must complete before evaluation")
     runtime_path = run / "runtime_manifest.json"
     runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    if runtime.get("algorithm") is not None and runtime["algorithm"] != algorithm_provenance(config):
+    if runtime.get("algorithm") is not None and not algorithm_provenance_matches(
+            config, runtime["algorithm"]):
         raise ValueError("Algorithm adapter source changed since training")
     policy_hash = algorithm_fingerprint(config) if baseline else None
     if baseline and status.get("algorithm_sha256") != policy_hash:
@@ -899,6 +914,7 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
             checkpoint = selection["checkpoint_file"]
             selected_hash = selection["checkpoint_sha256"]
             val_name = checkpoint
+        # Checkpoint selection is frozen from the canonical greedy VAL report.
         validation_path = evaluation_directory(run, config, val_name, "val", "normal") / "summary.json"
         if _hash(validation_path) != selection["validation_summary_sha256"]:
             raise ValueError("Selected VAL report changed after selection")
@@ -917,7 +933,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         checkpoint_name = checkpoint_path.name
         if selected_hash is not None and frozen_hash != selected_hash:
             raise ValueError("Selected checkpoint changed")
-    target = evaluation_directory(run, config, checkpoint_name, split, condition)
+    target = evaluation_directory(run, config, checkpoint_name, split, condition,
+                                  action_mode=action_mode, action_seed=action_seed)
     if target.exists():
         # A completed report is immutable by default. An interrupted evaluation
         # has no summary.json commit marker, so discard its partial artifacts
@@ -925,7 +942,9 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         if (target / "summary.json").exists():
             raise FileExistsError(target)
         shutil.rmtree(target)
-    data = Path(config["data_root"]).resolve()
+    data = Path(data_root if data_root is not None else config["data_root"]).resolve()
+    if not data.is_dir():
+        raise FileNotFoundError(f"Evaluation dataset root not found: {data}; pass --data-root")
     frozen_catalog = None
     frozen_catalog_sha256 = None
     if config["evaluation"].get("require_frozen_world_catalog"):
@@ -955,6 +974,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                                    "retune_time_ms": config["receiver"]["retune_time_ms"],
                                    "dwell_slots_by_band": config["action"].get("dwell_slots_by_band"),
                                    "condition": condition,
+                                   "action_mode": action_mode,
+                                   "action_seed_base": action_seed if action_mode == "sampled" else None,
                                    "illumination_settings": conditions[condition],
                                    "illumination_seed_base": config["evaluation"].get("illumination_seed", 20261004),
                                    "composed_worlds": composed,
@@ -1023,8 +1044,10 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                 visibility_mask_sha256=illumination["visibility_mask_sha256"],
                 replay_signature=world.replay_signature())
         _json(target / "world_logs" / f"{config_id}.json", illumination)
+        action_seed_world = _seed(action_seed, f"{split}:action", config_id)
         policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path,
-                                  restore_rng=False)
+                                  restore_rng=False, evaluation_action_mode=action_mode,
+                                  action_seed=action_seed_world if action_mode == "sampled" else None)
         predictions = []
         trajectory, _, reward_components = _run_episode(
             world, policy, training=False, episode=index, log_path=target / "steps.jsonl",
@@ -1035,6 +1058,7 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         source = data / "stare" / f"{split}_stare" / f"{config_id}.h5"
         row = {
             "config_id": config_id, "receiver_seed": seed,
+            "action_seed": action_seed_world if action_mode == "sampled" else None,
             "condition": condition, "illumination_seed": illumination_seed,
             "illumination_audit_file": f"world_logs/{config_id}.json",
             "source_recorded_pulses_in_mission": illumination["source_recorded_pulses_in_mission"],
@@ -1078,8 +1102,10 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                 visibility_mask_sha256=illumination["visibility_mask_sha256"],
                 replay_signature=world.replay_signature())
         _json(target / "world_logs" / f"{recipe['id']}.json", illumination)
+        action_seed_world = _seed(action_seed, f"{split}:action", recipe["id"])
         policy = create_algorithm(config, bands=world.n_bands, seed=seed, checkpoint=checkpoint_path,
-                                  restore_rng=False)
+                                  restore_rng=False, evaluation_action_mode=action_mode,
+                                  action_seed=action_seed_world if action_mode == "sampled" else None)
         predictions = []
         trajectory, _, reward_components = _run_episode(
             world, policy, training=False, episode=len(ids) + offset,
@@ -1090,6 +1116,7 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         scores.append(score)
         row = {
             "config_id": recipe["id"], "kind": "composed_heldout",
+            "action_seed": action_seed_world if action_mode == "sampled" else None,
             "condition": condition, "illumination_seed": illumination_seed,
             "illumination_audit_file": f"world_logs/{recipe['id']}.json",
             "world_seed": int(recipe["world_seed"]), "receiver_seed": seed,
@@ -1123,6 +1150,8 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                       policy_sha256=frozen_hash)
     else:
         report.update(checkpoint_sha256=frozen_hash, checkpoint_file=checkpoint_name)
+    report["action_mode"] = action_mode
+    report["action_seed_base"] = action_seed if action_mode == "sampled" else None
     report["per_world_sha256"] = _hash(target / "per_world.jsonl")
     report["worlds_sha256"] = _hash(target / "worlds.json")
     if protocol:

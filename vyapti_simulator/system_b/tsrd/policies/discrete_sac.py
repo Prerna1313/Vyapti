@@ -119,6 +119,8 @@ class DiscreteSACPolicy:
                 raise ValueError("cpu_threads must be positive")
             torch.set_num_threads(cpu_threads)
         self.rng = np.random.default_rng(int(seed))
+        self.evaluation_action_mode = "greedy"
+        self.evaluation_rng = np.random.default_rng(int(seed))
         torch.manual_seed(int(seed))
         if self.device.type == "cuda":
             torch.cuda.manual_seed_all(int(seed))
@@ -180,10 +182,23 @@ class DiscreteSACPolicy:
             x = torch.as_tensor(features, dtype=torch.float32, device=self.device).unsqueeze(0)
             with torch.no_grad():
                 probabilities, _ = self.actor(x)
-                action = int(torch.argmax(probabilities, dim=-1).item()) if not training else int(
-                    torch.multinomial(probabilities, 1, generator=None).item())
+                if training:
+                    action = int(torch.multinomial(probabilities, 1, generator=None).item())
+                elif self.evaluation_action_mode == "sampled":
+                    action = int(self.evaluation_rng.choice(self.bands, p=probabilities[0].cpu().numpy()))
+                else:
+                    action = int(torch.argmax(probabilities, dim=-1).item())
         self.episode_counts[action] += 1
         return action
+
+    def set_evaluation_action_mode(self, mode: str, seed: int | None = None) -> None:
+        if mode not in {"greedy", "sampled"}:
+            raise ValueError("Evaluation action mode must be greedy or sampled")
+        if mode == "sampled" and (type(seed) is not int or seed < 0):
+            raise ValueError("Sampled evaluation requires a nonnegative integer action seed")
+        self.evaluation_action_mode = mode
+        if seed is not None:
+            self.evaluation_rng = np.random.default_rng(seed)
 
     def _update_belief(self, observation, slots: int) -> None:
         band = int(observation.selected_band)

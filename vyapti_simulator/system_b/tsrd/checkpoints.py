@@ -61,8 +61,12 @@ def resolve_checkpoint(run, config, status, name=None):
     return path, expected_hash
 
 
-def evaluation_directory(run, config, name, split, condition):
+def evaluation_directory(run, config, name, split, condition, *, action_mode="greedy", action_seed=None):
     root = Path(run) / "eval" / split
+    if action_mode != "greedy":
+        if action_seed is None:
+            raise ValueError("Sampled evaluation output requires an action seed")
+        root = root / "action_modes" / action_mode / f"seed_{int(action_seed)}"
     if name is not None and name != config.get("checkpoint_file", "final.json"):
         root = root / "checkpoints" / Path(name).stem
     return root / condition

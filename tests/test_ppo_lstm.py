@@ -25,6 +25,7 @@ def _receiver_observation(slot, band, hit=False):
 
 def _config():
     return {
+        "action": {"dwell_slots_by_band": [1, 2] * 18},
         "algorithm": {
             "name": "ppo_lstm",
             "module": "vyapti_simulator.system_b.tsrd.policies.ppo_lstm",
@@ -32,7 +33,7 @@ def _config():
             "settings": {
                 "device": "cpu", "hidden_units": 16, "ppo_epochs": 1,
                 "bptt_chunk": 2, "sequence_minibatch": 2,
-                "periodicity_history": 8, "training_episodes_target": 2,
+                "periodicity_history": 8, "training_actions_target": 4,
             },
         }
     }
@@ -41,18 +42,27 @@ def _config():
 def test_ppo_lstm_public_transition_update_and_checkpoint_roundtrip(tmp_path):
     config = _config()
     policy = create_algorithm(config, bands=36, seed=13)
+    assert policy.observation_dim == 253
+    assert not hasattr(policy, "band_reward_ema")
+    assert not hasattr(policy, "previous_reward")
+    assert policy.native_dwell_feature.tolist() == [0.5, 1.0] * 18
     policy.reset_episode(training=True)
     state = PublicState(0, None)
     action = policy.select_action(state, training=True)
     next_state = PublicState(1, _receiver_observation(0, action, hit=True))
     policy.observe(PublicTransition(state, action, 0.125, next_state, False), training=True)
+    features = policy._features(1)
+    assert features.shape == (253,)
+    assert features[181 + action] == policy.native_dwell_feature[action]
+    assert features[217 + action] == 0.0
+    assert policy._rewards == [0.125]
     diagnostics = policy.end_episode(training=True)
     assert diagnostics["training_updates"] == 1
     assert diagnostics["episode_decisions"] == 1
     assert diagnostics["band_selection_counts"][action] == 1
     assert math.isfinite(diagnostics["mean_loss"])
     assert math.isfinite(diagnostics["mean_kl"])
-    assert diagnostics["mean_learning_rate_fraction"] == 1.0
+    assert diagnostics["mean_learning_rate_fraction"] == 0.75
 
     policy.reset_episode(training=True)
     state = PublicState(0, None)

@@ -15,6 +15,7 @@ from ..algorithm_interface import PublicTransition
 NATIVE_DWELL_S = 0.05
 MISSION_S = 30.0
 FEATURES_PER_BAND = 5
+OBSERVATION_SCHEMA = "receiver_belief_periodicity_dwell_hit_history_v2"
 
 
 def _init_linear(layer: nn.Linear, gain: float) -> nn.Linear:
@@ -81,8 +82,7 @@ class PPOLSTMPolicy:
         self.target_kl = float(self.settings.get("target_kl", 0.03))
         self.bptt_chunk = int(self.settings.get("bptt_chunk", 128))
         self.sequence_minibatch = int(self.settings.get("sequence_minibatch", 8))
-        episode_target = self.settings.get("training_episodes_target")
-        self.training_episodes_target = None if episode_target is None else int(episode_target)
+        self.training_actions_target = int(self.settings.get("training_actions_target", 400_000))
         self.period_history = int(self.settings.get("periodicity_history", 32))
         self.p01 = float(self.settings.get("inactive_to_active_probability", 0.05))
         self.p11 = float(self.settings.get("active_to_active_probability", 0.90))
@@ -90,12 +90,18 @@ class PPOLSTMPolicy:
         self.pd = float(self.settings.get("detection_probability", 0.90))
         self.pfa = float(self.settings.get("false_alarm_probability", 0.05))
         self.base_slot_s = float(self.settings.get("base_slot_seconds", NATIVE_DWELL_S))
+        dwell_profile = self.settings.get("native_dwell_slots", [1] * bands)
+        if (not isinstance(dwell_profile, (list, tuple)) or len(dwell_profile) != bands
+                or any(type(value) is not int or value not in (1, 2) for value in dwell_profile)):
+            raise ValueError("native_dwell_slots must contain one- or two-slot dwell values for every band")
+        self.native_dwell_slots = np.asarray(dwell_profile, dtype=np.float32)
+        self.native_dwell_feature = self.native_dwell_slots / 2.0
         positive = (self.hidden_size, self.ppo_epochs, self.bptt_chunk, self.sequence_minibatch,
                     self.period_history)
         if any(value < 1 for value in positive):
             raise ValueError("PPO-LSTM dimensions, epochs, chunk, and history must be positive")
-        if self.training_episodes_target is not None and self.training_episodes_target < 1:
-            raise ValueError("training_episodes_target must be positive when provided")
+        if self.training_actions_target < 1:
+            raise ValueError("training_actions_target must be positive")
         probabilities = (self.gamma_base, self.gae_lambda_base, self.p01, self.p11,
                          self.prior_active, self.pd, self.pfa)
         if any(not math.isfinite(value) or not 0 < value < 1 for value in probabilities):
@@ -126,10 +132,14 @@ class PPOLSTMPolicy:
 
         self.seed = int(seed)
         self.rng = np.random.default_rng(self.seed)
+        self.evaluation_action_mode = "greedy"
+        self.evaluation_rng = np.random.default_rng(self.seed)
         torch.manual_seed(self.seed)
         if self.device.type == "cuda":
             torch.cuda.manual_seed_all(self.seed)
-        self.observation_dim = bands * FEATURES_PER_BAND + 1
+        # Existing receiver/belief/periodicity state (181 features at 36 bands)
+        # plus native dwell and time since observed HIT (36 each).
+        self.observation_dim = bands * (FEATURES_PER_BAND + 2) + 1
         self.model = _ActorCritic(self.observation_dim, bands, self.hidden_size).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, eps=1e-5)
         self.total_actions = 0
@@ -145,6 +155,7 @@ class PPOLSTMPolicy:
     def reset_episode(self, *, training: bool) -> None:
         self.belief = np.full(self.bands, self.prior_active, dtype=np.float64)
         self.last_visit_end = np.full(self.bands, -1, dtype=np.int64)
+        self.last_hit_slot = np.full(self.bands, -1, dtype=np.int64)
         self.hit_times: list[list[float]] = [[] for _ in range(self.bands)]
         self.previous_action = -1
         self.hidden = self._initial_recurrent_state()
@@ -189,11 +200,16 @@ class PPOLSTMPolicy:
         previous = np.zeros(self.bands, dtype=np.float32)
         if self.previous_action >= 0:
             previous[self.previous_action] = 1.0
+        time_since_hit = np.where(
+            self.last_hit_slot >= 0, (slot - self.last_hit_slot) / 600.0, 1.0,
+        )
         remaining = np.asarray([np.clip(1.0 - slot * self.base_slot_s / MISSION_S, 0, 1)],
                                dtype=np.float32)
         features = np.concatenate((self.belief.astype(np.float32),
                                     np.clip(staleness, 0, 1).astype(np.float32),
-                                    periodicity, confidence, previous, remaining))
+                                    periodicity, confidence, previous, remaining,
+                                    self.native_dwell_feature.astype(np.float32),
+                                    np.clip(time_since_hit, 0, 1).astype(np.float32)))
         if features.shape != (self.observation_dim,) or not np.all(np.isfinite(features)):
             raise RuntimeError("PPO-LSTM produced invalid public observation features")
         return features
@@ -211,6 +227,8 @@ class PPOLSTMPolicy:
             probabilities = torch.softmax(logits, dim=-1)[0].cpu().numpy()
             if training:
                 action = int(self.rng.choice(self.bands, p=probabilities))
+            elif self.evaluation_action_mode == "sampled":
+                action = int(self.evaluation_rng.choice(self.bands, p=probabilities))
             else:
                 action = int(torch.argmax(logits, dim=-1).item())
             log_probability = float(log_probabilities[action].item())
@@ -224,6 +242,15 @@ class PPOLSTMPolicy:
         self.episode_decisions += 1
         self.total_actions += int(training)
         return action
+
+    def set_evaluation_action_mode(self, mode: str, seed: int | None = None) -> None:
+        if mode not in {"greedy", "sampled"}:
+            raise ValueError("Evaluation action mode must be greedy or sampled")
+        if mode == "sampled" and (type(seed) is not int or seed < 0):
+            raise ValueError("Sampled evaluation requires a nonnegative integer action seed")
+        self.evaluation_action_mode = mode
+        if seed is not None:
+            self.evaluation_rng = np.random.default_rng(seed)
 
     @staticmethod
     def _transition(distribution: np.ndarray, p01: float, p11: float) -> np.ndarray:
@@ -274,6 +301,7 @@ class PPOLSTMPolicy:
             times.append(float(end_slot))
             if len(times) > self.period_history:
                 del times[:-self.period_history]
+            self.last_hit_slot[band] = end_slot
         self.last_visit_end[band] = end_slot
         self.previous_action = band
         self.episode_reward += float(transition.reward)
@@ -316,12 +344,10 @@ class PPOLSTMPolicy:
 
         chunks = [(start, min(start + self.bptt_chunk, len(rewards)))
                   for start in range(0, len(rewards), self.bptt_chunk)]
-        # PPO updates once after each complete training world. Decay against
-        # that frozen episode budget, not action count: mixed dwell choices
-        # make the number of decisions per episode policy-dependent.
-        learning_rate_fraction = (
-            max(0.0, 1.0 - self.completed_training_episodes / self.training_episodes_target)
-            if self.training_episodes_target is not None else 1.0
+        # Use training actions because the number of decisions per episode is
+        # policy-dependent under mixed native dwell lengths.
+        learning_rate_fraction = max(
+            0.0, 1.0 - self.total_actions / self.training_actions_target,
         )
         for group in self.optimizer.param_groups:
             group["lr"] = self.lr * learning_rate_fraction
@@ -422,6 +448,7 @@ class PPOLSTMPolicy:
     def save(self, path) -> None:
         torch.save({
             "format": "vyapti_ppo_lstm_v1", "bands": self.bands,
+            "observation_schema": OBSERVATION_SCHEMA,
             "settings": self.settings, "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(), "total_actions": self.total_actions,
             "total_updates": self.total_updates,
@@ -433,6 +460,8 @@ class PPOLSTMPolicy:
         payload = torch.load(Path(path), map_location=self.device, weights_only=False)
         if payload.get("format") != "vyapti_ppo_lstm_v1" or payload.get("bands") != self.bands:
             raise ValueError("PPO-LSTM checkpoint format or action-space size does not match this run")
+        if payload.get("observation_schema") != OBSERVATION_SCHEMA:
+            raise ValueError("PPO-LSTM checkpoint uses a different observation schema; train a fresh run")
         self.model.load_state_dict(payload["model"])
         self.optimizer.load_state_dict(payload["optimizer"])
         self.total_actions = int(payload.get("total_actions", 0))

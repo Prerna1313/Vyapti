@@ -13,9 +13,16 @@ def main():
     parser.add_argument("--condition", choices=("normal", "beam_periodic", "beam_stochastic", "all"),
                         default="all", help="Held-out illumination stress condition")
     parser.add_argument("--final", action="store_true", help="Required to reveal TEST results")
+    parser.add_argument("--action-mode", choices=("greedy", "sampled"), default="greedy",
+                        help="Greedy argmax or seeded sampling from the policy action distribution")
+    parser.add_argument("--action-seed", type=int, default=20261004,
+                        help="Base seed for sampled action choices (results are stored separately)")
+    parser.add_argument("--data-root", help="Override the dataset root recorded in config.json")
     args = parser.parse_args()
     print(json.dumps(evaluate(args.run, args.split, final=args.final,
-                              condition=args.condition, checkpoint=args.checkpoint), indent=2))
+                              condition=args.condition, checkpoint=args.checkpoint,
+                              action_mode=args.action_mode, action_seed=args.action_seed,
+                              data_root=args.data_root), indent=2))
 
 
 if __name__ == "__main__":

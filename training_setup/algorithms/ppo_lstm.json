@@ -6,9 +6,10 @@
   "checkpoint_extension": ".pt",
   "belief_model_spec": "../belief_models/train250_observed_band_hmm.json",
   "settings": {
-    "description": "Recurrent PPO with receiver-only aggregate-HMM belief and causal periodicity features.",
+    "description": "Recurrent PPO-LSTM with a 253-feature receiver-only belief, periodicity, native-dwell, and observed-hit history.",
     "hidden_units": 256,
     "learning_rate": 0.0002,
+    "training_actions_target": 400000,
     "gamma_per_base_slot": 0.997,
     "gae_lambda_per_base_slot": 0.98,
     "clip_epsilon": 0.2,

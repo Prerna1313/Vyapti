@@ -178,18 +178,19 @@ head, so prediction metrics are omitted by the existing conditional rule.
 
 PPO-LSTM uses the same public `PublicTransition` interface and shared runner as
 SAC. It keeps a recurrent state within each episode and resets it at the next
-world. Its 181 policy features combine a receiver-only aggregate-HMM belief,
-staleness, causal periodicity cues from observed aggregate hits, previous band,
-and mission time remaining. The PPO update uses the runner's scalar reward;
-held-out scoring and checkpoint selection remain in the common evaluator.
+world. Its 253 features retain receiver-only belief, staleness, causal
+periodicity cues, previous band, and mission time, and add native dwell and
+time since observed HIT per band. Reward is used only by PPO to calculate
+returns and advantages; it is not included in the policy observation. The
+observation contains no emitter identity or hidden truth.
 
-The HMM uses explicit configurable priors (`P(inactive→active)=0.05`,
-`P(active→active)=0.90`, initial activity 0.5). These are engineering
-assumptions, not estimated TSRD transition statistics. As with SAC, a dwell's
-single aggregate HIT/NO-HIT is filtered exactly over the latent base-slot
-transitions. The linear learning-rate schedule uses the configured training-episode
-budget, so it decays across the actual run even though mixed 50/100 ms dwell
-changes the number of band decisions per episode.
+The HMM prior and transitions come from the shared TRAIN-250 observed-band
+calibration (`P01≈0.02220`, `P11≈0.95753`, initial activity `≈0.34266`), not
+the older engineering defaults. As with SAC, one aggregate HIT/NO-HIT is
+filtered over latent base-slot transitions. The learning-rate schedule uses
+the configured training-action budget (400,000 by default), so mixed 50/100 ms
+dwell choices set a consistent decay clock. The learning rate decays linearly
+from 2e-4 to zero over that action budget.
 
 ```powershell
 python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/ppo_lstm.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/ppo_lstm
