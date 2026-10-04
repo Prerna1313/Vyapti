@@ -81,3 +81,22 @@ python -m scripts.evaluation.freeze_residual_discrete_sac_selection `
 After selection, evaluate the selected checkpoint on TEST with each frozen
 condition (`normal`, `beam_periodic`, `beam_stochastic`) and `--final`. The
 evaluator rejects TEST if the selected checkpoint or frozen catalog differs.
+
+For VAL diagnostics with an existing checkpoint, the dedicated evaluator
+accepts `--policy-mode ts_only` or `--policy-mode actor_sampled`. TS-only selects
+candidate zero with the checkpoint's learned posterior and causal online
+updates. Sampled actor selects from unbiased actor probabilities using a
+separate per-world RNG stream; it has no critic fallback. Both modes reuse
+the frozen catalog and receiver seeds, and reset TS to the trained posterior
+for each world. Reports are written under
+`eval/val/<condition>/ablations/<policy-mode>/checkpoints/<checkpoint-stem>/`.
+They are diagnostic reports, excluded from primary checkpoint selection and
+restricted to VAL. They do not change the learner source or checkpoint schema,
+so existing trained checkpoints remain usable.
+
+Use `--diagnostic --policy-mode actor_argmax` to create a fresh argmax reference
+in the same ablation layout. The evaluator deep-copies the checkpoint TS state
+for every world: the sampler's loader otherwise shares NumPy arrays and online
+updates can leak across world boundaries. All three diagnostic modes use this
+independent reset. Previous reports without this reset should be reevaluated
+before comparing the diagnostic modes.
