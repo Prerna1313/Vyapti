@@ -188,6 +188,15 @@ INITIAL_ALPHA = 0.15
 TARGET_ENTROPY_FRACTION = 0.70
 TARGET_ENTROPY = TARGET_ENTROPY_FRACTION * math.log(CANDIDATE_COUNT)
 
+
+def entropy_temperature_loss(
+    log_alpha: torch.Tensor,
+    entropy: torch.Tensor,
+    target_entropy: float,
+) -> torch.Tensor:
+    """SAC temperature objective for positive entropy and target-entropy values."""
+    return (log_alpha * (entropy.detach() - float(target_entropy))).mean()
+
 # Contextual-TS warm-start / conservative residual schedule.
 PRIOR_MIX_START = 0.75
 PRIOR_MIX_END = 0.10
@@ -1114,7 +1123,9 @@ class ResidualDiscreteSAC:
 
         # -------------------- alpha --------------------
         entropy = -(probs.detach() * log_probs.detach()).sum(dim=-1)
-        alpha_loss = -(self.log_alpha * (entropy - self.target_entropy)).mean()
+        alpha_loss = entropy_temperature_loss(
+            self.log_alpha, entropy, self.target_entropy
+        )
         self.alpha_opt.zero_grad(set_to_none=True)
         alpha_loss.backward()
         torch.nn.utils.clip_grad_norm_([self.log_alpha], 10.0)
@@ -1580,7 +1591,8 @@ def train(
                 f"rate={rate:7.2f}/s "
                 f"ep_actions={ep_actions:4d} "
                 f"ep_reward={ep_reward:10.6f} "
-                f"replay={len(replay):7d}"
+                f"replay={len(replay):7d} "
+                f"alpha={last_stats.get('alpha', float(agent.alpha.item())):.5f}"
             )
 
     final_ckpt = output_dir / "checkpoints" / "residual_sac_final.pt"

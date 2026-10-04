@@ -2,8 +2,26 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import torch
 
 from vyapti_simulator.system_b.tsrd.policies import residual_discrete_sac as residual
+
+
+def test_entropy_temperature_update_moves_alpha_toward_target_entropy():
+    # With entropy below target, alpha must rise to encourage more entropy;
+    # with entropy above target, alpha must fall.
+    for entropy, should_increase in ((0.5, True), (1.5, False)):
+        log_alpha = torch.tensor(0.0, requires_grad=True)
+        optimizer = torch.optim.SGD([log_alpha], lr=0.1)
+        before = log_alpha.detach().exp().item()
+        loss = residual.entropy_temperature_loss(
+            log_alpha, torch.tensor([entropy]), target_entropy=1.0
+        )
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        after = log_alpha.detach().exp().item()
+        assert (after > before) is should_increase
 
 
 def test_contextual_ts_feedback_is_receiver_hit_rate():
