@@ -412,8 +412,10 @@ receiver-derived visit counts and recent hit rates alongside spectrum
 coverage diagnostics.
 It is R2D2/Rainbow-inspired, not a distributed or paper-exact R2D2
 implementation. Evaluation uses fixed midpoint IQN quantiles, disables
-NoisyNet noise, and selects the action with the highest mean Q value. The
-frozen quantile cosine basis uses frequencies 1 through 64 for this run.
+NoisyNet noise, and selects the action with the highest mean Q value. Its IQN
+cosine embedding uses frequencies 0 through 63, following the original IQN
+definition. The observation normalizes both staleness and time-since-hit to
+four 43-slot sweeps; diagnostics retain raw, unclipped age in receiver slots.
 
 Train a fresh run; the non-versioned checkpoint identity and 325-D schema
 reject the earlier 253-D checkpoints:

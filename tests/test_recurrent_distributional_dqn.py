@@ -50,7 +50,7 @@ def _settings():
 
 def test_iqn_fixed_taus_and_sequence_priorities_are_deterministic():
     model = DuelingIQNRecurrentQ(325, 36, hidden=8, n_quantiles=4, quantile_embed_dim=8)
-    assert torch_equal(model.cos_basis, torch.arange(1, 9, dtype=torch.float32) * np.pi)
+    assert torch_equal(model.cos_basis, torch.arange(8, dtype=torch.float32) * np.pi)
     taus_a = model.fixed_taus(2, 3, 4, model.cos_basis.device)
     taus_b = model.fixed_taus(2, 3, 4, model.cos_basis.device)
     assert torch_equal(taus_a, taus_b)
@@ -209,9 +209,27 @@ def test_recent_hit_rate_staleness_visits_and_base_step_beta_are_receiver_causal
     assert feature[289] == pytest.approx(2 / 8)
     assert feature[253] == pytest.approx(1.0)
     assert feature[36] == pytest.approx(0.0)
+    policy.last_hit_slot[0] = 0
+    sweep_relative = policy._features(43)
+    assert sweep_relative[217] == pytest.approx(0.25)
+    assert np.all(sweep_relative[217 + 1:253] == 1.0)
     policy.total_actions = 100
     policy.total_receiver_base_steps = 50
     assert policy._current_per_beta() == pytest.approx(0.8)
+
+
+def test_dqn_rejects_noncanonical_sweep_profile():
+    config = {
+        "action": {"dwell_slots_by_band": [1] * 36},
+        "algorithm": {
+            "name": "recurrent_distributional_dqn",
+            "module": "vyapti_simulator.system_b.tsrd.policies.recurrent_distributional_dqn",
+            "api": "public_transitions",
+            "settings": {**_settings(), "native_dwell_slots": [1] * 36},
+        },
+    }
+    with pytest.raises(ValueError, match="must sum to 43"):
+        create_algorithm(config, bands=36, seed=44)
 
 
 def test_dqn_waits_for_eight_eligible_replay_episodes():

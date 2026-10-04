@@ -304,9 +304,9 @@ class DuelingIQNRecurrentQ(nn.Module):
             elif "weight" in name:
                 nn.init.orthogonal_(parameter, 1.0)
 
-        # Use the frozen R3DQN experiment basis i = 1, ..., n.
+        # IQN cosine embedding uses frequencies i = 0, ..., n-1.
         self.cos_basis = torch.arange(
-            1, self.quantile_embed_dim + 1, dtype=torch.float32,
+            self.quantile_embed_dim, dtype=torch.float32,
         ).mul_(math.pi)
         self.quantile_fc = nn.Linear(self.quantile_embed_dim, hidden)
 
@@ -475,6 +475,11 @@ class RecurrentDistributionalDQNPolicy:
             self.settings["native_dwell_slots"]
         )
         self.sweep_slots = int(np.sum(self.native_dwell_slots))
+        if self.sweep_slots != 43:
+            raise ValueError(
+                f"Frozen Vyapti dwell profile must sum to 43 base slots, "
+                f"got {self.sweep_slots}"
+            )
         self.native_dwell_feature = self.native_dwell_slots.astype(np.float32) / 2.0
         self.observation_dim = OBS_DIM
 
@@ -656,12 +661,16 @@ class RecurrentDistributionalDQNPolicy:
             dtype=np.float32,
         )
 
-        time_since_hit = np.where(
+        raw_time_since_hit = np.where(
             self.last_hit_slot >= 0,
-            (slot - self.last_hit_slot) / 600.0,
+            slot - self.last_hit_slot,
+            4 * self.sweep_slots,
+        )
+        time_since_hit = np.clip(
+            raw_time_since_hit / float(4 * self.sweep_slots),
+            0.0,
             1.0,
         ).astype(np.float32)
-        time_since_hit = np.clip(time_since_hit, 0.0, 1.0)
 
         total_visits = max(int(self.episode_decisions), 1)
         visit_count_norm = np.clip(
