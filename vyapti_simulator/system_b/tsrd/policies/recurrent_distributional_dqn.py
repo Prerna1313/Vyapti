@@ -599,7 +599,7 @@ class RecurrentDistributionalDQNPolicy:
         self._raw_staleness_slot_history: list[np.ndarray] = []
         self._recent_hit_rate_history: list[np.ndarray] = []
         self._training_episode = bool(training)
-        self._last_losses: dict[str, float] = {}
+        self._last_losses: dict[str, float | None] = {}
 
     def reset_episode(self, *, training: bool) -> None:
         # The replay buffer deliberately survives episode boundaries during
@@ -1077,7 +1077,7 @@ class RecurrentDistributionalDQNPolicy:
             "per_beta": float(self._current_per_beta()),
         }
 
-    def _learn_episode(self) -> dict[str, float]:
+    def _learn_episode(self) -> dict[str, float | None]:
         ep = self._episode_from_buffers()
         if ep is not None:
             self.replay.add(ep)
@@ -1088,13 +1088,15 @@ class RecurrentDistributionalDQNPolicy:
         )
         eligible_sequences = len(self.replay.sequence_refs)
         if (eligible_episodes < self.min_replay_episodes
-                or eligible_sequences < self.min_replay_sequences):
+            or eligible_sequences < self.min_replay_sequences):
             return {
-                "loss": float("nan"),
-                "td_error": float("nan"),
-                "grad_norm": float("nan"),
-                "q_value": float("nan"),
-                "target_value": float("nan"),
+                # No optimizer update has happened yet; use JSON null for
+                # unavailable diagnostics rather than non-standard NaN.
+                "loss": None,
+                "td_error": None,
+                "grad_norm": None,
+                "q_value": None,
+                "target_value": None,
                 "per_beta": float(self._current_per_beta()),
             }
 
@@ -1115,6 +1117,11 @@ class RecurrentDistributionalDQNPolicy:
         else:
             self._last_losses = {}
 
+        loss_value = self._last_losses.get("loss")
+        has_finite_loss = (
+            loss_value is not None and math.isfinite(float(loss_value))
+        )
+
         selection_counts = self.band_selection_counts
         total_selections = int(selection_counts.sum())
         top_counts = np.sort(selection_counts)[::-1]
@@ -1130,7 +1137,7 @@ class RecurrentDistributionalDQNPolicy:
         return {
             "algorithm": "recurrent_distributional_dqn",
             "algorithm_family": "R2D2/Rainbow-inspired recurrent value-based RL",
-            "training_updates": int(bool(self._last_losses and np.isfinite(next(iter(self._last_losses.values()))))) * self.updates_per_episode,
+            "training_updates": self.updates_per_episode if has_finite_loss else 0,
             "total_training_actions": int(self.total_actions),
             "total_policy_decisions": int(self.total_actions),
             "total_receiver_base_steps": int(self.total_receiver_base_steps),
@@ -1156,7 +1163,14 @@ class RecurrentDistributionalDQNPolicy:
                 float(np.max(recent_hits)) if recent_hits.size else 0.0
             ),
             "per_beta": float(self._current_per_beta()),
-            **{f"mean_{k}": v for k, v in self._last_losses.items()},
+            **{
+                f"mean_{key}": (
+                    float(value)
+                    if value is not None and math.isfinite(float(value))
+                    else None
+                )
+                for key, value in self._last_losses.items()
+            },
         }
 
     # -------------------------------------------------------------------------

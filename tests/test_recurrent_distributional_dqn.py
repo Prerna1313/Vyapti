@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pytest
 from pathlib import Path
@@ -266,6 +267,13 @@ def test_dqn_waits_for_eight_eligible_replay_episodes():
         diagnostics = policy.end_episode(training=True)
         assert diagnostics["training_updates"] == (1 if episode_index == 7 else 0)
         assert diagnostics["replay_episodes"] == episode_index + 1
+        # The runner writes these diagnostics with allow_nan=False. Metrics
+        # before replay warmup must therefore be null, not NaN.
+        json.dumps(diagnostics, allow_nan=False)
+        if episode_index < 7:
+            assert diagnostics["mean_loss"] is None
+        else:
+            assert np.isfinite(diagnostics["mean_loss"])
     assert policy.total_updates == 1
 
 
