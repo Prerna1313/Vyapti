@@ -322,6 +322,120 @@ python -m scripts.evaluation.evaluate --run runs/round_robin --split test --cond
 python -m scripts.evaluation.plot_run --run runs/round_robin
 ```
 
+### PPO-LSTM receiver-only coverage pilot
+
+`ppo_lstm_receiver_only.py` is a separate PPO-LSTM implementation for the receiver-only
+325-feature observation and eight-world recurrent rollouts. It retains the
+shared environment, receiver, scalar reward, and public transition boundary.
+Reward is used only by PPO's return/advantage calculation and is not fed into
+the next observation. The coverage prior is added to action logits during
+both collection and PPO updates. It is based on receiver-derived staleness and
+visit counts, capped at one, with `coverage_kappa` set by the algorithm file.
+The learning rate decays against receiver base slots, with a 480,000-slot
+full-run target. Each training episode samples a fresh TRAIN world and
+discards it after the episode. Evaluation uses the existing frozen 50-world
+VAL and 50-world TEST recipes.
+
+The pilot configs compare gamma/lambda A (`0.997/0.98`), B (`0.998/0.990`),
+and C (`0.999/0.995`) with `coverage_kappa=0.10`. The separate coverage screen
+compares `kappa=0.05` and `0.15` against the A baseline. These are pilot
+comparisons, not final multi-seed claims. Use the same training seed and 80
+episodes (48,000 receiver base slots) for each candidate; evaluate VAL_NORMAL
+only while choosing settings. The existing `runs/ppo_lstm_v2/` directory and
+its checkpoints are a previous run and are not overwritten.
+
+For example, run gamma A:
+
+```powershell
+python -u -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/ppo_lstm_receiver_only.json --episodes 80 --seed 42 --checkpoint-every 80 --run runs/ppo_lstm_receiver_only_gamma_a_pilot
+python -u -m scripts.evaluation.freeze_worlds --run runs/ppo_lstm_receiver_only_gamma_a_pilot
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only_gamma_a_pilot --split val --condition normal --checkpoint final.pt
+```
+
+Run gamma B/C and the two kappa screen configs with the same seed and episode
+budget, using a new run directory for each. `freeze_worlds` reuses a compatible
+existing recipe catalog when the world-defining setup matches. Compare
+unique-emitter interception rate first, then restricted-mean TTFI and censoring,
+coverage/staleness, OIR, and reward per decision. Use the recorded per-world
+VAL results as paired comparisons. Do not run TEST during this screen. After
+choosing a configuration and checkpoint, freeze its VAL selection; the
+selection record stores the supporting VAL metrics and priority order. TEST is
+then run once, using the frozen selection.
+
+Training logs print progress every 10 episodes. `plots/` includes PPO loss,
+entropy and KL curves, training reward-component curves, band-selection
+histograms, and VAL checkpoint metric curves after each candidate checkpoint
+has been evaluated. Evaluation reports include deadline interception rates,
+rolling/whole-mission coverage, band staleness, action distribution, and
+reward totals normalized by decision and receiver base step.
+
+After selecting the pilot configuration using VAL_NORMAL, run the full budget
+with a new results directory. The final run saves checkpoints every 200 worlds;
+evaluate each on the same VAL_NORMAL worlds before freezing one selection:
+
+```powershell
+python -u -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/ppo_lstm_receiver_only.json --episodes 800 --seed 42 --checkpoint-every 200 --run runs/ppo_lstm_receiver_only
+python -u -m scripts.evaluation.freeze_worlds --run runs/ppo_lstm_receiver_only
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only --split val --condition normal --checkpoint episode_000200.pt
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only --split val --condition normal --checkpoint episode_000400.pt
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only --split val --condition normal --checkpoint episode_000600.pt
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only --split val --condition normal --checkpoint final.pt
+python -m scripts.evaluation.freeze_selection --run runs/ppo_lstm_receiver_only --checkpoint episode_000400.pt --reason "Selected by the registered receiver-only VAL metric priority"
+python -u -m scripts.evaluation.evaluate --run runs/ppo_lstm_receiver_only --split test --condition all --final
+python -m scripts.evaluation.plot_run --run runs/ppo_lstm_receiver_only
+```
+
+`freeze_selection` verifies the stated priority against all completed greedy
+VAL_NORMAL checkpoint reports, so it cannot freeze a lower-priority checkpoint
+just because it has higher OIR. Replace the example `episode_000400.pt` with
+the top checkpoint from that ordering. The current
+local protocol has 50 VAL and 50 TEST worlds; TEST remains unopened during the
+pilot and checkpoint selection.
+
+### Recurrent Distributional DQN
+
+`recurrent_distributional_dqn` is a trainable, single-learner recurrent
+distributional Double-Dueling DQN with NoisyNet exploration. It uses the
+shared 253-feature receiver-only state, calibrated TRAIN-250 HMM, native
+one/two-slot dwell schedule, environment-owned reward, and common train/VAL/
+TEST runner. Its prioritized replay assigns priorities to sequence starts,
+stores terminal successor observations, and pads/masks shorter windows at
+episode boundaries. Each sampled window uses up to 32 no-gradient recurrent
+burn-in steps followed by 64 learning positions and five-step targets, so
+initial and terminal decisions can receive loss. The target network updates
+every 1,000 learner updates (about every 125 episodes at eight updates per
+episode); monitor TD error and VAL progress before changing that interval.
+It is R2D2/Rainbow-inspired, not a distributed or paper-exact R2D2
+implementation. Evaluation uses fixed midpoint IQN quantiles, disables
+NoisyNet noise, and selects the action with the highest mean Q value. The
+frozen quantile cosine basis uses frequencies 1 through 64 for this run.
+
+Train a fresh run; the v2 checkpoint identity intentionally rejects older
+checkpoints:
+
+```powershell
+python -m scripts.training.train --environment training_setup/environments/train250_composed.json --algorithm training_setup/algorithms/recurrent_distributional_dqn.json --episodes 800 --seed 20261003 --checkpoint-every 200 --run runs/recurrent_distributional_dqn
+```
+
+Freeze this run's recipes, evaluate saved checkpoints on VAL_NORMAL, select
+the highest pooled OIR, then run all TEST conditions and generate plots:
+
+```powershell
+python -m scripts.evaluation.freeze_worlds --run runs/recurrent_distributional_dqn
+python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint episode_000200.pt
+python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint episode_000400.pt
+python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint episode_000600.pt
+python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split val --condition normal --checkpoint final.pt
+python -m scripts.evaluation.freeze_selection --run runs/recurrent_distributional_dqn --checkpoint episode_000400.pt --reason "Selected by highest VAL_NORMAL pooled OIR"
+python -m scripts.evaluation.evaluate --run runs/recurrent_distributional_dqn --split test --condition all --final
+python -m scripts.evaluation.plot_run --run runs/recurrent_distributional_dqn
+```
+
+Replace the example checkpoint in `freeze_selection` with the checkpoint that
+actually has the highest VAL_NORMAL pooled OIR. Keep TEST sealed until that
+choice is frozen. Checkpoints are currently for evaluation and selection;
+replay state is not saved, so interrupted training cannot be resumed faithfully.
+
 Keep world seeds, interaction budgets, receiver settings, held-out worlds, and
 metrics matched when comparing algorithms. See
 [`docs/protocols/mode-b-evaluation.md`](../docs/protocols/mode-b-evaluation.md)

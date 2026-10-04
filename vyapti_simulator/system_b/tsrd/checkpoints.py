@@ -72,6 +72,28 @@ def evaluation_directory(run, config, name, split, condition, *, action_mode="gr
     return root / condition
 
 
+def _ppo_lstm_selection_key(report):
+    """Lexicographic VAL preference from primary discovery through reward."""
+    summary = report.get("summary", {})
+    ttfi = summary.get("source_relative_ttfi", {})
+
+    def higher(value):
+        return float(value) if value is not None else float("-inf")
+
+    def lower(value):
+        return -float(value) if value is not None else float("-inf")
+
+    return (
+        higher(summary.get("unique_emitter_interception_rate")),
+        lower(ttfi.get("km_restricted_mean_ms")),
+        lower(ttfi.get("censored_fraction")),
+        higher(summary.get("mean_rolling_coverage")),
+        higher(summary.get("fraction_worlds_reaching_90pct_band_coverage")),
+        higher(summary.get("opportunity_interception_ratio")),
+        higher(summary.get("policy_reward_per_decision")),
+    )
+
+
 def freeze_selection(run_dir, name=None, *, baseline=False,
                      reason="Selected using frozen VAL_NORMAL results"):
     run = Path(run_dir).resolve()
@@ -103,13 +125,71 @@ def freeze_selection(run_dir, name=None, *, baseline=False,
     if (report["split"] != "val" or report["condition"] != "normal"
             or report.get(report_key) != digest):
         raise ValueError("Selection needs the policy's completed VAL_NORMAL report")
-    metric = report["summary"]["opportunity_interception_ratio"]
-    if metric is None:
-        raise ValueError("VAL selection metric is unavailable")
+    is_ppo_lstm_receiver_only = config.get("algorithm", {}).get("module", "").endswith(
+        ".ppo_lstm_receiver_only")
+    if is_ppo_lstm_receiver_only:
+        summary = report["summary"]
+        candidate_reports = []
+        for candidate_path in sorted((run / "eval" / "val").rglob("summary.json")):
+            candidate = json.loads(candidate_path.read_text())
+            if (candidate.get("split") == "val" and candidate.get("condition") == "normal"
+                    and candidate.get("action_mode", "greedy") == "greedy"
+                    and candidate.get("checkpoint_file")):
+                candidate_reports.append(candidate)
+        if candidate_reports:
+            best_report = max(candidate_reports, key=_ppo_lstm_selection_key)
+            if _ppo_lstm_selection_key(report) != _ppo_lstm_selection_key(best_report):
+                raise ValueError(
+                    "PPO-LSTM receiver-only selection must follow the configured VAL metric priority; "
+                    f"best evaluated checkpoint is {best_report['checkpoint_file']}"
+                )
+        ttfi = summary.get("source_relative_ttfi", {})
+        metrics = {
+            "unique_emitter_interception_rate": summary.get("unique_emitter_interception_rate"),
+            "restricted_mean_ttfi_ms": ttfi.get("km_restricted_mean_ms"),
+            "censored_fraction": ttfi.get("censored_fraction"),
+            "mean_rolling_coverage": summary.get("mean_rolling_coverage"),
+            "worlds_reaching_90pct_band_coverage": summary.get("worlds_reaching_90pct_band_coverage"),
+            "fraction_worlds_reaching_90pct_band_coverage": summary.get(
+                "fraction_worlds_reaching_90pct_band_coverage"),
+            "interception_by_deadline": summary.get("interception_by_deadline"),
+            "revisit_interval_distribution_s": summary.get("revisit_interval_distribution_s"),
+            "world_count": summary.get("worlds"),
+            "opportunity_interception_ratio": summary.get("opportunity_interception_ratio"),
+            "policy_reward_per_decision": summary.get("policy_reward_per_decision"),
+            "conditional_pd": summary.get("conditional_pd"),
+            "true_pfa": summary.get("true_pfa"),
+        }
+        if metrics["unique_emitter_interception_rate"] is None:
+            raise ValueError("VAL unique-emitter interception metric is unavailable")
+        selection_metric = "VAL_NORMAL.unique_emitter_interception_rate"
+        selection_value = metrics["unique_emitter_interception_rate"]
+    else:
+        metric = report["summary"]["opportunity_interception_ratio"]
+        if metric is None:
+            raise ValueError("VAL selection metric is unavailable")
+        selection_metric = "VAL_NORMAL.opportunity_interception_ratio"
+        selection_value = metric
+        metrics = None
     selection = {"artifact_type": "online_baseline" if is_baseline else "checkpoint",
                  "config_sha256": status["config_sha256"], "reason": reason,
-                 "metric": "VAL_NORMAL.opportunity_interception_ratio", "value": metric,
+                 "metric": selection_metric, "value": selection_value,
                  "validation_summary_sha256": file_hash(summary_path)}
+    if is_ppo_lstm_receiver_only:
+        selection["validation_metrics"] = metrics
+        selection["evaluated_checkpoint_priority_order"] = [
+            candidate["checkpoint_file"] for candidate in sorted(
+                candidate_reports, key=_ppo_lstm_selection_key, reverse=True)
+        ]
+        selection["selection_priority"] = [
+            "unique_emitter_interception_rate:max",
+            "restricted_mean_ttfi_ms:min",
+            "censored_fraction:min",
+            "mean_rolling_coverage:max",
+            "worlds_reaching_90pct_band_coverage:max",
+            "opportunity_interception_ratio:max",
+            "policy_reward_per_decision:max",
+        ]
     if config.get("evaluation", {}).get("require_frozen_world_catalog"):
         catalog_path = run / "frozen_world_catalog.json"
         if not catalog_path.is_file():

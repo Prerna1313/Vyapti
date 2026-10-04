@@ -49,6 +49,7 @@ def _km_restricted_mean(durations: list[float], events: list[bool]) -> tuple[flo
 def score_recorded_replay(
     env: Any, trajectory: Sequence[Any],
     decision_visits: Sequence[tuple[int, int, int]] | None = None,
+    *, coverage_window_slots: int | None = None,
 ) -> dict[str, Any]:
     """Score one full episode; no result from this function is scheduler-visible."""
     if len(trajectory) != env.n_slots:
@@ -194,6 +195,29 @@ def score_recorded_replay(
     normalized_action_entropy = (
         float(action_entropy / np.log(env.n_bands)) if env.n_bands > 1 else 0.0
     )
+    if coverage_window_slots is None:
+        coverage_window_slots = env.n_bands
+    if type(coverage_window_slots) is not int or coverage_window_slots < 1:
+        raise ValueError("coverage_window_slots must be a positive integer")
+    action_by_slot = np.asarray([int(step.action) for step in trajectory], dtype=np.int64)
+    rolling_coverage = [
+        len(np.unique(action_by_slot[start:start + coverage_window_slots])) / env.n_bands
+        for start in range(max(1, env.n_slots - coverage_window_slots + 1))
+    ] if env.n_slots >= coverage_window_slots else []
+    last_seen = np.full(env.n_bands, -1, dtype=np.int64)
+    staleness_samples = []
+    for slot, selected_band in enumerate(action_by_slot):
+        ages = np.where(last_seen >= 0, slot - last_seen, slot)
+        staleness_samples.extend(ages.tolist())
+        last_seen[selected_band] = slot
+    deadline_seconds = (5, 10, 15, 20, 25, 30)
+    intercepted_by_deadline = {}
+    for deadline in deadline_seconds:
+        intercepted_by_deadline[f"{deadline}s"] = sum(
+            record["emitter_first_intercept_ms"] is not None
+            and record["emitter_first_intercept_ms"] <= deadline * 1000.0
+            for record in records.values()
+        )
     # Blind intervals count only periods when the world had an emitter-slot
     # opportunity but the receiver selected no band containing a PDW.
     missed_active_slots = emitter_slots.any(axis=0) & ~eligible_slots
@@ -321,12 +345,27 @@ def score_recorded_replay(
             "unvisited_bands_excluded": int(np.sum([not np.any(actions == band) for band in range(env.n_bands)])),
             "time_to_90pct_band_coverage_s": coverage_time_s,
             "band_coverage_fraction": float(len(first_visit_by_band) / env.n_bands),
+            "rolling_coverage_window_slots": coverage_window_slots,
+            "mean_rolling_coverage": float(np.mean(rolling_coverage)) if rolling_coverage else None,
+            "whole_mission_unique_band_fraction": float(len(first_visit_by_band) / env.n_bands),
+            "mean_band_staleness_slots": float(np.mean(staleness_samples)) if staleness_samples else 0.0,
+            "p95_band_staleness_slots": float(np.percentile(staleness_samples, 95)) if staleness_samples else 0.0,
+            "max_band_staleness_slots": int(np.max(staleness_samples)) if staleness_samples else 0,
             "max_blind_interval_s": float(np.max(blind_intervals_s)) if len(blind_intervals_s) else 0.0,
             "p95_blind_interval_s": float(np.percentile(blind_intervals_s, 95)) if len(blind_intervals_s) else 0.0,
             "blind_interval_count": int(len(blind_intervals_s)),
             "blind_intervals_s": blind_intervals_s.tolist(),
             "action_entropy": action_entropy,
             "normalized_action_entropy": normalized_action_entropy,
+        },
+        "interception_by_deadline": {
+            "eligible_emitters": n_eligible_emitters,
+            "intercepted_emitters": intercepted_by_deadline,
+            "interception_rate": {
+                key: _rate(value, n_eligible_emitters)
+                for key, value in intercepted_by_deadline.items()
+            },
+            "time_basis": "first_intercept_time_from_mission_start",
         },
         "decision_level": {
             "total_dwells": len(decision_visits),

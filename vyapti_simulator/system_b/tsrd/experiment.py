@@ -327,7 +327,20 @@ def train(config_path: str | Path | dict, run_dir: str | Path, *, agility_refere
             raise ValueError("Agility channel width differs from the frozen protocol")
     execution_mode = config.get("execution_mode", "training")
     algorithm = config.get("algorithm", {})
-    if algorithm.get("name") == "ppo_lstm" and execution_mode == "training":
+    algorithm_settings = algorithm.get("settings", {})
+    rollout_episodes = int(algorithm_settings.get("rollout_episodes", 1))
+    checkpoint_interval = config.get("checkpointing", {}).get("interval_episodes")
+    if execution_mode == "training" and rollout_episodes > 1:
+        if int(config["train_episodes"]) % rollout_episodes:
+            raise ValueError(
+                f"Training episodes must be divisible by PPO rollout_episodes={rollout_episodes}"
+            )
+        if checkpoint_interval is not None and int(checkpoint_interval) % rollout_episodes:
+            raise ValueError(
+                f"Checkpoint interval must be divisible by PPO rollout_episodes={rollout_episodes}"
+            )
+    if (algorithm.get("name") == "ppo_lstm" and execution_mode == "training"
+            and not algorithm.get("module", "").endswith(".ppo_lstm_receiver_only")):
         config = dict(config)
         config["algorithm"] = dict(algorithm)
         config["algorithm"]["settings"] = dict(algorithm.get("settings", {}))
@@ -492,6 +505,21 @@ def _summary(scores: list[dict]) -> dict:
     revisits = [row["revisit"] for row in scores]
     coverage_times = [row["time_to_90pct_band_coverage_s"] for row in revisits
                       if row["time_to_90pct_band_coverage_s"] is not None]
+    deadline_names = ("5s", "10s", "15s", "20s", "25s", "30s")
+    deadline_eligible = sum(row.get("interception_by_deadline", {}).get("eligible_emitters", 0)
+                            for row in scores)
+    deadline_counts = {
+        deadline: sum(row.get("interception_by_deadline", {}).get(
+            "intercepted_emitters", {}).get(deadline, 0) for row in scores)
+        for deadline in deadline_names
+    }
+    rolling_coverage = [row.get("mean_rolling_coverage") for row in revisits
+                        if row.get("mean_rolling_coverage") is not None]
+    revisit_intervals = np.asarray([
+        interval for row in revisits for interval in row.get("intervals_s", [])
+    ], dtype=float)
+    rolling_windows = [row.get("rolling_coverage_window_slots") for row in revisits
+                       if row.get("rolling_coverage_window_slots") is not None]
     return {"worlds": len(scores), "true_detections": true, "false_alarms": false,
             "conditional_pd": ratio(true, eligible), "true_pfa": ratio(false, empty),
             "opportunity_interception_ratio": ratio(true, occupied),
@@ -509,6 +537,32 @@ def _summary(scores: list[dict]) -> dict:
                 float(np.mean(coverage_times)) if coverage_times else None
             ),
             "worlds_reaching_90pct_band_coverage": len(coverage_times),
+            "fraction_worlds_reaching_90pct_band_coverage": ratio(len(coverage_times), len(scores)),
+            "whole_mission_unique_band_fraction": (
+                float(np.mean([row.get("whole_mission_unique_band_fraction", row["band_coverage_fraction"])
+                               for row in revisits])) if revisits else None
+            ),
+            "mean_rolling_coverage": float(np.mean(rolling_coverage)) if rolling_coverage else None,
+            "rolling_coverage_window_slots": int(rolling_windows[0]) if rolling_windows else None,
+            "revisit_interval_distribution_s": {
+                "count": int(len(revisit_intervals)),
+                "mean": float(np.mean(revisit_intervals)) if len(revisit_intervals) else None,
+                "median": float(np.median(revisit_intervals)) if len(revisit_intervals) else None,
+                "p95": float(np.percentile(revisit_intervals, 95)) if len(revisit_intervals) else None,
+                "max": float(np.max(revisit_intervals)) if len(revisit_intervals) else None,
+            },
+            "mean_band_staleness_s": (
+                float(np.mean([row.get("mean_band_staleness_slots", 0.0) for row in revisits])) * 0.05
+                if revisits else None
+            ),
+            "p95_band_staleness_s": (
+                float(np.mean([row.get("p95_band_staleness_slots", 0.0) for row in revisits])) * 0.05
+                if revisits else None
+            ),
+            "max_band_staleness_s": (
+                float(np.mean([row.get("max_band_staleness_slots", 0) for row in revisits])) * 0.05
+                if revisits else None
+            ),
             "mean_world_max_blind_interval_s": (
                 float(np.mean([row["max_blind_interval_s"] for row in revisits])) if revisits else None
             ),
@@ -520,6 +574,13 @@ def _summary(scores: list[dict]) -> dict:
                 "km_restricted_mean_ms": mean_ttfi, "restriction_ms": restriction_ms,
                 "km_median_ms": _km_quantile(durations, events, 0.5),
                 "censored_fraction": ratio(source_eligible - source_intercepted, source_eligible),
+            },
+            "interception_by_deadline": {
+                "time_basis": "first_intercept_time_from_mission_start",
+                "eligible_emitters": deadline_eligible,
+                "intercepted_emitters": deadline_counts,
+                "interception_rate": {key: ratio(value, deadline_eligible)
+                                      for key, value in deadline_counts.items()},
             }}
 
 
@@ -1049,10 +1110,11 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                                   restore_rng=False, evaluation_action_mode=action_mode,
                                   action_seed=action_seed_world if action_mode == "sampled" else None)
         predictions = []
-        trajectory, _, reward_components = _run_episode(
+        trajectory, policy_reward, reward_components = _run_episode(
             world, policy, training=False, episode=index, log_path=target / "steps.jsonl",
             prediction_rows=predictions if protocol else None, config=config)
-        score = score_recorded_replay(world, trajectory)
+        sweep_slots = sum(config.get("action", {}).get("dwell_slots_by_band", [1] * world.n_bands))
+        score = score_recorded_replay(world, trajectory, coverage_window_slots=sweep_slots)
         annotate_illumination_score(score, illumination, world.config.slot_duration_s())
         scores.append(score)
         source = data / "stare" / f"{split}_stare" / f"{config_id}.h5"
@@ -1065,6 +1127,9 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
             "visible_recorded_pulses_in_mission": illumination["visible_recorded_pulses_in_mission"],
             "source_sha256": _hash(source), "replay_signature": world.replay_signature(),
             "receiver_accounting": world.receiver_accounting(), "scorecard": score,
+            "policy_reward_total": policy_reward,
+            "policy_reward_decisions": reward_components.get("band_decisions", 0),
+            "policy_reward_receiver_steps": reward_components.get("receiver_steps", 0),
             "policy_reward_components": reward_components,
             "policy_diagnostics": reward_components.get("policy_diagnostics"),
         }
@@ -1107,11 +1172,12 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
                                   restore_rng=False, evaluation_action_mode=action_mode,
                                   action_seed=action_seed_world if action_mode == "sampled" else None)
         predictions = []
-        trajectory, _, reward_components = _run_episode(
+        trajectory, policy_reward, reward_components = _run_episode(
             world, policy, training=False, episode=len(ids) + offset,
             log_path=target / "steps.jsonl", prediction_rows=predictions if protocol else None,
             config=config)
-        score = score_recorded_replay(world, trajectory)
+        sweep_slots = sum(config.get("action", {}).get("dwell_slots_by_band", [1] * world.n_bands))
+        score = score_recorded_replay(world, trajectory, coverage_window_slots=sweep_slots)
         annotate_illumination_score(score, illumination, world.config.slot_duration_s())
         scores.append(score)
         row = {
@@ -1124,6 +1190,9 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
             "source_sha256": source_hashes,
             "replay_signature": world.replay_signature(),
             "receiver_accounting": world.receiver_accounting(), "scorecard": score,
+            "policy_reward_total": policy_reward,
+            "policy_reward_decisions": reward_components.get("band_decisions", 0),
+            "policy_reward_receiver_steps": reward_components.get("receiver_steps", 0),
             "policy_reward_components": reward_components,
             "policy_diagnostics": reward_components.get("policy_diagnostics"),
         }
@@ -1158,5 +1227,54 @@ def evaluate(run_dir: str | Path, split: str, *, final: bool = False,
         report["analysis"] = analysis_summary(analysis_rows, protocol, _summary)
         report["analysis_protocol"] = protocol
         report["agility_reference_sha256"] = config["agility_reference_sha256"]
+    if config.get("algorithm", {}).get("module", "").endswith(".ppo_lstm_receiver_only"):
+        world_rows = [json.loads(line) for line in (target / "per_world.jsonl").read_text(
+            encoding="utf-8").splitlines()]
+        diagnostic_rows = [row["policy_diagnostics"] for row in world_rows
+                           if isinstance(row.get("policy_diagnostics"), dict)]
+        if diagnostic_rows:
+            counts = np.sum([np.asarray(row["band_selection_counts"], dtype=np.int64)
+                             for row in diagnostic_rows], axis=0)
+            total_actions = max(int(np.sum(counts)), 1)
+            ranked = np.sort(counts)[::-1]
+            report["policy_diagnostics"] = {
+                "worlds_with_diagnostics": len(diagnostic_rows),
+                "action_histogram_per_band": counts.astype(int).tolist(),
+                "fraction_top_1_band_pooled": float(ranked[:1].sum() / total_actions),
+                "fraction_top_3_bands_pooled": float(ranked[:3].sum() / total_actions),
+                "fraction_top_5_bands_pooled": float(ranked[:5].sum() / total_actions),
+                "mean_fraction_top_1_per_world": float(np.mean(
+                    [row["fraction_top_1_band"] for row in diagnostic_rows])),
+                "mean_fraction_top_3_per_world": float(np.mean(
+                    [row["fraction_top_3_bands"] for row in diagnostic_rows])),
+                "mean_fraction_top_5_per_world": float(np.mean(
+                    [row["fraction_top_5_bands"] for row in diagnostic_rows])),
+                "mean_action_entropy": float(np.mean(
+                    [row["action_entropy"] for row in diagnostic_rows])),
+                "mean_unique_bands_visited": float(np.mean(
+                    [row["unique_bands_visited"] for row in diagnostic_rows])),
+                "mean_whole_mission_unique_band_fraction": float(np.mean(
+                    [row["whole_mission_unique_band_fraction"] for row in diagnostic_rows])),
+                "mean_number_of_bands_never_visited": float(np.mean(
+                    [row["number_of_bands_never_visited"] for row in diagnostic_rows])),
+                "mean_visit_count_per_band": float(np.mean(
+                    [row["mean_visit_count_per_band"] for row in diagnostic_rows])),
+                "mean_max_band_staleness_s": float(np.mean(
+                    [row["max_band_staleness_slots"] for row in diagnostic_rows])) * 0.05,
+                "mean_rolling_coverage": float(np.mean([
+                    row["mean_rolling_coverage"] for row in diagnostic_rows
+                    if row.get("mean_rolling_coverage") is not None
+                ])) if any(row.get("mean_rolling_coverage") is not None for row in diagnostic_rows) else None,
+                "revisit_interval_distribution_s": report["summary"][
+                    "revisit_interval_distribution_s"],
+            }
+        reward_total = float(sum(row.get("policy_reward_total", 0.0) for row in world_rows))
+        decisions = int(sum(row.get("policy_reward_decisions", 0) for row in world_rows))
+        base_steps = int(sum(row.get("policy_reward_receiver_steps", 0) for row in world_rows))
+        report["summary"].update({
+            "policy_reward_total": reward_total,
+            "policy_reward_per_decision": reward_total / decisions if decisions else None,
+            "policy_reward_per_receiver_base_step": reward_total / base_steps if base_steps else None,
+        })
     _json(target / "summary.json", report)
     return report
