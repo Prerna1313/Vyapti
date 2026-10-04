@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vyapti / PS26055 — Conservative Residual Discrete SAC (TRAIN-250)
+Vyapti / PS26055 — Residual Discrete SAC (TRAIN-250)
 =================================================================
 
 Purpose
@@ -29,17 +29,14 @@ Core design
    visit count normalized(36)
    recent hit-rate(36), K=8 per-band visits
 3. Candidate action set is causal and state-dependent:
-   [contextual-TS prior,
-    top belief,
-    top periodic opportunity,
-    top staleness,
-    top recent-hit,
-    top operational-priority candidates]
+   [contextual-TS prior, best TS mean, three underexplored bands,
+    TS uncertainty, periodic opportunity, belief, staleness,
+    operational priority], deduplicated and filled to ten candidates.
 4. Actor/Q networks score candidate descriptors, not opaque candidate indices.
-5. Conservative residual learning:
+5. Residual learning:
    - contextual-TS prior candidate is always candidate 0
    - early training is prior-biased
-   - evaluation requires positive critic advantage AND sufficient actor mass
+   - evaluation selects the actor argmax without a TS fallback
    - no RR action is embedded in the learner
 6. Reward is NEVER reimplemented here. The environment owns the authoritative
    `truth_based_intercept_utility_v2` reward.
@@ -48,8 +45,8 @@ IMPORTANT LIMIT
 ---------------
 No RL code can guarantee improved physical benchmark metrics before the active
 reward/environment/evaluator pass is verified. This implementation is designed
-to make catastrophic degradation much less likely than unrestricted RL and to
-make the learned contribution measurable as "deviation from contextual TS".
+to measure learned deviations from contextual TS; coverage and interception
+performance must be checked on the fixed validation worlds.
 
 Adapter contract
 ----------------
@@ -158,11 +155,9 @@ MAX_UNSEEN_AGE = 4.0 * SWEEP_SLOTS
 # Conservative residual SAC configuration.
 # -----------------------------------------------------------------------------
 CANDIDATE_COUNT = 10  # candidate 0 is always the contextual-TS prior action
-TOP_K_BELIEF = 2
-TOP_K_PERIODIC = 2
-TOP_K_STALE = 2
-TOP_K_RECENT = 1
-TOP_K_PRIORITY = 2
+TOP_K_UNVISITED = 3
+CANDIDATE_DIM = 18
+CANDIDATE_SCHEMA = "receiver_candidates_underexplored_unvisited"
 
 # Contextual Thompson Sampling prior. Its posterior learns a receiver-observable
 # hit rate; only the SAC replay/update uses the hidden-truth mission reward.
@@ -198,20 +193,16 @@ def entropy_temperature_loss(
     return (log_alpha * (entropy.detach() - float(target_entropy))).mean()
 
 # Contextual-TS warm-start / conservative residual schedule.
-PRIOR_MIX_START = 0.75
-PRIOR_MIX_END = 0.10
-PRIOR_MIX_DECAY_ACTIONS = 100_000
-PRIOR_LOGIT_BIAS_START = 1.50
+PRIOR_MIX_START = 0.40
+PRIOR_MIX_END = 0.05
+PRIOR_MIX_DECAY_ACTIONS = 25_000
+PRIOR_LOGIT_BIAS_START = 0.50
 PRIOR_LOGIT_BIAS_END = 0.00
-PRIOR_LOGIT_DECAY_ACTIONS = 120_000
+PRIOR_LOGIT_DECAY_ACTIONS = 25_000
 
-# Eval-time safety gate.
-# A learned deviation from contextual TS must have BOTH:
-#   1. actor probability >= this threshold
-#   2. conservative critic advantage over the TS prior > 0
-# Otherwise the contextual-TS prior action is used.
-EVAL_MIN_POLICY_PROB = 0.10
-EVAL_REQUIRE_POSITIVE_Q_ADVANTAGE = True
+# Evaluation uses actor argmax. Critics provide diagnostics, not a fallback.
+EVAL_MIN_POLICY_PROB = 0.0
+EVAL_REQUIRE_POSITIVE_Q_ADVANTAGE = False
 
 CHECKPOINTS = (50_000, 100_000, 200_000, 300_000, 400_000)
 
@@ -638,7 +629,7 @@ class ResidualCandidateGenerator:
     def __init__(self, dwell_slots: np.ndarray, ts: ContextualThompsonSampler) -> None:
         self.dwell_slots = np.asarray(dwell_slots, dtype=np.float32)
         self.ts = ts
-        self.feature_dim = 17
+        self.feature_dim = CANDIDATE_DIM
 
     @staticmethod
     def _top_unique(score: np.ndarray, k: int, existing: set[int]) -> list[int]:
@@ -712,12 +703,28 @@ class ResidualCandidateGenerator:
             if candidate not in used:
                 bands.append(candidate); used.add(candidate)
 
-        bands += self._top_unique(ts_std, 2, used); used.update(bands)
-        bands += self._top_unique(belief, TOP_K_BELIEF, used); used.update(bands)
-        bands += self._top_unique(opportunity, TOP_K_PERIODIC, used); used.update(bands)
-        bands += self._top_unique(staleness, TOP_K_STALE, used); used.update(bands)
-        bands += self._top_unique(recent + 0.25 * belief, TOP_K_RECENT, used); used.update(bands)
-        bands += self._top_unique(priority + 0.10 * uncertainty, TOP_K_PRIORITY, used)
+        # Reserve three underexplored slots before other proposals. Raw counts
+        # rank like 1 - normalized visits; oldest visit breaks count ties using
+        # unclipped receiver history. Candidate presence does not force action.
+        underexplored_order = np.lexsort(
+            (np.arange(N_BANDS), state.last_visit_end, state.visit_counts)
+        )
+        added = 0
+        for b in underexplored_order.tolist():
+            if b not in used:
+                bands.append(b)
+                used.add(b)
+                added += 1
+                if added == TOP_K_UNVISITED:
+                    break
+
+        # At most 10 slots: prior + mean + three underexplored + one each
+        # uncertainty, periodic, belief, staleness and operational priority.
+        for score in (ts_std, opportunity, belief, staleness,
+                      priority + 0.10 * uncertainty):
+            selected = self._top_unique(score, 1, used)
+            bands.extend(selected)
+            used.update(selected)
 
         fallback_score = (
             0.35 * ts_sample
@@ -727,9 +734,9 @@ class ResidualCandidateGenerator:
             + 0.15 * ts_std
         )
         for b in self._top_unique(fallback_score, N_BANDS, set(bands)):
-            bands.append(b)
             if len(bands) >= CANDIDATE_COUNT:
                 break
+            bands.append(b)
 
         if len(bands) < CANDIDATE_COUNT:
             for b in np.argsort(-ts_sample).tolist():
@@ -738,7 +745,8 @@ class ResidualCandidateGenerator:
                 if len(bands) >= CANDIDATE_COUNT:
                     break
 
-        bands = bands[:CANDIDATE_COUNT]
+        if len(bands) != CANDIDATE_COUNT or len(set(bands)) != CANDIDATE_COUNT:
+            raise RuntimeError("Candidate quotas must yield ten distinct bands")
         if bands[0] != prior:
             raise RuntimeError("Candidate 0 must always be the contextual-TS prior action")
 
@@ -765,6 +773,7 @@ class ResidualCandidateGenerator:
                         float(priority[b]),
                         float(uncertainty[b]),
                         float((ts_sample[b] - ts_mean[b])),
+                        float(state.visit_counts[b] == 0),
                     ],
                     dtype=np.float32,
                 )
@@ -1034,14 +1043,7 @@ class ResidualDiscreteSAC:
         best_q = float(q_np[best])
         advantage = best_q - prior_q
 
-        use_prior = False
-        if best != 0:
-            if p_np[best] < EVAL_MIN_POLICY_PROB:
-                use_prior = True
-            if EVAL_REQUIRE_POSITIVE_Q_ADVANTAGE and advantage <= 0.0:
-                use_prior = True
-
-        chosen = 0 if use_prior else best
+        chosen = best
         return chosen, {
             "policy_prob": float(p_np[best]),
             "prior_q": prior_q,
@@ -1152,6 +1154,7 @@ class ResidualDiscreteSAC:
     def state_dict(self, step: int) -> dict[str, Any]:
         return {
             "step": int(step),
+            "candidate_schema": CANDIDATE_SCHEMA,
             "obs_dim": self.obs_dim,
             "candidate_dim": self.cand_dim,
             "n_candidates": self.n_candidates,
@@ -1169,6 +1172,11 @@ class ResidualDiscreteSAC:
         }
 
     def load_state_dict(self, payload: dict[str, Any]) -> None:
+        if (payload.get("candidate_schema") != CANDIDATE_SCHEMA
+                or payload.get("candidate_dim") != CANDIDATE_DIM
+                or payload.get("n_candidates") != CANDIDATE_COUNT
+                or payload.get("obs_dim") != OBS_DIM):
+            raise ValueError("Incompatible residual-SAC candidate schema; train a fresh checkpoint")
         self.actor.load_state_dict(payload["actor"])
         self.q1.load_state_dict(payload["q1"])
         self.q2.load_state_dict(payload["q2"])
@@ -1208,9 +1216,11 @@ def save_checkpoint(
             "ts_state": ts.state_dict(),
             "train_stats": stats,
             "protocol": {
-                "algorithm": "Conservative Residual Discrete SAC",
+                "algorithm": "Residual Discrete SAC",
                 "obs_dim": OBS_DIM,
                 "candidate_count": CANDIDATE_COUNT,
+                "candidate_dim": CANDIDATE_DIM,
+                "candidate_schema": CANDIDATE_SCHEMA,
                 "contextual_ts_context_dim": TS_CONTEXT_DIM,
                 "contextual_ts_lambda": TS_LAMBDA,
                 "contextual_ts_noise_scale": TS_NOISE_SCALE,
@@ -1275,7 +1285,7 @@ def run_episode(
     diagnostics = {
         "ts_prior_decisions": 0,
         "residual_decisions": 0,
-        "eval_gate_prior": 0,
+        "actor_selected_ts_decisions": 0,
         "q_advantages": [],
     }
 
@@ -1292,7 +1302,7 @@ def run_episode(
             )
         else:
             choice, diag = agent.select_eval_action(obs, candidates.features)
-            diagnostics["eval_gate_prior"] += int(diag["used_prior"])
+            diagnostics["actor_selected_ts_decisions"] += int(diag["used_prior"])
             diagnostics["q_advantages"].append(float(diag["q_advantage"]))
 
         if choice == 0:
@@ -1352,7 +1362,7 @@ def write_manifest(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     payload = {
-        "algorithm": "Conservative Residual Discrete SAC",
+        "algorithm": "Residual Discrete SAC",
         "seed": int(seed),
         "eval_seed_base": int(eval_seed_base),
         "device": str(DEVICE),
@@ -1384,10 +1394,15 @@ def write_manifest(
         "residual_contract": {
             "candidate_0": "contextual Thompson Sampling prior action",
             "candidate_count": CANDIDATE_COUNT,
+            "candidate_dim": CANDIDATE_DIM,
+            "candidate_schema": CANDIDATE_SCHEMA,
+            "underexplored_candidates": TOP_K_UNVISITED,
             "prior_mix_start": PRIOR_MIX_START,
             "prior_mix_end": PRIOR_MIX_END,
+            "prior_mix_decay_actions": PRIOR_MIX_DECAY_ACTIONS,
             "prior_logit_bias_start": PRIOR_LOGIT_BIAS_START,
             "prior_logit_bias_end": PRIOR_LOGIT_BIAS_END,
+            "prior_logit_decay_actions": PRIOR_LOGIT_DECAY_ACTIONS,
             "eval_min_policy_prob": EVAL_MIN_POLICY_PROB,
             "eval_positive_q_advantage_required": EVAL_REQUIRE_POSITIVE_Q_ADVANTAGE,
             "contextual_ts_feedback_schema": TS_FEEDBACK_SCHEMA,
@@ -1493,7 +1508,8 @@ def train(
             if global_action_step < WARMUP_ACTIONS:
                 # Collect mostly-prior data, but retain a small amount of
                 # candidate exploration to prevent a degenerate TS posterior.
-                choice = 0 if rng.random() < 0.70 else int(rng.integers(0, CANDIDATE_COUNT))
+                choice = (0 if rng.random() < agent.prior_mix(global_action_step)
+                          else int(rng.integers(0, CANDIDATE_COUNT)))
             else:
                 choice = agent.select_training_action(
                     obs,

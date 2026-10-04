@@ -83,3 +83,113 @@ def test_evaluation_ts_adapts_from_hits_not_mission_reward():
     # Mission reward is deliberately large, but the observed outcome was MISS.
     # Therefore it must not appear in the TS posterior's response vector.
     np.testing.assert_array_equal(ts.b, np.zeros_like(ts.b))
+
+
+@pytest.mark.parametrize("duplicate_mean", [False, True])
+def test_candidate_quotas_preserve_underexplored_and_priority(monkeypatch, duplicate_mean):
+    dwell = np.ones(residual.N_BANDS, dtype=np.int32)
+    state = residual.ResidualCausalState(
+        residual.make_calibrated_transition(),
+        np.full(residual.N_BANDS, residual.CAL_PRIOR_ACTIVE), dwell,
+    )
+    state.visit_counts.fill(2)
+    state.visit_counts[3:6] = 0
+    state.total_decisions = int(state.visit_counts.sum())
+
+    def peak(band):
+        values = np.zeros(residual.N_BANDS, dtype=np.float32)
+        values[band] = 1.0
+        return values
+
+    monkeypatch.setattr(state, "belief_vector", lambda: peak(7))
+    monkeypatch.setattr(state, "periodicity_features", lambda: (peak(6), peak(6)))
+    monkeypatch.setattr(state, "staleness_vector", lambda: peak(8))
+    monkeypatch.setattr(state, "priority_vector", lambda: peak(9))
+    ts = residual.ContextualThompsonSampler(residual.N_BANDS, seed=5)
+    monkeypatch.setattr(ts, "sample_scores", lambda contexts: (
+        peak(0), peak(0 if duplicate_mean else 1), peak(2),
+    ))
+    candidates = residual.ResidualCandidateGenerator(dwell, ts).build(state)
+    assert candidates.bands[0] == 0
+    assert len(set(candidates.bands)) == 10
+    assert {2, 3, 4, 5, 6, 7, 8, 9}.issubset(set(candidates.bands))
+    assert candidates.features.shape == (10, 18)
+    np.testing.assert_array_equal(
+        candidates.features[:, -1], (state.visit_counts[candidates.bands] == 0),
+    )
+
+
+def test_underexplored_count_ties_use_oldest_raw_visit():
+    dwell = np.ones(residual.N_BANDS, dtype=np.int32)
+    state = residual.ResidualCausalState(
+        residual.make_calibrated_transition(),
+        np.full(residual.N_BANDS, residual.CAL_PRIOR_ACTIVE), dwell,
+    )
+    state.visit_counts.fill(1)
+    state.last_visit_end.fill(100)
+    state.last_visit_end[33:36] = [1, 2, 3]
+    state.total_decisions = residual.N_BANDS
+    ts = residual.ContextualThompsonSampler(residual.N_BANDS, seed=5)
+    generator = residual.ResidualCandidateGenerator(dwell, ts)
+    candidates = generator.build(state)
+    # TS proposals may themselves select an old band. The reserved slots must
+    # still include all three oldest bands rather than prefer tied low indices.
+    assert {33, 34, 35}.issubset(set(candidates.bands))
+
+
+def test_eval_actor_argmax_survives_negative_critic_advantage(monkeypatch):
+    agent = residual.ResidualDiscreteSAC(
+        residual.OBS_DIM, residual.CANDIDATE_DIM, residual.CANDIDATE_COUNT, seed=3,
+    )
+    probs = torch.full((1, 10), 0.09, device=residual.DEVICE)
+    probs[0, 3] = 0.19
+    monkeypatch.setattr(agent, "policy_distribution", lambda *args, **kwargs: (
+        probs, probs.log(),
+    ))
+
+    class FakeQ:
+        def all_values(self, observation, candidates):
+            values = torch.zeros((1, 10), device=residual.DEVICE)
+            values[0, 0] = 10.0
+            values[0, 3] = -10.0
+            return values
+
+    monkeypatch.setattr(agent, "q1", FakeQ())
+    monkeypatch.setattr(agent, "q2", FakeQ())
+    choice, info = agent.select_eval_action(
+        np.zeros(residual.OBS_DIM), np.zeros((10, 18)),
+    )
+    assert choice == 3
+    assert info["q_advantage"] < 0.0
+    assert info["used_prior"] == 0.0
+
+
+def test_new_candidate_replay_update_and_checkpoint_schema():
+    dwell = np.ones(residual.N_BANDS, dtype=np.int32)
+    state = residual.ResidualCausalState(
+        residual.make_calibrated_transition(),
+        np.full(residual.N_BANDS, residual.CAL_PRIOR_ACTIVE), dwell,
+    )
+    ts = residual.ContextualThompsonSampler(residual.N_BANDS, seed=5)
+    generator = residual.ResidualCandidateGenerator(dwell, ts)
+    agent = residual.ResidualDiscreteSAC(
+        residual.OBS_DIM, generator.feature_dim, residual.CANDIDATE_COUNT, seed=3,
+    )
+    replay = residual.ReplayBuffer(8, residual.OBS_DIM, 10, 18, seed=4)
+    before = [parameter.detach().clone() for parameter in agent.actor.parameters()]
+    for action in range(4):
+        obs, candidates = state.observation(), generator.build(state)
+        band = int(candidates.bands[action])
+        state.step(band, [bool(action % 2)])
+        replay.add(obs, candidates.features, action, 0.01 * action,
+                   state.observation(), generator.build(state).features,
+                   action == 3, residual.GAMMA_BASE)
+    stats = agent.update(replay.sample(4, residual.DEVICE), prior_bias=0.25)
+    assert all(np.isfinite(value) for value in stats.values())
+    assert any(not torch.equal(old, new) for old, new in zip(before, agent.actor.parameters()))
+    payload = agent.state_dict(step=4)
+    agent.load_state_dict(payload)
+    stale = dict(payload, candidate_dim=17)
+    stale.pop("candidate_schema")
+    with pytest.raises(ValueError, match="candidate schema"):
+        agent.load_state_dict(stale)

@@ -7,6 +7,27 @@ TS feedback is explicitly the observed HIT/MISS rate, with a fresh checkpoint
 schema so posteriors trained on mission reward cannot be reused. Its evaluation
 posterior now updates online within each episode.
 
+The actor evaluates exactly ten distinct candidate bands: TS sample, TS mean,
+three least-visited bands, and one proposal each from TS uncertainty,
+periodicity, belief, staleness and operational priority. Duplicate TS mean
+proposals leave a slot that is filled by the causal fallback ranking. Equal
+visit counts are ordered by oldest raw visit time. Candidate descriptors have
+18 fields, including an explicit unvisited flag; the receiver state remains
+325-dimensional. Old 17-field checkpoints are rejected by the candidate-schema
+guard and require fresh training.
+
+Evaluation uses actor argmax directly; critic advantages are diagnostics and
+never force a TS fallback. TS remains candidate zero and adapts to receiver
+HIT/MISS feedback. Candidate inclusion does not enforce coverage. There is no
+external coverage floor in this configuration. The training prior mixture
+decays from 0.40 to 0.05 over 25,000 actions, including warm-up; the actor's
+prior-logit bias decays from 0.50 to zero over the same budget. Batch size 128
+and one gradient update per action after warm-up are retained.
+
+Use a fresh 25,000-action pilot and evaluate VAL_NORMAL before extending the
+budget. The corpus contains 50 VAL and 50 TEST worlds. Reuse Round Robin's
+catalog and receiver seeds for comparison.
+
 `scripts/training/train_residual_discrete_sac.py` provides its dedicated
 TRAIN-250 entry point. It samples a fresh TRAIN world per episode and uses the
 shared `truth_based_intercept_utility_v2` reward for SAC learning. The

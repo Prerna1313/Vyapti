@@ -93,7 +93,7 @@ def main() -> None:
     result["condition"] = args.condition
     result["checkpoint_sha256"] = sha256(checkpoint)
     result["frozen_world_catalog_sha256"] = factory.catalog_sha256
-    result["action_mode"] = "residual_gate_with_seeded_contextual_ts"
+    result["action_mode"] = "actor_argmax_with_seeded_contextual_ts_proposals"
     result["receiver_rng_source"] = "receiver_seed pinned by shared frozen-world catalog"
     result["protocol_run"] = str(factory.protocol_run)
     result["per_world_identity_check"] = "every world rebuilt and hash-verified against frozen catalog"

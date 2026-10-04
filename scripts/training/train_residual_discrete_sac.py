@@ -65,7 +65,7 @@ def main() -> None:
             for split in ("val", "test")
         },
         "policy_logic_modified": True,
-        "policy_logic_change_note": "Contextual-TS posterior learns observed HIT/MISS rate; SAC reward target, actor, critics, replay and updates are unchanged",
+        "policy_logic_change_note": "Receiver HIT/MISS TS feedback; ten candidates including three underexplored bands and explicit unvisited feature; actor-argmax evaluation without TS fallback; faster prior schedules; corrected entropy-temperature direction",
         "ts_feedback_schema": learner.TS_FEEDBACK_SCHEMA,
         "ts_feedback_scale": learner.TS_FEEDBACK_SCALE,
         "receiver_seed_protocol": "VAL/TEST receiver RNG is pinned per world in the shared frozen catalog",
