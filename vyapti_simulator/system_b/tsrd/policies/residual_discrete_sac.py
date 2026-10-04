@@ -1457,14 +1457,13 @@ def train(
     )
 
     ts = ContextualThompsonSampler(N_BANDS, seed=seed + 4242)
-
+    generator = ResidualCandidateGenerator(dwell_slots, ts)
     agent = ResidualDiscreteSAC(
         OBS_DIM,
-        cand_dim=17,
+        cand_dim=generator.feature_dim,
         n_candidates=CANDIDATE_COUNT,
         seed=seed,
     )
-    generator = ResidualCandidateGenerator(dwell_slots, ts)
     replay = ReplayBuffer(
         REPLAY_CAPACITY,
         OBS_DIM,

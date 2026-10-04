@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+import json
 
 from vyapti_simulator.system_b.tsrd.policies import residual_discrete_sac as residual
 
@@ -193,3 +194,56 @@ def test_new_candidate_replay_update_and_checkpoint_schema():
     stale.pop("candidate_schema")
     with pytest.raises(ValueError, match="candidate schema"):
         agent.load_state_dict(stale)
+
+
+def test_actual_trainer_crosses_replay_warmup_and_saves_loadable_checkpoint(monkeypatch, tmp_path):
+    # Exercise train() itself: manual construction of an 18-field agent did
+    # not catch the old hard-coded 17-field network in the training entry point.
+    class FakeWorld:
+        def __init__(self):
+            self.native_dwell_slots = np.ones(residual.N_BANDS, dtype=np.int32)
+            self.native_dwell_slots[:7] = 2
+            self.slots = 0
+
+        def dwell_slots_for_band(self, band):
+            return int(self.native_dwell_slots[band])
+
+        def reset(self, seed):
+            self.slots = 0
+
+        def step_dwell_training(self, band, dwell, reward_mode):
+            assert reward_mode == residual.REWARD_MODE
+            looks = [{"hit": bool((self.slots + offset) % 2),
+                      "time_slot": self.slots + offset} for offset in range(dwell)]
+            self.slots += dwell
+            return looks, 0.01, self.slots >= 6
+
+    class FakeFactory:
+        def make_train_world(self, seed):
+            return FakeWorld()
+
+    monkeypatch.setattr(residual, "DEVICE", torch.device("cpu"))
+    monkeypatch.setattr(residual, "REPLAY_CAPACITY", 16)
+    monkeypatch.setattr(residual, "MIN_REPLAY_SIZE", 2)
+    monkeypatch.setattr(residual, "WARMUP_ACTIONS", 2)
+    monkeypatch.setattr(residual, "BATCH_SIZE", 4)
+    residual.train(
+        FakeFactory(), tmp_path, seed=3,
+        transition=residual.make_calibrated_transition(),
+        prior_active=np.full(residual.N_BANDS, residual.CAL_PRIOR_ACTIVE),
+        max_actions=8,
+    )
+    checkpoint = tmp_path / "checkpoints" / "residual_sac_final.pt"
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    assert payload["step"] == 8
+    assert payload["candidate_dim"] == residual.CANDIDATE_DIM == 18
+    assert payload["train_stats"]["replay_size"] == 8
+    assert "actor_loss" in payload["train_stats"]
+    assert all(np.isfinite(value) for value in payload["train_stats"].values())
+    agent, transition, prior, dwell, ts = residual.load_agent(checkpoint)
+    state = residual.ResidualCausalState(transition, prior, dwell)
+    candidates = residual.ResidualCandidateGenerator(dwell, ts).build(state)
+    choice, _ = agent.select_eval_action(state.observation(), candidates.features)
+    assert 0 <= choice < residual.CANDIDATE_COUNT
+    manifest = json.loads((tmp_path / "experiment_config.json").read_text())
+    assert manifest["residual_contract"]["candidate_dim"] == 18
