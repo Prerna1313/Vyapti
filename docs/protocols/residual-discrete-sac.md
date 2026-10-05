@@ -100,3 +100,21 @@ for every world: the sampler's loader otherwise shares NumPy arrays and online
 updates can leak across world boundaries. All three diagnostic modes use this
 independent reset. Previous reports without this reset should be reevaluated
 before comparing the diagnostic modes.
+
+## Sampling calibration on VAL
+
+The evaluator accepts `--temperature` for sampled-actor evaluation and
+`--action-seed-base` to change only the action-sampling stream. The trained
+SAC alpha, trained weights, TS proposal seeds (`--eval-seed-base`) and frozen
+receiver seeds are unaffected. Temperature applies `softmax(log(pi) / T)`,
+equivalent to rescaling actor logits; T=1 preserves the existing probabilities.
+`--policy-mode uniform_candidates` samples uniformly from the same ten causal
+candidates with the same checkpoint TS prior and online feedback.
+
+`scripts.evaluation.calibrate_residual_discrete_sac` runs temperatures 0.8,
+1.0 and 1.2 plus the uniform baseline on VAL_NORMAL. It streams child progress
+and errors, validates existing reports before reuse, and keeps parameter and
+seed variants in separate directories. Pass `--action-seed-bases` for multiple
+action sampling seeds; these are not independent training runs. The comparison
+is written under `eval/val/normal/calibration/`. It reports metrics without
+automatically changing the frozen selection objective or exposing TEST.
