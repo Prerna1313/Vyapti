@@ -7,6 +7,77 @@ import torch
 from scripts.evaluation import evaluate_residual_discrete_sac as evaluator
 
 
+@pytest.mark.parametrize("mode", ["actor_sampled", "uniform_candidates"])
+@pytest.mark.parametrize("mixed_dwell", [False, True])
+def test_decision_trace_preserves_rollout_and_rewards(tmp_path, monkeypatch, mode, mixed_dwell):
+    import json
+    learner = evaluator.learner
+    monkeypatch.setattr(learner, "DEVICE", torch.device("cpu"))
+
+    class Q:
+        def __init__(self, offset):
+            self.offset = offset
+
+        def all_values(self, obs, candidates):
+            return torch.arange(10, dtype=torch.float32)[None] + self.offset
+
+    probs = torch.softmax(torch.arange(10, dtype=torch.float32), dim=0)[None]
+    agent = SimpleNamespace(policy_distribution=lambda *args, **kwargs: (probs, probs.log()),
+                            q1=Q(0), q2=Q(0.5))
+
+    class World:
+        def __init__(self):
+            self.slot = 0
+            self.actions = []
+
+        @property
+        def done(self):
+            return self.slot >= 20
+
+        def step_dwell_training(self, band, dwell, reward_mode):
+            self.actions.append(band)
+            looks = [{"time_slot": slot, "hit": bool((slot + band) % 3 == 0)}
+                     for slot in range(self.slot, min(self.slot + dwell, 20))]
+            self.slot += len(looks)
+            self.last_reward_components = {"new_intercept_utility": 0.1,
+                "elapsed_cost": 0.02, "false_alarm_cost": 0.01, "mission_reward": 0.07}
+            return looks, 0.07, self.done
+
+    transition = np.tile(np.array([[0.9, 0.1], [0.1, 0.9]]), (36, 1, 1))
+    prior = np.full(36, 0.5)
+    dwell = np.ones(36, dtype=int)
+    if mixed_dwell:
+        dwell[[0, 1, 6, 7, 17, 18, 19]] = 2
+    worlds = [World(), World()]
+    trajectories = []
+    diagnostics = []
+    path = tmp_path / "decisions.jsonl"
+    for traced, env in zip((False, True), worlds):
+        policy = evaluator.DiagnosticPolicy(agent, mode, 420000)
+        ts = learner.ContextualThompsonSampler(36, seed=420000)
+        if traced:
+            trajectory, diag = evaluator.traced_rollout(env, policy, transition, prior,
+                                                       dwell, ts, path, "world_0")
+        else:
+            trajectory, diag = learner.rollout_policy_on_world(env, policy, transition,
+                                                               prior, dwell, ts)
+        trajectories.append([(s.action, s.time_slot, s.observation) for s in trajectory])
+        diagnostics.append(diag)
+    assert worlds[0].actions == worlds[1].actions
+    assert trajectories[0] == trajectories[1]
+    for key in ("q_advantages", "policy_probs", "decisions"):
+        assert diagnostics[0][key] == diagnostics[1][key]
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(rows) == len(worlds[1].actions)
+    assert len(trajectories[1]) == 20
+    assert rows[-1]["done"] is True
+    assert diagnostics[1]["mission_reward_components"]["mission_reward"] == pytest.approx(0.07 * len(rows))
+    for row in rows:
+        assert row["q_spread"] == 9
+        assert row["mean_critic_disagreement"] == 0.5
+        assert sum(row["selection_probabilities"]) == pytest.approx(1)
+
+
 def test_sampled_actor_reproducible_and_independent_of_torch_rng(monkeypatch):
     monkeypatch.setattr(evaluator.learner, "DEVICE", torch.device("cpu"))
 

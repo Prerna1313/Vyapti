@@ -118,3 +118,30 @@ seed variants in separate directories. Pass `--action-seed-bases` for multiple
 action sampling seeds; these are not independent training runs. The comparison
 is written under `eval/val/normal/calibration/`. It reports metrics without
 automatically changing the frozen selection objective or exposing TEST.
+
+## Candidate and reward audit
+
+Pass `--decision-diagnostics` to the dedicated evaluator on VAL to save a
+separate `decision_diagnostics/` directory beneath the usual checkpoint report.
+Existing calibration reports and the trained learner source are preserved.
+The trace `decisions.jsonl` contains candidate band IDs, all actor probabilities,
+actual selection probabilities, both critics and their minimum, Q spread,
+critic disagreement, actor entropy, selected candidate, observed HIT/MISS,
+and environment-owned mission-reward components. No audit values feed the policy.
+Per-world and aggregate summaries include mission reward and component totals.
+Candidate summary aggregates are means across worlds; they are not calibration
+of Q values against counterfactual outcomes. Unselected candidates have no observed
+outcome, so this audit alone cannot establish accurate candidate ranking.
+
+Example (one existing checkpoint, same frozen VAL worlds and seeds):
+
+```bash
+python -u -m scripts.evaluation.evaluate_residual_discrete_sac \
+  --run runs/residual_discrete_sac_actor_pilot_retry \
+  --checkpoint residual_sac_final.pt \
+  --environment training_setup/environments/train250_colab.json \
+  --world-catalog /content/frozen_world_catalog.json \
+  --split val --condition normal --policy-mode actor_sampled \
+  --temperature 1.0 --eval-seed-base 420000 --action-seed-base 420000 \
+  --device cpu --diagnostic --decision-diagnostics
+```

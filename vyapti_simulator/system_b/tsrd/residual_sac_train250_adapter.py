@@ -124,6 +124,12 @@ class ResidualWorld:
         false_alarm_cost = false_alarm_rate * elapsed_seconds / 30.0
         reward = new_intercept_utility - elapsed_cost - false_alarm_cost
         self._intercepted.update(newly_intercepted)
+        self.last_reward_components = {
+            "new_intercept_utility": float(new_intercept_utility),
+            "elapsed_cost": float(elapsed_cost),
+            "false_alarm_cost": float(false_alarm_cost),
+            "mission_reward": float(reward),
+        }
         return looks, float(reward), self.done
 
 

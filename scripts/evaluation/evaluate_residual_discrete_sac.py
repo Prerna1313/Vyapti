@@ -65,8 +65,91 @@ class DiagnosticPolicy:
         }
 
 
+@torch.no_grad()
+def traced_rollout(env, policy, transition, prior, dwell, ts, trace_path, world_id):
+    """Observe the existing rollout without feeding diagnostics into decisions."""
+    from vyapti_simulator.core.metrics import TrajectoryStep
+
+    generator = learner.ResidualCandidateGenerator(dwell, ts)
+    state = learner.ResidualCausalState(transition, prior, dwell)
+    state.reset()
+    trajectory = []
+    diag = {"decisions": 0, "residual_decisions": 0, "ts_prior_decisions": 0,
+            "q_advantages": [], "policy_probs": []}
+    totals = {key: 0.0 for key in (
+        "mission_reward", "new_intercept_utility", "elapsed_cost", "false_alarm_cost")}
+    measurements = []
+    with Path(trace_path).open("a", encoding="utf-8") as stream:
+        while not env.done:
+            obs = state.observation()
+            cand = generator.build(state)
+            choice, info = policy.select_eval_action(obs, cand.features)
+            x = torch.as_tensor(obs, dtype=torch.float32, device=learner.DEVICE).unsqueeze(0)
+            c = torch.as_tensor(cand.features, dtype=torch.float32, device=learner.DEVICE).unsqueeze(0)
+            probs, logs = policy.agent.policy_distribution(x, c, prior_bias=0.0)
+            if logs is None:
+                logs = probs.double().log()
+            actor_p = torch.softmax(logs.double() / policy.temperature, dim=-1)[0].cpu().numpy()
+            q1 = policy.agent.q1.all_values(x, c)[0].cpu().numpy()
+            q2 = policy.agent.q2.all_values(x, c)[0].cpu().numpy()
+            q = np.minimum(q1, q2)
+            if not all(np.all(np.isfinite(v)) for v in (actor_p, q1, q2)):
+                raise ValueError("Nonfinite actor or critic diagnostic")
+            selection_p = (np.full(len(actor_p), 1 / len(actor_p))
+                           if policy.mode == "uniform_candidates" else actor_p)
+            if policy.mode in ("actor_argmax", "ts_only"):
+                selection_p = np.eye(len(actor_p))[choice]
+            positive = actor_p > 0
+            entropy = float(-np.sum(actor_p[positive] * np.log(actor_p[positive])))
+            band = int(cand.bands[choice])
+            context = generator.context_for_band(state, band)
+            looks, reward, done = learner.env_step(env, band, int(dwell[band]))
+            positives = learner.extract_positives(looks)
+            ts.update(band, context, learner.contextual_ts_feedback(positives))
+            components = dict(env.last_reward_components)
+            if not np.isclose(components["mission_reward"], reward):
+                raise ValueError("Reward diagnostic differs from environment reward")
+            record = {
+                "world_id": world_id, "decision": diag["decisions"],
+                "time_slot": int(looks[0]["time_slot"]),
+                "candidate_bands": [int(b) for b in cand.bands],
+                "selected_candidate": int(choice), "selected_band": band,
+                "actor_probabilities": actor_p.tolist(),
+                "selection_probabilities": selection_p.tolist(),
+                "q1": q1.tolist(), "q2": q2.tolist(), "minimum_q": q.tolist(),
+                "q_spread": float(np.ptp(q)),
+                "mean_critic_disagreement": float(np.mean(np.abs(q1 - q2))),
+                "actor_entropy": entropy,
+                "chosen_q_minus_candidate_mean": float(q[choice] - np.mean(q)),
+                "chosen_q_regret": float(np.max(q) - q[choice]),
+                "hits": positives, "reward_components": components,
+                "done": bool(done),
+            }
+            stream.write(json.dumps(record, allow_nan=False) + "\n")
+            measurements.append(record)
+            for key in totals:
+                totals[key] += components[key]
+            for look in looks:
+                trajectory.append(TrajectoryStep(action=band,
+                    time_slot=int(look["time_slot"]), observation=look))
+            state.step(band, positives)
+            diag["decisions"] += 1
+            diag["residual_decisions"] += int(choice != 0)
+            diag["ts_prior_decisions"] += int(choice == 0)
+            diag["q_advantages"].append(float(info["q_advantage"]))
+            diag["policy_probs"].append(float(info["policy_prob"]))
+        stream.flush()
+    diag["mission_reward_components"] = totals
+    diag["candidate_diagnostics"] = {
+        key: float(np.mean([record[key] for record in measurements]))
+        for key in ("q_spread", "mean_critic_disagreement", "actor_entropy",
+                    "chosen_q_minus_candidate_mean", "chosen_q_regret")
+    }
+    return trajectory, diag
+
+
 def evaluate_ablation(factory, checkpoint, recipes, mode, eval_seed_base, split="val",
-                      temperature=1.0, action_seed_base=None):
+                      temperature=1.0, action_seed_base=None, trace_path=None):
     action_seed_base = eval_seed_base if action_seed_base is None else action_seed_base
     agent, transition, prior, dwell, trained_ts = learner.load_agent(checkpoint)
     # load_state_dict uses np.asarray and can alias its input arrays. Preserve
@@ -86,9 +169,12 @@ def evaluate_ablation(factory, checkpoint, recipes, mode, eval_seed_base, split=
         ts.load_state_dict(deepcopy(trained_posterior))
         action_seed = int(action_seed_base + i)
         policy = DiagnosticPolicy(agent, mode, action_seed, temperature)
-        trajectory, diag = learner.rollout_policy_on_world(
-            env, policy, transition, prior, dwell, ts,
-        )
+        if trace_path is None:
+            trajectory, diag = learner.rollout_policy_on_world(
+                env, policy, transition, prior, dwell, ts)
+        else:
+            trajectory, diag = traced_rollout(env, policy, transition, prior, dwell, ts,
+                trace_path, recipe.get("catalog_world_id", i))
         metric = dict(factory.score_episode(env, trajectory))
         metric.update(world_id=int(recipe.get("world_id", i)),
                       receiver_seed=receiver_seed, policy_eval_seed=policy_seed)
@@ -130,11 +216,16 @@ def main() -> None:
                         default="actor_argmax", help="VAL diagnostics: TS proposal only or sampled actor")
     parser.add_argument("--diagnostic", action="store_true",
                         help="Save VAL reports separately, including a fresh actor-argmax reference")
+    parser.add_argument("--decision-diagnostics", action="store_true",
+                        help="VAL only: save candidate Q/probability and mission-reward traces separately")
     parser.add_argument("--temperature", type=float, default=1.0,
                         help="VAL sampled-actor logit temperature; independent of training alpha")
     parser.add_argument("--action-seed-base", type=int,
                         help="VAL action sampling seed base; TS and receiver seeds stay fixed")
     args = parser.parse_args()
+    if args.decision_diagnostics and args.split != "val":
+        parser.error("Decision diagnostics are available only on VAL")
+    print(f"[EVAL] Starting {args.split.upper()} {args.condition}; checking inputs and loading checkpoint", flush=True)
 
     run = Path(args.run).resolve()
     checkpoint = Path(args.checkpoint)
@@ -198,15 +289,33 @@ def main() -> None:
     destination = evaluation_destination(run, args.split, args.condition, checkpoint,
                                         args.policy_mode, diagnostic, args.temperature,
                                         args.action_seed_base)
+    if args.decision_diagnostics:
+        destination = destination / "decision_diagnostics"
     if destination.exists():
         raise FileExistsError(destination)
+    trace_path = None
+    if args.decision_diagnostics:
+        destination.mkdir(parents=True)
+        trace_path = destination / "decisions.jsonl"
     result = evaluate_ablation(factory, checkpoint, recipes, args.policy_mode,
                               args.eval_seed_base, split=args.split,
-                              temperature=args.temperature, action_seed_base=args.action_seed_base)
+                              temperature=args.temperature, action_seed_base=args.action_seed_base,
+                              trace_path=trace_path)
     scorecards = [row for row in result["rows"] if "cell_level" in row]
     if len(scorecards) != len(recipes):
         raise ValueError("Some evaluation worlds did not produce a benchmark scorecard")
     result["summary"] = _summary(scorecards)
+    if args.decision_diagnostics:
+        diagnostics = result["diagnostics"]
+        result["decision_diagnostics_schema"] = "candidate_q_reward_audit_v1"
+        result["summary"]["mean_mission_reward_per_episode"] = float(np.mean([
+            d["mission_reward_components"]["mission_reward"] for d in diagnostics]))
+        result["summary"]["mean_reward_components_per_episode"] = {
+            key: float(np.mean([d["mission_reward_components"][key] for d in diagnostics]))
+            for key in diagnostics[0]["mission_reward_components"]}
+        result["summary"]["mean_world_candidate_diagnostics"] = {
+            key: float(np.mean([d["candidate_diagnostics"][key] for d in diagnostics]))
+            for key in diagnostics[0]["candidate_diagnostics"]}
     result["condition"] = args.condition
     result["checkpoint_sha256"] = sha256(checkpoint)
     result["frozen_world_catalog_sha256"] = factory.catalog_sha256
@@ -225,13 +334,20 @@ def main() -> None:
     result["protocol_run"] = str(factory.protocol_run)
     result["per_world_identity_check"] = "every world rebuilt and hash-verified against frozen catalog"
 
-    destination.mkdir(parents=True)
+    destination.mkdir(parents=True, exist_ok=args.decision_diagnostics)
     (destination / "summary.json").write_text(
         json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     with (destination / "per_world.jsonl").open("w", encoding="utf-8") as stream:
         for row in result["rows"]:
             stream.write(json.dumps(row, allow_nan=False) + "\n")
+    if args.decision_diagnostics:
+        print(json.dumps({
+            "decision_trace": str(trace_path),
+            "mean_mission_reward_per_episode": result["summary"]["mean_mission_reward_per_episode"],
+            "mean_reward_components_per_episode": result["summary"]["mean_reward_components_per_episode"],
+            "mean_world_candidate_diagnostics": result["summary"]["mean_world_candidate_diagnostics"],
+        }, indent=2, allow_nan=False), flush=True)
     print(json.dumps({
         "split": args.split,
         "condition": args.condition,
