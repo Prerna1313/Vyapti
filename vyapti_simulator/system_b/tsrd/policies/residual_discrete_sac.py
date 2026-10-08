@@ -204,7 +204,7 @@ PRIOR_LOGIT_DECAY_ACTIONS = 25_000
 EVAL_MIN_POLICY_PROB = 0.0
 EVAL_REQUIRE_POSITIVE_Q_ADVANTAGE = False
 
-CHECKPOINTS = (50_000, 100_000, 200_000, 300_000, 400_000)
+CHECKPOINTS = (10_000, 25_000, 50_000, 100_000, 200_000, 300_000, 400_000)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -529,10 +529,9 @@ def env_step(env: Any, band: int, dwell: int) -> tuple[list[dict], float, bool]:
 
 
 def time_aware_gamma(dwell: int, switched: bool) -> float:
-    sec = float(dwell) * BASE_SLOT_SECONDS
-    if switched:
-        sec += RETUNE_SECONDS
-    return float(GAMMA_BASE ** (sec / BASE_SLOT_SECONDS))
+    # Retuning consumes usable time within the shared receiver slots. It does
+    # not advance the mission clock beyond these elapsed slots.
+    return float(GAMMA_BASE ** int(dwell))
 
 
 # =============================================================================

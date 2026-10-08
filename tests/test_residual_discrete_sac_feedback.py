@@ -8,6 +8,20 @@ import json
 from vyapti_simulator.system_b.tsrd.policies import residual_discrete_sac as residual
 
 
+@pytest.mark.parametrize("elapsed_slots", [1, 2])
+@pytest.mark.parametrize("switched", [False, True])
+def test_discount_uses_receiver_clock_without_extra_retune(elapsed_slots, switched):
+    assert residual.time_aware_gamma(elapsed_slots, switched) == pytest.approx(
+        residual.GAMMA_BASE ** elapsed_slots, abs=1e-12
+    )
+
+
+def test_short_run_checkpoint_schedule():
+    assert [step for step in residual.CHECKPOINTS if step <= 50_000] == [
+        10_000, 25_000, 50_000
+    ]
+
+
 def test_entropy_temperature_update_moves_alpha_toward_target_entropy():
     # With entropy below target, alpha must rise to encourage more entropy;
     # with entropy above target, alpha must fall.
