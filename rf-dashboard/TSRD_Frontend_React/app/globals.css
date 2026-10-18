@@ -1,0 +1,15 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body { background: #020812; color: #dcecf6; font-family: Arial, sans-serif; }
+.shell { min-height: 100vh; padding: 12px; }
+.app-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1800px; margin: 0 auto 10px; padding: 0 4px; }
+.eyebrow { margin: 0 0 3px; color: #57d9f7; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(16px, 2vw, 22px); font-weight: 600; }
+.fullscreen-button { border: 1px solid #1a6681; border-radius: 4px; padding: 8px 11px; background: #0b2639; color: #d8f6ff; cursor: pointer; }
+.fullscreen-button:hover { background: #10405b; }
+.loading { position: absolute; z-index: 1; left: 50%; top: 96px; transform: translateX(-50%); color: #8be4fa; }
+.dashboard { display: block; width: 100%; min-width: 1176px; height: calc(100vh - 82px); min-height: 780px; border: 1px solid #123d59; border-radius: 6px; background: #030712; }
+.dashboard--loading { visibility: hidden; }
+.dashboard:fullscreen { width: 100vw; height: 100vh; border: 0; border-radius: 0; }
+@media (max-width: 720px) { .shell { padding: 8px; overflow-x: auto; } .app-bar { min-width: 620px; } }

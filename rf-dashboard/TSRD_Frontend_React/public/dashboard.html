@@ -1,0 +1,2554 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VYAPTI TSRD Environment</title>
+  <link rel="icon" type="image/png" href="ultraHD-logo.png">
+  
+  <!-- Fonts & Styles -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Fast Local Stylesheet & Tailwind -->
+  <script src="/tailwind.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      --font-sans: 'Inter', sans-serif;
+      --color-panel-bg: #0A111D;
+      --color-panel-border: #1E2D4A;
+      --color-panel-header: #0D1829;
+    }
+    
+    body {
+      font-family: var(--font-sans);
+      background-color: #030712;
+      color: #cbd5e1;
+      overflow-x: auto; /* Prevent squishing on small screens */
+    }
+
+    .dashboard-panel {
+      @apply flex flex-col bg-[var(--color-panel-bg)] border border-[var(--color-panel-border)] rounded shadow-lg overflow-hidden;
+    }
+
+    .panel-header {
+      @apply flex items-center gap-1.5 px-2.5 py-1.5 text-cyan-400 font-semibold text-[11px] uppercase bg-gradient-to-r from-[var(--color-panel-header)] to-[var(--color-panel-bg)] border-b border-[var(--color-panel-border)];
+    }
+
+    /* Custom Scrollbar for the dark theme */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #030712; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    
+    /* Utility for chart containers to ensure pure black/dark-blue bg */
+    .chart-bg { background-color: #020617; }
+
+    .reference-navbar {
+      display: flex;
+      width: calc(100vw - 32px);
+      min-width: 1176px;
+      margin: 8px auto 0;
+      border: 1px solid #12344f;
+      background: linear-gradient(180deg, #071a2b 0%, #03101c 100%);
+      box-shadow: 0 3px 16px rgba(0, 0, 0, 0.35), inset 0 -2px 0 rgba(0, 193, 232, 0.35);
+    }
+
+    .reference-navbar > div { min-width: 0; }
+    .reference-navbar > div:first-child { gap: 10px; }
+    .reference-navbar > div:last-child { gap: 8px; flex-shrink: 0; }
+    .reference-navbar .nav-title,
+    .reference-navbar .nav-logo { flex-shrink: 0; white-space: nowrap; }
+    .reference-navbar .nav-stats {
+      margin-left: 0;
+      gap: 8px;
+      padding-left: 8px;
+      padding-right: 8px;
+      flex-shrink: 0;
+    }
+    .reference-navbar .nav-stats > div { flex-shrink: 0; }
+    .reference-navbar .nav-stats .leading-tight span { white-space: nowrap; }
+    .reference-navbar .nav-progress {
+      width: 170px;
+      margin-left: 0;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .reference-navbar .nav-controls { margin-left: 0; gap: 4px; }
+    .reference-navbar .nav-controls button { padding-left: 8px; padding-right: 8px; }
+
+    .reference-grid {
+      width: calc(100vw - 32px);
+      min-width: 1176px;
+      margin: 0 auto;
+      grid-template-columns: minmax(220px, 17fr) minmax(570px, 49fr) minmax(350px, 34fr);
+      grid-template-rows: 420px 400px minmax(300px, auto);
+      align-content: start;
+      overflow: visible;
+    }
+
+    body { height: auto; min-height: 100vh; }
+
+    .dashboard-panel {
+      border-color: #10334d;
+      background: linear-gradient(145deg, #071321 0%, #050e19 100%);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(66, 191, 229, 0.035);
+      opacity: 1 !important;
+      transform: none !important;
+    }
+
+    .panel-header {
+      min-height: 28px;
+      color: #e2edf7;
+      background: linear-gradient(90deg, #0a1a2a 0%, #07111d 100%);
+      border-bottom-color: #12344f;
+      letter-spacing: 0.01em;
+    }
+
+    .metrics-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 9px;
+      color: #8fb5d5;
+    }
+
+    .metrics-table th,
+    .metrics-table td { padding: 5px 8px; }
+
+    .metrics-table thead th {
+      background: #0a1a2a;
+      border-bottom: 1px solid #1a405b;
+      color: #75a8cf;
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .metrics-table tbody tr + tr td { border-top: 1px solid rgba(24, 58, 84, 0.68); }
+    .metrics-table tbody tr:hover td { background: rgba(10, 62, 91, 0.28); }
+    .metrics-table .metric-value { color: #f0f8ff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; text-align: right; }
+    .metrics-table .metric-note { color: #6e97b9; text-align: right; white-space: nowrap; }
+    .metrics-table .value-cyan { color: #00d9ff; }
+    .metrics-table .value-green { color: #21e6a4; }
+    .metrics-table .value-red { color: #ff6474; }
+    .metrics-table .value-violet { color: #2db9f7; }
+
+    .metric-grid-table { font-size: 10px; line-height: 1.35; }
+    .metric-grid-table th,
+    .metric-grid-table td { padding: 5px 8px; }
+    .metric-grid-table th:nth-child(2),
+    .metric-grid-table th:nth-child(4) { text-align: right; }
+    .metric-grid-table td:nth-child(3),
+    .metric-grid-table th:nth-child(3) { border-left: 1px solid rgba(24, 58, 84, 0.75); }
+
+    .bottom-dashboard-row {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 1.45fr) minmax(0, 0.95fr);
+      gap: 8px;
+      height: 220px;
+      max-height: 220px;
+      min-height: 220px;
+    }
+
+    .reference-performance,
+    .reference-ledger,
+    .reference-why {
+      min-width: 0;
+      height: 220px;
+      max-height: 220px;
+      overflow: hidden;
+    }
+
+    .reference-performance { grid-column: auto; }
+
+    .reference-ledger {
+      position: relative;
+      left: auto;
+      top: auto;
+      width: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .reference-ledger-scroll {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 185px;
+    }
+
+    .reference-why {
+      width: auto;
+      justify-self: stretch;
+      overflow-y: auto;
+    }
+
+    .decision-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 18px;
+      row-gap: 10px;
+    }
+
+    .decision-metric {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .decision-metric span:first-child { min-width: 0; }
+    .decision-metric span:last-child { white-space: nowrap; }
+
+    .extended-analytics {
+      display: grid;
+      grid-column: 1 / -1;
+      min-width: 0;
+      margin-top: 28px;
+      padding-top: 20px;
+    }
+
+    .extended-left {
+      display: grid;
+      grid-template-rows: 280px 300px;
+      min-height: 0;
+    }
+
+    .extended-right {
+      display: grid;
+      grid-template-rows: 400px 180px;
+      min-height: 0;
+    }
+
+    .extended-right-top { height: 100%; }
+    .extended-analytics .dashboard-panel { min-width: 0; min-height: 0; }
+    .extended-analytics .comparison-chart { min-width: 0; }
+    .extended-analytics .comparison-plot { min-height: 120px; }
+    .extended-analytics .metrics-catalog { margin-top: 4px; }
+    .analytics-panel {
+      border-color: #1b4259;
+      background: linear-gradient(155deg, #081b2b 0%, #06111f 52%, #050e19 100%);
+    }
+    .analytics-panel .panel-header { min-height: 34px; }
+    .heatmap-content { gap: 10px; padding: 10px 12px 14px; }
+    .heatmap-mode {
+      min-width: 0;
+      padding: 7px 8px 4px;
+      border: 1px solid #1c3d54;
+      border-radius: 6px;
+      background: linear-gradient(180deg, rgba(15, 43, 61, .8), rgba(5, 16, 29, .5));
+    }
+    .heatmap-mode-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 7px;
+      color: #d8edf7;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .heatmap-mode-title small { color: #75a8bd; font-size: 9px; font-weight: 400; }
+    .heatmap-plot { min-height: 150px; border-color: #27516a; }
+    .heatmap-legend { width: 26px; }
+    .loop-panel .panel-header,
+    .timeline-panel .panel-header,
+    .metrics-catalog .panel-header { background: linear-gradient(90deg, #0b2130, #071321); }
+    .loop-panel-body { gap: 10px; padding: 10px; }
+    .comparison-chart {
+      border-color: #24465d;
+      border-radius: 6px;
+      background: #071626;
+    }
+    .loop-chart-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 10px;
+      background: rgba(14, 35, 51, .9);
+      font-size: 10px;
+      font-weight: 600;
+      text-align: left;
+    }
+    .loop-chart-heading small { color: #7f9fb4; font-size: 9px; font-weight: 400; }
+    .comparison-plot { margin-top: 10px; margin-bottom: 25px; }
+    .loop-stats {
+      background: #19354b;
+      gap: 1px;
+      padding-top: 1px;
+    }
+    .loop-stats > div { padding: 5px 2px; min-height: 32px; }
+    .loop-stats > div > div:first-child { color: #7f9fb4; font-size: 8px; }
+    .loop-stats > div > div:last-child { font-size: 11px; }
+    .timeline-panel { border-color: #1b4259; box-shadow: none; }
+    .timeline-panel .chart-bg { background: #061524; }
+    .timeline-lanes { margin-left: 128px; margin-right: 12px; }
+    .timeline-labels { color: #afc9d8; }
+    .metrics-catalog .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+      font-size: 10px;
+    }
+    .metrics-catalog .metrics-grid[data-mode="single"] { grid-template-columns: minmax(0, 1fr); }
+    .metrics-grid > div {
+      min-width: 0;
+      padding: 10px;
+      border-color: #23465a;
+      border-left: 2px solid #19b9d4;
+      border-radius: 6px;
+      background: linear-gradient(145deg, #0c2232, #071421);
+    }
+    .metrics-grid > div:nth-child(5n + 2) { border-left-color: #20c997; }
+    .metrics-grid > div:nth-child(5n + 3) { border-left-color: #68a5ff; }
+    .metrics-grid > div:nth-child(5n + 4) { border-left-color: #e1ac56; }
+    .metrics-grid > div:nth-child(5n + 5) { border-left-color: #1674e4; }
+    .metrics-grid > div > span:first-child {
+      margin-bottom: 10px;
+      color: #e1eff7;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .metrics-grid > div > div.grid { gap: 5px; }
+    .metrics-grid > div > div.grid > div {
+      min-width: 0;
+      min-height: 51px;
+      padding: 6px 3px;
+      border: 1px solid rgba(52, 91, 113, .55);
+      border-radius: 4px;
+      background: rgba(4, 17, 29, .65);
+    }
+    .metrics-grid > div > div.grid > div > div:first-child { color: #8aafc1; font-size: 9px; line-height: 1.15; }
+    .metrics-grid > div > div.grid > div > div:last-child { margin-top: 5px; font-size: 13px; }
+    .metrics-grid > div > div.flex { margin-top: auto; }
+    .metrics-grid > div[hidden] { display: none; }
+    .chart-hover-tip {
+      display: none;
+      position: absolute;
+      z-index: 20;
+      pointer-events: none;
+      padding: 6px 8px;
+      border: 1px solid #2d6079;
+      border-radius: 4px;
+      background: rgba(3, 17, 30, .96);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
+      color: #d7f3fa;
+      font-size: 9px;
+      line-height: 1.45;
+      white-space: nowrap;
+    }
+    .heatmap-plot:hover .chart-hover-tip,
+    .heatmap-plot:focus .chart-hover-tip,
+    .comparison-plot:hover .chart-hover-tip,
+    .comparison-plot:focus .chart-hover-tip,
+    .timeline-plot:hover .chart-hover-tip,
+    .timeline-plot:focus .chart-hover-tip { display: block; }
+    .heatmap-plot:focus-visible, .comparison-plot:focus-visible, .timeline-plot:focus-visible { outline: 2px solid #43d4f6; outline-offset: 2px; }
+    @media (max-width: 1500px) {
+      .metrics-catalog .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    .waterfall-panel { border-color: #1a3d55; background: #030b14; }
+    .waterfall-header {
+      min-height: 45px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 12px;
+      border-bottom: 1px solid #1e3f52;
+      background: linear-gradient(90deg, #081d2e, #071828);
+    }
+    .waterfall-heading { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .waterfall-heading strong { color: #d9f0f6; font-size: 11px; letter-spacing: .06em; white-space: nowrap; }
+    .waterfall-heading small { color: #84aabd; font-size: 9px; font-weight: 400; white-space: nowrap; }
+    .waterfall-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .waterfall-actions button {
+      min-height: 24px;
+      border: 1px solid #2a5267;
+      border-radius: 4px;
+      background: #10283a;
+      color: #c7e0ed;
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .waterfall-actions button:hover { background: #173a50; border-color: #3e7a95; }
+    .waterfall-actions .waterfall-playback { background: #0b302e; border-color: #1b695e; color: #8ff0cf; }
+    .waterfall-playback[aria-pressed="true"] .playback-dot { animation: pulse 1.5s ease-in-out infinite; }
+    .waterfall-playback[aria-pressed="false"] { background: #252c35; border-color: #59616c; color: #b5c1ca; }
+    .waterfall-chart { cursor: crosshair; border-color: #1e4a62; background: #020a12; }
+    .waterfall-panel button:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Receiver status bar */
+    .wf-status-bar {
+      display: flex; align-items: center; gap: 0; flex-shrink: 0;
+      background: #051320; border: 1px solid #193547;
+      border-radius: 3px; overflow: hidden; font-size: 9.5px;
+    }
+    .wf-status-cell {
+      display: flex; flex-direction: column; padding: 4px 10px;
+      border-right: 1px solid #183044;
+    }
+    .wf-status-cell:last-child { border-right: none; }
+    .wf-status-label { color: #4e7a91; font-size: 8px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 1px; }
+    .wf-status-value { color: #c8e8f5; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .wf-status-value.active { color: #34d9a2; }
+    .wf-status-value.warn { color: #f5c842; }
+    /* AI decision panel */
+    .wf-ai-panel {
+      width: 130px; flex-shrink: 0; background: #040f1c;
+      border-left: 1px solid #193547; display: flex; flex-direction: column;
+      font-size: 9.5px; overflow: hidden;
+    }
+    .wf-ai-section {
+      padding: 5px 8px; border-bottom: 1px solid #142535;
+    }
+    .wf-ai-section:last-child { border-bottom: none; flex: 1; }
+    .wf-ai-key { color: #4e7a91; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+    .wf-ai-val { color: #b8dcea; font-weight: 600; line-height: 1.3; }
+    .wf-ai-val.highlight { color: #27cfaa; }
+    .wf-ai-val.next { color: #7fc5e8; }
+    .wf-conf-bar { height: 3px; background: #0d2235; border-radius: 2px; margin-top: 3px; overflow: hidden; }
+    .wf-conf-fill { height: 100%; background: linear-gradient(90deg, #0d9f74, #2fe8aa); border-radius: 2px; transition: width .4s ease; }
+    /* Event timeline strip */
+    .wf-event-timeline {
+      height: 32px; flex-shrink: 0; background: #040d18; border-top: 1px solid #142737;
+      position: relative; overflow: hidden;
+    }
+    .wf-event-timeline canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    /* Main waterfall layout wrapper */
+    .wf-main-area {
+      display: flex; flex: 1; min-height: 0; gap: 0;
+    }
+    .wf-chart-col {
+      flex: 1; min-width: 0; display: flex; flex-direction: column;
+    }
+    /* Tooltip */
+    .waterfall-tooltip {
+      position: absolute; z-index: 30; pointer-events: none; display: none;
+      min-width: 144px; padding: 7px 9px; border: 1px solid #1e5c74;
+      border-radius: 4px; background: rgba(3,14,26,.96);
+      box-shadow: 0 10px 24px rgba(0,0,0,.45);
+      color: #dff4fe; font-size: 10px; line-height: 1.55;
+    }
+    .waterfall-chart:hover .waterfall-tooltip { display: block; }
+    /* Legend */
+    .waterfall-legend {
+      display: flex; flex-wrap: wrap; justify-content: flex-start;
+      column-gap: 14px; row-gap: 3px;
+      padding: 4px 8px; border-top: 1px solid rgba(40,80,106,.4);
+      font-size: 8.5px; color: #7aa8bc;
+    }
+    .waterfall-legend > div { white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+    .waterfall-panel:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
+    .waterfall-panel:fullscreen .wf-chart-col { margin-bottom: 0; }
+    .tactical-shell { min-height: 0; }
+    .tactical-charts { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(190px, .85fr); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 10px; min-width: 0; overflow: hidden; }
+    .tactical-charts[data-view="all"] #chart-signal { grid-row: 1 / -1; }
+    .tactical-chart { min-width: 0; width: auto; height: 100%; border: 1px solid #214056; border-radius: 5px; background: #050e19; box-shadow: inset 0 1px 0 rgba(106, 206, 227, .04); cursor: pointer; }
+    .tactical-charts[data-view="signal"] #chart-signal, .tactical-charts[data-view="iq"] #chart-iq, .tactical-charts[data-view="freq"] #chart-freq { border-color: #24bce4; box-shadow: inset 0 0 0 1px rgba(36, 188, 228, .2); }
+    .chart-expand { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border: 1px solid #294c61; border-radius: 3px; background: #10283b; color: #9bd5e9; }
+    .chart-expand:hover, .chart-expand:focus-visible { border-color: #27c3ee; color: #eefcff; outline: none; }
+    .tactical-chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 25px; color: #d7edf5; font-size: 10px; font-weight: 600; letter-spacing: .025em; }
+    .tactical-chart-heading small { color: #719bb0; font-size: 9px; font-weight: 400; letter-spacing: 0; }
+    .tactical-key { display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 3px 0 5px; color: #8db2c2; font-size: 9px; border-bottom: 1px solid #1c3a4c; }
+    .tactical-chart-details { display: none; align-items: center; gap: 14px; padding: 8px 3px 1px; color: #8eacbb; font-size: 11px; border-top: 1px solid #1c3a4c; }
+    .tactical-chart-details strong { color: #dceef5; font-weight: 600; }
+    .tactical-charts[data-view="signal"] #chart-signal .tactical-chart-details, .tactical-charts[data-view="iq"] #chart-iq .tactical-chart-details, .tactical-charts[data-view="freq"] #chart-freq .tactical-chart-details { display: flex; }
+    .tactical-chart:focus-within, .tactical-chart:hover { border-color: #3482a0; }
+    .tactical-charts[data-view="signal"], .tactical-charts[data-view="iq"], .tactical-charts[data-view="freq"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+    .tactical-charts[data-view="signal"] #chart-signal { grid-row: auto; }
+    .tactical-charts[data-view="signal"] #chart-iq, .tactical-charts[data-view="signal"] #chart-freq,
+    .tactical-charts[data-view="iq"] #chart-signal, .tactical-charts[data-view="iq"] #chart-freq,
+    .tactical-charts[data-view="freq"] #chart-signal, .tactical-charts[data-view="freq"] #chart-iq { display: none; }
+    .tactical-charts[data-view="all"] .chart-focus-label { display: none; }
+    .tactical-chart .chart-focus-label { color: #8eb3c3; font-size: 10px; }
+    .tactical-chart:focus-within { outline: 1px solid #24bce4; outline-offset: -1px; }
+    .heatmap-mode, .comparison-chart { transition: border-color .2s ease, box-shadow .2s ease; }
+    .heatmap-mode:hover, .comparison-chart:hover { border-color: #2b8cae; box-shadow: inset 0 0 0 1px rgba(30, 193, 224, .12); }
+    .health-body { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 10px 13px 12px; }
+    .health-row { display: flex; justify-content: space-between; align-items: center; min-height: 34px; gap: 8px; border-bottom: 1px solid #153347; color: #b9d1dc; font-size: 11px; }
+    .health-row span:last-child { white-space: nowrap; font-size: 10px; font-weight: 600; }
+    .health-summary { margin-top: auto; padding: 12px 10px; border: 1px solid #1a5b4a; border-radius: 5px; background: linear-gradient(120deg, #083327, #071c21); }
+    .health-summary strong { display: block; color: #8ff4bf; font-size: 23px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+    .health-summary span { display: block; margin-top: 6px; color: #b1d8cc; font-size: 10px; letter-spacing: .07em; }
+    .reference-grid, .reference-navbar { font-variant-numeric: tabular-nums; }
+    .nav-controls button { min-height: 32px; }
+    .waterfall-actions button { min-height: 28px; }
+    .nav-status[data-state="paused"] { background: #142b42; border-color: #285ba0; color: #98c9ff; }
+    .nav-status[data-state="stopped"] { background: #331822; border-color: #8b3444; color: #ffb4bd; }
+    .reference-navbar { position: relative; z-index: 40; }
+    .settings-popover { position: absolute; z-index: 50; top: calc(100% + 6px); right: 8px; width: 240px; padding: 13px; border: 1px solid #28617d; border-radius: 5px; background: #081827; box-shadow: 0 16px 38px rgba(0,0,0,.56); color: #c9e2eb; }
+    .settings-popover[hidden] { display: none; }
+    .settings-popover strong { display: block; margin-bottom: 10px; color: #e8f8fb; font-size: 12px; }
+    .settings-popover label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid #1c3b50; font-size: 11px; }
+    .settings-popover input { width: 16px; height: 16px; accent-color: #11b9e3; }
+    .reference-grid [class*="text-[7px]"] { font-size: 9px; }
+    .reference-grid [class*="text-[8px]"] { font-size: 9.5px; }
+    .reference-grid [class*="text-[9px]"] { font-size: 10.5px; }
+    .reference-grid .panel-header { min-height: 34px; font-size: 12px; }
+    .waterfall-heading strong { font-size: 12px; }
+    .metrics-table { font-size: 10.5px; }
+    .metrics-table th, .metrics-table td { padding: 5px 7px; }
+    .algorithm-table { font-size: 10.5px; }
+    .algorithm-table { table-layout: fixed; }
+    .algorithm-table th { white-space: normal; line-height: 1.2; }
+    .algorithm-table td { white-space: nowrap; }
+    .algorithm-table th:first-child { width: 92px; }
+
+    @media (max-width: 1235px) {
+      .extended-left { grid-template-rows: 300px 300px; }
+      .extended-right { grid-template-rows: 400px 200px; }
+      .waterfall-chart { margin-bottom: 72px; }
+      .waterfall-legend { column-gap: 10px; }
+      .waterfall-heading small { display: none; }
+      .waterfall-heading strong { font-size: 10px; }
+    }
+
+    @media (max-width: 1235px) {
+      .reference-navbar {
+        width: 1176px;
+        margin-left: 8px;
+        margin-right: 8px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .reference-navbar > div { width: 100%; gap: 10px; }
+      .reference-navbar > div:last-child { justify-content: flex-end; }
+      .reference-navbar .nav-stats { gap: 5px; padding-left: 5px; padding-right: 5px; }
+      .reference-navbar .nav-progress { width: 170px; }
+      .reference-navbar .nav-controls { gap: 4px; }
+      .reference-grid {
+        width: 1176px;
+        margin-left: 8px;
+        margin-right: 8px;
+        grid-template-rows: 500px 310px minmax(280px, auto);
+      }
+    }
+    @media (max-width: 1180px) {
+      .reference-navbar { width: calc(100vw - 20px); min-width: 0 !important; margin: 8px 10px 0; }
+      .reference-navbar > div:first-child { flex-wrap: wrap; }
+      .reference-grid { width: calc(100vw - 20px); min-width: 0; margin: 0 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: auto; }
+      .reference-grid > * { grid-row: auto; min-width: 0; }
+      .reference-grid > .mission-config { grid-column: 1; height: auto; min-height: 420px; }
+      .reference-grid > #waterfall-panel { grid-column: 2; height: 420px; }
+      .reference-grid > .right-stack, .reference-grid > .tactical-panel, .reference-grid > .band-panel, .reference-grid > .bottom-dashboard-row, .reference-grid > .extended-analytics { grid-column: 1 / -1; }
+      .right-stack { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); height: auto; min-height: 285px; }
+      .right-stack > .dashboard-panel { min-height: 0; }
+      .tactical-panel { height: 400px; }
+      .band-panel { height: 300px; }
+      .bottom-dashboard-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); min-height: 0; }
+      .bottom-dashboard-row > .reference-performance, .bottom-dashboard-row > .reference-ledger { min-height: 285px; }
+      .bottom-dashboard-row > .reference-why { grid-column: 1 / -1; min-height: 180px; }
+      .extended-analytics { display: block; }
+      .extended-left { grid-template-rows: 270px 320px; }
+      .extended-right { display: block; margin-top: 8px; }
+      .extended-right-top { display: grid; grid-template-columns: 1fr; height: auto; }
+      .extended-right-top > .dashboard-panel { grid-column: 1 / -1; }
+      .extended-right-top > .dashboard-panel:first-child { min-height: 260px; }
+      .extended-right-top > .dashboard-panel:last-child { min-height: 420px; }
+      .extended-right > .timeline-panel { min-height: 195px; margin-top: 8px; }
+      .waterfall-heading strong { font-size: 12px; }
+    }
+    @media (max-width: 760px) {
+      .reference-grid { display: flex; flex-direction: column; }
+      .reference-grid > .mission-config { min-height: 300px; }
+      .reference-grid > #waterfall-panel { min-height: 410px; }
+      .right-stack { display: flex; flex-direction: column; min-height: 0; }
+      .right-stack > .dashboard-panel { min-height: 235px; }
+      .right-stack > .dashboard-panel:first-child { min-height: 170px; }
+      .tactical-panel { height: auto !important; min-height: 0; }
+      .tactical-shell { height: auto !important; flex-direction: column; }
+      .tactical-shell > div:first-child { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; width: 100%; align-content: start; }
+      .tactical-shell > div:first-child > :first-child, .tactical-shell > div:first-child > :nth-child(9), .tactical-shell > div:first-child > :nth-child(10) { grid-column: 1 / -1; }
+      .tactical-shell > div:first-child > :nth-child(4), .tactical-shell > div:first-child > :nth-child(8) { display: none; }
+      .tactical-charts { height: 350px; min-height: 350px; flex: none; }
+      .bottom-dashboard-row { grid-template-columns: 1fr; }
+      .bottom-dashboard-row > .dashboard-panel { grid-column: 1 / -1; min-height: 245px; }
+      .extended-left { grid-template-rows: 300px 360px; }
+      .extended-right-top > .dashboard-panel:last-child { min-height: 550px; }
+      .loop-panel-body { flex-direction: column; }
+      .comparison-chart { min-height: 245px; }
+      .metrics-catalog .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    /* Premium command-centre pass: stronger hierarchy, quieter chrome, richer depth. */
+    :root {
+      color-scheme: dark;
+      --ink-0: #020811;
+      --ink-1: #06121d;
+      --ink-2: #091a28;
+      --ink-3: #0d2232;
+      --line-soft: rgba(96, 170, 198, .16);
+      --line-mid: rgba(80, 168, 201, .32);
+      --cyan-hot: #39d9f5;
+      --cyan-soft: #8bd8e9;
+      --green-hot: #39e5a7;
+    }
+
+    html {
+      background: var(--ink-0);
+      scroll-behavior: smooth;
+    }
+
+    body {
+      position: relative;
+      background:
+        radial-gradient(1100px 620px at 50% -14%, rgba(11, 88, 125, .22), transparent 62%),
+        radial-gradient(680px 500px at 100% 18%, rgba(10, 46, 81, .14), transparent 68%),
+        linear-gradient(180deg, #020811 0%, #030b15 54%, #020711 100%);
+      color: #c5d9e4;
+      letter-spacing: .005em;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .2;
+      background-image:
+        linear-gradient(rgba(71, 147, 178, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(71, 147, 178, .035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,.9), transparent 86%);
+    }
+
+    .reference-navbar {
+      position: sticky;
+      top: 8px;
+      isolation: isolate;
+      width: calc(100vw - 40px);
+      min-height: 54px;
+      margin-top: 10px;
+      border: 1px solid rgba(74, 171, 204, .36);
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(8, 29, 45, .96), rgba(3, 14, 24, .94));
+      box-shadow: 0 16px 34px rgba(0, 0, 0, .34), 0 0 0 1px rgba(4, 20, 31, .84) inset, 0 0 34px rgba(18, 145, 178, .08);
+      backdrop-filter: blur(14px);
+    }
+
+    .reference-navbar::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      left: 18px;
+      right: 18px;
+      bottom: -1px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(46, 214, 244, .9) 18%, rgba(46, 214, 244, .3) 82%, transparent);
+      box-shadow: 0 0 14px rgba(46, 214, 244, .48);
+    }
+
+    .nav-logo {
+      letter-spacing: .16em;
+    }
+
+    .nav-logo i {
+      filter: drop-shadow(0 0 7px rgba(57, 217, 245, .65));
+    }
+
+    .nav-title span:first-child {
+      font-size: 12px;
+      letter-spacing: .1em;
+    }
+
+    .nav-title span:last-child {
+      letter-spacing: .14em;
+      color: #56cae4;
+    }
+
+    .nav-stats {
+      border-color: rgba(67, 151, 181, .28) !important;
+      background: rgba(3, 14, 26, .64) !important;
+      border-radius: 7px !important;
+      box-shadow: inset 0 1px 0 rgba(131, 221, 242, .08), 0 5px 16px rgba(0,0,0,.16) !important;
+    }
+
+    .nav-stats .text-cyan-400,
+    .nav-stats .text-cyan-500 { color: var(--cyan-hot) !important; }
+
+    .nav-status {
+      border-radius: 999px !important;
+      padding-inline: 11px !important;
+      box-shadow: 0 0 18px rgba(38, 217, 164, .11), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+
+    .nav-status[data-state="playing"] > div { box-shadow: 0 0 0 3px rgba(55, 224, 166, .1), 0 0 11px currentColor; }
+
+    .nav-progress {
+      padding: 4px 0 3px;
+      min-width: 182px;
+    }
+
+    .nav-progress > div { column-gap: 12px; }
+    .nav-progress > div:nth-child(2) span { white-space: nowrap; }
+
+    .reference-navbar > .settings-popover {
+      width: min(240px, calc(100vw - 30px)) !important;
+    }
+
+    .nav-progress > div:last-child {
+      height: 4px !important;
+      background: rgba(98, 142, 162, .18) !important;
+      box-shadow: inset 0 0 0 1px rgba(104, 182, 204, .12);
+    }
+
+    .nav-progress #mission-progress {
+      background: linear-gradient(90deg, #18b8df, #6af1dd) !important;
+      box-shadow: 0 0 12px rgba(57, 217, 245, .7) !important;
+    }
+
+    .nav-controls button,
+    .waterfall-actions button {
+      border-radius: 6px !important;
+      border: 1px solid rgba(97, 171, 195, .28) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.16);
+      transition: transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .nav-controls button:hover,
+    .waterfall-actions button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(118, 217, 237, .66) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 7px 18px rgba(0,0,0,.28), 0 0 14px rgba(42, 190, 224, .12);
+    }
+
+    .dashboard-panel {
+      position: relative;
+      border-color: var(--line-mid) !important;
+      border-radius: 8px !important;
+      background: linear-gradient(145deg, rgba(9, 27, 42, .98), rgba(3, 14, 24, .98)) !important;
+      box-shadow: 0 12px 28px rgba(0,0,0,.25), inset 0 1px 0 rgba(152, 226, 241, .045), inset 0 0 0 1px rgba(5, 19, 31, .74) !important;
+      transition: border-color .22s ease, box-shadow .22s ease, transform .22s ease;
+    }
+
+    .dashboard-panel:hover {
+      border-color: rgba(93, 195, 222, .5) !important;
+      box-shadow: 0 16px 34px rgba(0,0,0,.3), inset 0 1px 0 rgba(152, 226, 241, .07), inset 0 0 0 1px rgba(5, 19, 31, .74), 0 0 22px rgba(30, 170, 204, .045) !important;
+    }
+
+    .panel-header {
+      position: relative;
+      min-height: 38px !important;
+      padding: 9px 12px !important;
+      color: #d7edf5 !important;
+      background: linear-gradient(90deg, rgba(12, 36, 54, .98), rgba(7, 21, 34, .76)) !important;
+      border-bottom-color: rgba(84, 159, 184, .28) !important;
+      letter-spacing: .075em;
+      font-size: 11px !important;
+      text-shadow: 0 0 12px rgba(120, 224, 242, .08);
+    }
+
+    .panel-header::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: -1px;
+      width: 54px;
+      height: 1px;
+      background: var(--cyan-hot);
+      box-shadow: 0 0 12px rgba(57, 217, 245, .66);
+    }
+
+    .panel-header > i,
+    .panel-header i {
+      color: #58d5eb !important;
+      filter: drop-shadow(0 0 5px rgba(57, 217, 245, .25));
+    }
+
+    .panel-header select,
+    .tactical-panel select,
+    .reference-performance select,
+    #metrics-filter {
+      min-height: 26px;
+      border: 1px solid rgba(99, 184, 212, .34) !important;
+      border-radius: 5px !important;
+      background: rgba(5, 20, 32, .9) !important;
+      color: #bde5ee !important;
+      padding-inline: 9px !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    .panel-header select:hover,
+    .tactical-panel select:hover,
+    .reference-performance select:hover,
+    #metrics-filter:hover { border-color: rgba(104, 214, 237, .72) !important; }
+
+    .mission-config > .p-2\.5,
+    .mission-config > .p-3,
+    .right-stack .p-3 {
+      background: linear-gradient(180deg, rgba(4, 17, 28, .08), rgba(7, 20, 33, .32));
+    }
+
+    .mission-config > .p-2\.5 > div,
+    .mission-config > .p-3 > div {
+      min-height: 24px;
+      padding: 3px 5px;
+      border-bottom: 1px solid rgba(79, 144, 168, .11);
+      border-radius: 4px;
+    }
+
+    .mission-config > .p-2\.5 > div:last-child,
+    .mission-config > .p-3 > div:last-child { border-bottom: 0; }
+
+    .mission-config > .p-2\.5 > div:hover,
+    .mission-config > .p-3 > div:hover {
+      background: rgba(39, 163, 191, .08);
+    }
+
+    .waterfall-panel {
+      border-color: rgba(77, 186, 213, .48) !important;
+      background: linear-gradient(150deg, rgba(7, 28, 44, .99), rgba(2, 12, 21, .99)) !important;
+      box-shadow: 0 18px 38px rgba(0,0,0,.34), inset 0 1px 0 rgba(130, 220, 237, .07), 0 0 28px rgba(30, 177, 209, .06) !important;
+    }
+
+    .waterfall-header {
+      min-height: 56px;
+      padding: 8px 13px;
+      background: linear-gradient(90deg, rgba(10, 39, 57, .98), rgba(6, 22, 35, .9));
+      border-bottom-color: rgba(86, 179, 206, .34);
+    }
+
+    .waterfall-heading strong { letter-spacing: .12em; font-size: 13px; }
+    .waterfall-heading small { color: #7faebe; letter-spacing: .02em; }
+    .waterfall-chart { border-color: rgba(76, 166, 195, .45) !important; box-shadow: inset 0 0 0 1px rgba(109, 218, 238, .05), 0 8px 22px rgba(0,0,0,.2); }
+    .waterfall-legend { color: #a3c7d3 !important; }
+
+    .metrics-table tbody tr { transition: background .16s ease; }
+    .metrics-table tbody tr:hover td { background: rgba(50, 164, 193, .1) !important; }
+    .metrics-table th { letter-spacing: .11em; color: #6faec4 !important; }
+    .metrics-table td { color: #a9c5d1; }
+    .metrics-table .metric-value { color: #e2f3f7; }
+
+    .tactical-panel .tactical-shell { padding: 12px !important; gap: 12px; }
+    .tactical-chart { border-color: rgba(75, 152, 179, .32) !important; border-radius: 7px; background: linear-gradient(145deg, rgba(7, 25, 39, .92), rgba(3, 14, 24, .9)); box-shadow: inset 0 1px 0 rgba(135, 222, 239, .055), 0 6px 16px rgba(0,0,0,.12); }
+    .tactical-chart:hover, .tactical-chart:focus-within { border-color: rgba(64, 207, 236, .76) !important; box-shadow: inset 0 0 0 1px rgba(63, 202, 232, .22), 0 8px 22px rgba(0,0,0,.23), 0 0 18px rgba(34, 189, 221, .08); }
+    .tactical-chart-heading { letter-spacing: .07em; }
+    .tactical-key { color: #94bac8; border-bottom-color: rgba(80, 157, 181, .2); }
+    .chart-expand { border-radius: 5px; background: rgba(17, 46, 64, .82); }
+
+    .band-panel .flex-1.p-2 { padding: 14px 13px 13px !important; gap: 18px; }
+    .band-panel canvas { filter: saturate(1.08) drop-shadow(0 0 5px rgba(12, 150, 214, .08)); }
+
+    .reference-ledger table thead { background: rgba(10, 31, 46, .9) !important; }
+    .reference-ledger table tbody tr { transition: background .16s ease, transform .16s ease; }
+    .reference-ledger table tbody tr:hover { background: rgba(42, 177, 204, .1) !important; }
+    .reference-ledger table tbody tr.bg-cyan-950\/40 { background: linear-gradient(90deg, rgba(3, 86, 111, .34), rgba(2, 47, 68, .18)) !important; box-shadow: inset 2px 0 0 #39d9f5; }
+
+    .reference-why .decision-metric {
+      padding: 7px 8px;
+      border: 1px solid rgba(78, 150, 176, .12);
+      border-radius: 5px;
+      background: rgba(4, 17, 28, .3);
+    }
+
+    .extended-analytics {
+      margin-top: 20px !important;
+      padding-top: 20px !important;
+      border-top-color: rgba(83, 156, 182, .28) !important;
+    }
+
+    .extended-analytics .dashboard-panel { box-shadow: 0 10px 26px rgba(0,0,0,.2), inset 0 1px 0 rgba(152,226,241,.04) !important; }
+
+    .health-summary { border-radius: 8px; box-shadow: inset 0 1px 0 rgba(148, 255, 207, .1), 0 0 24px rgba(25, 202, 146, .09); }
+    .health-summary strong { text-shadow: 0 0 18px rgba(57, 229, 167, .35); }
+
+    .metrics-grid > div { border-radius: 8px !important; border-color: rgba(73, 149, 178, .34) !important; box-shadow: inset 0 1px 0 rgba(132, 222, 239, .06), 0 8px 18px rgba(0,0,0,.14); }
+    .metrics-grid > div:hover { transform: translateY(-2px); border-color: rgba(73, 205, 229, .68) !important; box-shadow: inset 0 1px 0 rgba(132, 222, 239, .1), 0 12px 24px rgba(0,0,0,.24), 0 0 16px rgba(30, 185, 219, .07); }
+
+    button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid rgba(88, 220, 241, .9) !important;
+      outline-offset: 2px;
+    }
+
+    input[type="checkbox"] { accent-color: var(--cyan-hot); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .001ms !important;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .reference-navbar { position: relative; top: auto; width: calc(100vw - 20px); }
+    }
+
+    @media (max-width: 760px) {
+      .reference-navbar { border-radius: 8px; }
+      .reference-navbar > div:first-child { gap: 8px; }
+      .nav-stats { order: 3; width: 100%; overflow-x: auto; }
+      .nav-progress { width: 184px !important; min-width: 184px; }
+      .panel-header { min-height: 36px !important; padding: 8px 10px !important; }
+    }
+
+    /* Refined analytics surfaces: make dense metrics feel like instruments, not form fields. */
+    .metrics-catalog {
+      overflow: hidden;
+      background: linear-gradient(150deg, rgba(8, 28, 43, .98), rgba(3, 14, 24, .98)) !important;
+    }
+
+    .metrics-catalog .metrics-grid {
+      gap: 12px;
+      padding: 14px !important;
+      background: linear-gradient(180deg, rgba(4, 15, 26, .34), rgba(3, 13, 22, .08));
+    }
+
+    .metrics-grid > div {
+      position: relative;
+      isolation: isolate;
+      padding: 12px !important;
+      overflow: hidden;
+      background:
+        radial-gradient(180px 90px at 100% 0%, rgba(27, 143, 174, .12), transparent 70%),
+        linear-gradient(150deg, rgba(10, 35, 51, .92), rgba(5, 19, 31, .95)) !important;
+    }
+
+    .metrics-grid > div::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      left: 12px;
+      right: 12px;
+      bottom: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(71, 214, 235, .6), transparent);
+      opacity: .55;
+    }
+
+    .metrics-grid > div:not(:has(> div.flex))::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      height: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(56, 224, 192, .72), rgba(56, 224, 192, .08) 72%, transparent);
+      box-shadow: 0 0 10px rgba(56, 224, 192, .18);
+      opacity: .72;
+    }
+
+    .metrics-grid > div:nth-child(5n + 3):not(:has(> div.flex))::before,
+    .metrics-grid > div:nth-child(5n + 5):not(:has(> div.flex))::before {
+      background: linear-gradient(90deg, rgba(54, 201, 239, .72), rgba(54, 201, 239, .08) 72%, transparent);
+      box-shadow: 0 0 10px rgba(54, 201, 239, .18);
+    }
+
+    .metrics-grid > div > span:first-child {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 12px !important;
+      color: #e5f6fb !important;
+      font-size: 11px !important;
+      letter-spacing: .025em;
+    }
+
+    .metrics-grid > div > span:first-child::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      flex: none;
+      border-radius: 999px;
+      background: #39d9f5;
+      box-shadow: 0 0 9px rgba(57, 217, 245, .7);
+    }
+
+    .metrics-grid > div:nth-child(5n + 2) > span:first-child::before { background: #39e5a7; box-shadow: 0 0 9px rgba(57, 229, 167, .62); }
+    .metrics-grid > div:nth-child(5n + 3) > span:first-child::before { background: #68a5ff; box-shadow: 0 0 9px rgba(104, 165, 255, .62); }
+    .metrics-grid > div:nth-child(5n + 4) > span:first-child::before { background: #e1ac56; box-shadow: 0 0 9px rgba(225, 172, 86, .56); }
+
+    .metrics-grid > div > div.grid { gap: 6px !important; }
+
+    .metrics-grid > div > div.grid > div {
+      position: relative;
+      min-height: 56px !important;
+      padding: 8px 5px !important;
+      border: 1px solid rgba(86, 151, 177, .32) !important;
+      border-radius: 6px !important;
+      background: linear-gradient(180deg, rgba(4, 18, 30, .86), rgba(5, 23, 36, .56)) !important;
+      box-shadow: inset 0 1px 0 rgba(164, 231, 244, .045);
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+
+    .metrics-grid > div > div.grid > div:hover {
+      transform: translateY(-1px);
+      border-color: rgba(95, 215, 237, .65) !important;
+      background: linear-gradient(180deg, rgba(7, 32, 48, .96), rgba(5, 22, 35, .76)) !important;
+    }
+
+    .metrics-grid > div > div.grid > div > div:first-child {
+      color: #91b8c8 !important;
+      font-size: 8px !important;
+      font-weight: 600;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+
+    .metrics-grid > div > div.grid > div > div:last-child {
+      margin-top: 7px !important;
+      color: #38e0c0;
+      font-size: 15px !important;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      text-shadow: 0 0 12px rgba(44, 224, 192, .22);
+    }
+
+    .metrics-grid > div:nth-child(5n + 3) > div.grid > div > div:last-child,
+    .metrics-grid > div:nth-child(5n + 5) > div.grid > div > div:last-child { color: #36c9ef; text-shadow: 0 0 12px rgba(54, 201, 239, .2); }
+
+    .metrics-grid > div > div.flex {
+      gap: 8px;
+      margin-top: 12px !important;
+      padding-top: 10px !important;
+      border-top-color: rgba(83, 153, 179, .24) !important;
+    }
+
+    .metrics-grid > div > div.flex > div {
+      min-width: 0;
+      flex: 1;
+      padding: 6px 8px;
+      border: 1px solid rgba(72, 147, 174, .2);
+      border-radius: 5px;
+      background: rgba(3, 18, 29, .42);
+    }
+
+    .metrics-grid > div > div.flex > div > div:first-child { letter-spacing: .04em; text-transform: uppercase; }
+    .metrics-grid > div > div.flex > div > div:last-child { margin-top: 3px; font-size: 14px; font-weight: 700; }
+
+    /* Timeline rail: clearer lanes, stronger event hierarchy, and a premium scan surface. */
+    .timeline-panel {
+      overflow: hidden;
+      background: linear-gradient(150deg, rgba(8, 28, 43, .98), rgba(3, 14, 24, .98)) !important;
+    }
+
+    .timeline-panel .chart-bg {
+      padding: 14px 14px 16px !important;
+      background:
+        radial-gradient(500px 160px at 70% 0%, rgba(13, 94, 123, .14), transparent 70%),
+        linear-gradient(180deg, rgba(3, 17, 29, .94), rgba(4, 15, 25, .98)) !important;
+    }
+
+    .timeline-lanes {
+      margin-left: 138px;
+      margin-right: 12px;
+      border: 1px solid rgba(75, 153, 181, .38) !important;
+      border-radius: 7px;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(145, 224, 240, .05), 0 8px 18px rgba(0,0,0,.16);
+    }
+
+    .timeline-labels {
+      left: -138px !important;
+      width: 124px !important;
+      padding-right: 14px !important;
+      color: #b8d2dc !important;
+      letter-spacing: .03em;
+    }
+
+    .timeline-labels span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      min-height: 22px;
+      padding: 0 8px;
+      border-right: 2px solid rgba(52, 191, 221, .52);
+      border-radius: 4px 0 0 4px;
+      background: linear-gradient(90deg, rgba(7, 32, 47, .3), rgba(7, 32, 47, .78));
+      color: #bcd7e1;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .075em;
+    }
+
+    .timeline-plot { inset: 0 !important; }
+    .timeline-plot::after {
+      content: "LIVE WINDOW";
+      position: absolute;
+      top: 7px;
+      right: 9px;
+      padding: 3px 6px;
+      border: 1px solid rgba(79, 192, 214, .32);
+      border-radius: 4px;
+      background: rgba(4, 22, 34, .72);
+      color: #83c6d5;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      pointer-events: none;
+    }
+
+    .timeline-panel .chart-hover-tip {
+      padding: 8px 10px;
+      border-color: rgba(79, 201, 226, .58);
+      border-radius: 6px;
+      background: rgba(3, 18, 30, .96);
+      box-shadow: 0 12px 25px rgba(0,0,0,.36), 0 0 14px rgba(39, 182, 215, .08);
+      font-size: 10px;
+    }
+
+    /* Monochrome graphite theme: keep telemetry accents, move every surface to black and grey. */
+    :root {
+      --ink-0: #030405;
+      --ink-1: #07090b;
+      --ink-2: #0d1013;
+      --ink-3: #15191d;
+      --line-soft: rgba(181, 191, 199, .13);
+      --line-mid: rgba(139, 150, 159, .34);
+      --graphite-0: #050607;
+      --graphite-1: #0a0c0e;
+      --graphite-2: #111417;
+      --graphite-3: #1a1e22;
+      --silver: #d7dce0;
+      --muted-silver: #8e989f;
+    }
+
+    html { background: #030405; }
+
+    body {
+      background:
+        radial-gradient(900px 520px at 50% -18%, rgba(126, 137, 146, .1), transparent 66%),
+        radial-gradient(720px 500px at 100% 18%, rgba(92, 101, 108, .055), transparent 70%),
+        linear-gradient(180deg, #030405 0%, #07090b 54%, #020303 100%);
+      color: #c9cdd1;
+    }
+
+    body::before {
+      opacity: .16;
+      background-image:
+        linear-gradient(rgba(215, 220, 224, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(215, 220, 224, .035) 1px, transparent 1px);
+    }
+
+    .reference-navbar {
+      border-color: rgba(174, 184, 192, .34) !important;
+      background: linear-gradient(180deg, rgba(22, 25, 28, .98), rgba(7, 9, 11, .98)) !important;
+      box-shadow: 0 16px 34px rgba(0, 0, 0, .62), 0 0 0 1px rgba(255,255,255,.04) inset, 0 0 28px rgba(255,255,255,.025) !important;
+    }
+
+    .reference-navbar::after {
+      background: linear-gradient(90deg, transparent, rgba(197, 205, 211, .72) 20%, rgba(120, 132, 141, .2) 82%, transparent);
+      box-shadow: 0 0 12px rgba(187, 198, 205, .22);
+    }
+
+    .nav-stats {
+      border-color: rgba(174, 184, 192, .22) !important;
+      background: rgba(7, 9, 11, .82) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 5px 16px rgba(0,0,0,.34) !important;
+    }
+
+    .nav-title span:last-child { color: #aeb8bf; }
+    .nav-stats .text-slate-100, .nav-progress .text-slate-100 { color: #e1e4e7 !important; }
+    .nav-progress > div:last-child { background: rgba(153, 161, 168, .2) !important; }
+
+    .dashboard-panel {
+      border-color: var(--line-mid) !important;
+      background: linear-gradient(145deg, rgba(20, 23, 26, .98), rgba(6, 8, 10, .99)) !important;
+      box-shadow: 0 12px 28px rgba(0,0,0,.52), inset 0 1px 0 rgba(255,255,255,.045), inset 0 0 0 1px rgba(255,255,255,.02) !important;
+    }
+
+    .dashboard-panel:hover {
+      border-color: rgba(196, 204, 210, .54) !important;
+      box-shadow: 0 16px 34px rgba(0,0,0,.66), inset 0 1px 0 rgba(255,255,255,.07), inset 0 0 0 1px rgba(255,255,255,.025) !important;
+    }
+
+    .panel-header {
+      color: #e0e4e7 !important;
+      background: linear-gradient(90deg, rgba(33, 38, 42, .98), rgba(15, 18, 21, .9)) !important;
+      border-bottom-color: rgba(174, 184, 192, .26) !important;
+      text-shadow: 0 0 12px rgba(255,255,255,.055);
+    }
+
+    .panel-header::after {
+      background: #c1c9cf;
+      box-shadow: 0 0 11px rgba(209, 217, 222, .45);
+    }
+
+    .waterfall-panel {
+      border-color: rgba(176, 188, 196, .44) !important;
+      background: linear-gradient(150deg, rgba(18, 22, 25, .99), rgba(3, 4, 5, .99)) !important;
+      box-shadow: 0 18px 38px rgba(0,0,0,.68), inset 0 1px 0 rgba(255,255,255,.065), 0 0 28px rgba(255,255,255,.03) !important;
+    }
+
+    .waterfall-header {
+      background: linear-gradient(90deg, rgba(34, 40, 44, .98), rgba(15, 18, 20, .94));
+      border-bottom-color: rgba(183, 193, 200, .3);
+    }
+
+    .waterfall-heading strong { color: #edf0f2; }
+    .waterfall-heading small { color: #9ba5ac; }
+    .chart-bg,
+    .timeline-panel .chart-bg,
+    .comparison-chart,
+    .tactical-chart { background-color: #050607 !important; }
+
+    .mission-config > .p-2\.5,
+    .mission-config > .p-3,
+    .right-stack .p-3 { background: linear-gradient(180deg, rgba(255,255,255,.015), rgba(0,0,0,.18)); }
+
+    .mission-config > .p-2\.5 > div,
+    .mission-config > .p-3 > div { border-bottom-color: rgba(179, 188, 195, .1); }
+
+    .mission-config > .p-2\.5 > div:hover,
+    .mission-config > .p-3 > div:hover { background: rgba(255,255,255,.045); }
+
+    .metrics-table th { color: #aab4ba !important; }
+    .metrics-table td { color: #aeb7bd; }
+    .metrics-table tbody tr:hover td { background: rgba(255,255,255,.055) !important; }
+
+    .tactical-chart {
+      border-color: rgba(171, 183, 191, .3) !important;
+      background: linear-gradient(145deg, rgba(24, 28, 31, .92), rgba(5, 7, 9, .95)) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 6px 16px rgba(0,0,0,.4);
+    }
+
+    .tactical-chart:hover,
+    .tactical-chart:focus-within { border-color: rgba(213, 222, 227, .72) !important; box-shadow: inset 0 0 0 1px rgba(220, 228, 232, .2), 0 8px 22px rgba(0,0,0,.58) !important; }
+
+    .metrics-catalog,
+    .timeline-panel { background: linear-gradient(150deg, rgba(20, 23, 26, .98), rgba(5, 7, 9, .99)) !important; }
+
+    .metrics-catalog .metrics-grid { background: linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.12)); }
+
+    .metrics-grid > div {
+      background:
+        radial-gradient(180px 90px at 100% 0%, rgba(180, 190, 197, .08), transparent 70%),
+        linear-gradient(150deg, rgba(30, 35, 39, .92), rgba(8, 10, 12, .96)) !important;
+      border-color: rgba(163, 175, 183, .34) !important;
+    }
+
+    .metrics-grid > div > div.grid > div {
+      border-color: rgba(151, 163, 171, .28) !important;
+      background: linear-gradient(180deg, rgba(11, 14, 17, .92), rgba(26, 30, 34, .58)) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    }
+
+    .metrics-grid > div > div.grid > div:hover { border-color: rgba(221, 228, 232, .64) !important; background: linear-gradient(180deg, rgba(35, 40, 44, .94), rgba(10, 12, 14, .84)) !important; }
+    .metrics-grid > div > div.grid > div > div:first-child { color: #aab4ba !important; }
+    .metrics-grid > div > div.flex > div { border-color: rgba(151, 163, 171, .22); background: rgba(8, 10, 12, .58); }
+
+    .timeline-panel .chart-bg {
+      background:
+        radial-gradient(500px 160px at 70% 0%, rgba(190, 200, 207, .08), transparent 70%),
+        linear-gradient(180deg, rgba(5, 7, 9, .96), rgba(13, 16, 19, .98)) !important;
+    }
+
+    .timeline-lanes { border-color: rgba(161, 173, 181, .38) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 18px rgba(0,0,0,.42); }
+    .timeline-labels span { border-right-color: rgba(199, 208, 214, .54); background: linear-gradient(90deg, rgba(17, 20, 23, .3), rgba(41, 46, 50, .78)); color: #cbd2d7; }
+    .timeline-plot::after { border-color: rgba(191, 201, 207, .32); background: rgba(8, 10, 12, .8); color: #c4ccd1; }
+
+    .settings-popover {
+      border-color: rgba(183, 193, 200, .42);
+      background: #111417;
+      color: #d1d7db;
+      box-shadow: 0 16px 38px rgba(0,0,0,.72), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    .settings-popover label { border-top-color: rgba(174, 184, 192, .18); }
+
+    ::-webkit-scrollbar-track { background: #050607; }
+    ::-webkit-scrollbar-thumb { background: #3b4248; }
+    ::-webkit-scrollbar-thumb:hover { background: #68727a; }
+
+    /* Reference RF dashboard palette: obsidian, carbon panels, neutral zinc text. */
+    :root {
+      --color-panel-bg: #0a0b0e;
+      --color-panel-border: #1a1b20;
+      --color-panel-header: #121316;
+      --ink-0: #000000;
+      --ink-1: #040506;
+      --ink-2: #0a0b0e;
+      --ink-3: #131417;
+      --line-soft: rgba(82, 82, 91, .22);
+      --line-mid: #26272c;
+      --cyan-hot: #38bdf8;
+      --cyan-soft: #a1a1aa;
+      --green-hot: #10b981;
+    }
+
+    html { background: #000 !important; }
+    body {
+      color: #f4f4f5;
+      background: radial-gradient(circle at 50% 0%, rgba(35, 36, 42, .35), transparent 70%), #000 !important;
+    }
+    body::before {
+      opacity: 1;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, .012) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .012) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    .reference-navbar {
+      border-color: #1a1b20 !important;
+      background: #08090b !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.02) !important;
+    }
+    .reference-navbar::after { background: #26272c; box-shadow: none; }
+    .nav-title span:last-child { color: #a1a1aa; }
+    .nav-stats {
+      border-color: #27282e !important;
+      background: #111215 !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03) !important;
+    }
+    .nav-stats .text-slate-100, .nav-progress .text-slate-100 { color: #f4f4f5 !important; }
+    .nav-progress > div:last-child { background: #27272a !important; box-shadow: none; }
+    .nav-progress #mission-progress { background: #38bdf8 !important; box-shadow: 0 0 8px rgba(56,189,248,.35) !important; }
+    #simulation-pause { background: #27272a !important; border-color: #3f3f46 !important; color: #e4e4e7 !important; }
+    #simulation-pause:hover { background: #3f3f46 !important; }
+    #display-settings-button { background: #18191c !important; border-color: #27282e !important; color: #a1a1aa !important; }
+    .nav-controls button, .waterfall-actions button { border-color: #27282e !important; }
+    .nav-controls button:hover, .waterfall-actions button:hover { border-color: #52525b !important; box-shadow: 0 4px 12px rgba(0,0,0,.4) !important; }
+
+    .dashboard-panel, .waterfall-panel, .metrics-catalog, .timeline-panel,
+    .tactical-panel, .heatmap-panel, .loop-panel {
+      border-color: #1a1b20 !important;
+      background: #0a0b0e !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.02) !important;
+    }
+    .dashboard-panel:hover { border-color: #3f3f46 !important; box-shadow: 0 6px 18px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.03) !important; }
+    .extended-analytics .dashboard-panel { box-shadow: 0 4px 16px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.02) !important; }
+    .panel-header, .waterfall-header {
+      color: #f4f4f5 !important;
+      background: #121316 !important;
+      border-bottom-color: #1c1d22 !important;
+      text-shadow: none;
+    }
+    .panel-header::after { background: #52525b; box-shadow: none; }
+    .panel-header i { color: #38bdf8 !important; filter: none; }
+    .waterfall-heading strong { color: #f4f4f5; }
+    .waterfall-heading small, .waterfall-legend { color: #a1a1aa !important; }
+    .waterfall-chart { border-color: #26272c !important; box-shadow: none; }
+    .chart-bg, .tactical-chart .chart-bg, .comparison-chart .chart-bg,
+    .heatmap-panel .chart-bg, .timeline-panel .chart-bg,
+    .heatmap-plot, .comparison-plot { background: #040506 !important; }
+
+    .panel-header select, .tactical-panel select, .reference-performance select,
+    #metrics-filter, .settings-popover {
+      border-color: #3f3f46 !important;
+      background: #131417 !important;
+      color: #e4e4e7 !important;
+    }
+    .panel-header select:hover, .tactical-panel select:hover,
+    .reference-performance select:hover, #metrics-filter:hover { border-color: #71717a !important; }
+    .settings-popover label { border-top-color: #26272c; }
+    .mission-config > .p-2\.5, .mission-config > .p-3,
+    .right-stack .p-3, .metrics-catalog .metrics-grid { background: transparent !important; }
+    .mission-config > .p-2\.5 > div, .mission-config > .p-3 > div { border-bottom-color: #1c1d22; }
+    .mission-config > .p-2\.5 > div:hover, .mission-config > .p-3 > div:hover { background: #18191c; }
+
+    .metrics-table th, .algorithm-table thead th { color: #a1a1aa !important; background: #0e0f12 !important; }
+    .metrics-table td, .algorithm-table td { color: #d4d4d8; }
+    .metrics-table tbody tr + tr td, .algorithm-table tbody tr + tr td { border-top-color: #1c1d22 !important; }
+    .metrics-table tbody tr:hover td, .algorithm-table tbody tr:hover td { background: #18191c !important; }
+    .reference-ledger table thead { background: #0e0f12 !important; }
+    .reference-ledger table tbody tr:hover { background: #18191c !important; }
+    .reference-ledger table tbody tr.bg-cyan-950\/40 { background: #111215 !important; }
+    .reference-why .decision-metric { border-color: #1c1d22; background: #0e0f12; }
+    .extended-analytics { border-top-color: #26272c !important; }
+
+    .tactical-chart, .comparison-chart {
+      border-color: #26272c !important;
+      background: #0e0f12 !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.02) !important;
+    }
+    .tactical-chart:hover, .tactical-chart:focus-within,
+    .comparison-chart:hover { border-color: #52525b !important; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04) !important; }
+    .tactical-chart-heading { color: #f4f4f5; }
+    .tactical-chart-heading small, .tactical-key { color: #a1a1aa; border-bottom-color: #26272c; }
+    .chart-expand { background: #18191c; border-color: #27282e; }
+    .comparison-chart .loop-chart-heading, .comparison-chart .loop-stats { background: #0e0f12 !important; border-color: #26272c !important; }
+
+    .metrics-grid > div {
+      border-color: #26272c !important;
+      background: #131417 !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 4px 14px rgba(0,0,0,.4) !important;
+    }
+    .metrics-grid > div:hover { border-color: #52525b !important; box-shadow: 0 6px 16px rgba(0,0,0,.5) !important; }
+    .metrics-grid > div::after { background: #26272c; }
+    .metrics-grid > div > span:first-child { color: #f4f4f5 !important; }
+    .metrics-grid > div > div.grid > div {
+      border-color: #26272c !important;
+      background: #0e0f12 !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
+    }
+    .metrics-grid > div > div.grid > div:hover { border-color: #52525b !important; background: #18191c !important; }
+    .metrics-grid > div > div.grid > div > div:first-child { color: #a1a1aa !important; }
+    .metrics-grid > div > div.flex, .metrics-grid > div > div.flex > div { border-color: #26272c !important; }
+    .metrics-grid > div > div.flex > div { background: #0e0f12; }
+    .timeline-lanes { border-color: #26272c !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.02) !important; }
+    .timeline-labels span { color: #a1a1aa; background: #131417; border-right-color: #3f3f46; }
+    .timeline-plot::after { color: #a1a1aa; background: #0e0f12; border-color: #26272c; }
+
+    ::-webkit-scrollbar-track { background: #000; }
+    ::-webkit-scrollbar-thumb { background: #27272a; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+    /* Dense data reads as shared rows and columns rather than separate tiles. */
+    .dashboard-panel table {
+      width: 100%;
+      border-collapse: collapse !important;
+      border-spacing: 0 !important;
+      font-variant-numeric: tabular-nums;
+    }
+    .dashboard-panel table th,
+    .dashboard-panel table td {
+      border: 1px solid #303036 !important;
+      background: transparent;
+      vertical-align: middle;
+    }
+    .dashboard-panel table th {
+      background: #27272a !important;
+      color: #fff !important;
+      font-weight: 600;
+    }
+    .dashboard-panel table tbody tr:nth-child(even) { background: #101114; }
+    .dashboard-panel table tbody tr:hover td { background: #1c1d22 !important; }
+    .dashboard-panel table tbody tr.bg-cyan-950\/40 { background: #16191d !important; }
+    .algorithm-table th,
+    .algorithm-table td { padding: 6px 5px !important; }
+    .algorithm-table th:first-child,
+    .algorithm-table td:first-child { text-align: left; }
+    .metric-grid-table th:nth-child(3),
+    .metric-grid-table td:nth-child(3) { border-left-color: #52525b !important; }
+
+    .metrics-catalog .metrics-grid { gap: 10px !important; }
+    .metrics-grid > div,
+    .metrics-grid > div:hover {
+      border: 0 !important;
+      border-radius: 0 !important;
+      border-bottom: 1px solid #3f3f46 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      transform: none !important;
+      padding: 0 0 10px !important;
+    }
+    .metrics-grid > div::before,
+    .metrics-grid > div::after,
+    .metrics-grid > div > span:first-child::before { display: none !important; }
+    .metrics-grid > div > span:first-child {
+      display: block;
+      margin: 0 !important;
+      padding: 8px 10px;
+      background: #27272a;
+      color: #fff !important;
+    }
+    .metrics-grid > div > div.grid { gap: 0 !important; }
+    .metrics-grid > div > div.grid > div,
+    .metrics-grid > div > div.grid > div:hover {
+      min-height: 56px;
+      border: 0 !important;
+      border-right: 1px solid #303036 !important;
+      border-bottom: 1px solid #303036 !important;
+      border-radius: 0 !important;
+      background: #0e0f12 !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .metrics-grid > div > div.grid > div:first-child { border-left: 1px solid #303036 !important; }
+    .metrics-grid > div > div.flex { gap: 0; margin-top: 0 !important; padding-top: 0 !important; border: 0 !important; }
+    .metrics-grid > div > div.flex > div {
+      border: 0 !important;
+      border-right: 1px solid #303036 !important;
+      border-bottom: 1px solid #303036 !important;
+      border-radius: 0 !important;
+      background: #0e0f12 !important;
+      text-align: center;
+    }
+    .metrics-grid > div > div.flex > div:first-child { border-left: 1px solid #303036 !important; }
+
+    .reference-why .decision-metrics { gap: 0; border-top: 1px solid #303036; border-left: 1px solid #303036; }
+    .reference-why .decision-metric {
+      border: 0 !important;
+      border-right: 1px solid #303036 !important;
+      border-bottom: 1px solid #303036 !important;
+      border-radius: 0 !important;
+      background: #0e0f12 !important;
+    }
+    .loop-stats { gap: 0; }
+    .loop-stats > div { border-right: 1px solid #303036; border-bottom: 1px solid #303036; }
+
+    /* Dark grey heading bands and white titles throughout the dashboard. */
+    .panel-header, .waterfall-header, .loop-chart-heading,
+    .heatmap-mode-title, .tactical-chart-heading,
+    .receiver-constraints-heading {
+      background: #27272a !important;
+      border-color: #3f3f46 !important;
+      color: #fff !important;
+    }
+    .panel-header :not(select):not(option),
+    .waterfall-heading strong, .waterfall-heading small,
+    .loop-chart-heading *, .heatmap-mode-title *,
+    .tactical-chart-heading *, .receiver-constraints-heading * { color: #fff !important; }
+    .panel-header::after { background: #52525b; }
+    .panel-header i { color: #fff !important; }
+
+    #simulation-start, #simulation-pause, #simulation-stop {
+      background: #27272a !important;
+      border: 1px solid #52525b !important;
+      color: #fff !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06) !important;
+    }
+    #simulation-start:hover, #simulation-pause:hover, #simulation-stop:hover {
+      background: #3f3f46 !important;
+      border-color: #71717a !important;
+    }
+
+    /* Grey navigation chrome, with state shown by a small status light. */
+    .reference-navbar {
+      background: #242529 !important;
+      border-color: #484a50 !important;
+      box-shadow: 0 10px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.055) !important;
+    }
+    .reference-navbar::after { background: #6b6d74; }
+    .reference-navbar .nav-logo,
+    .reference-navbar .nav-logo i,
+    .reference-navbar .nav-title span:last-child,
+    .reference-navbar .nav-stats i,
+    .reference-navbar .nav-stats .text-cyan-400,
+    .reference-navbar .nav-stats .text-cyan-500 { color: #d4d4d8 !important; }
+    .reference-navbar .nav-logo i { filter: none; }
+    .reference-navbar .nav-stats {
+      background: #303136 !important;
+      border-color: #4b4c52 !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
+    }
+    .reference-navbar .nav-progress > div:last-child { background: #4b4c52 !important; }
+    .reference-navbar .nav-progress #mission-progress {
+      background: #c4c4ca !important;
+      box-shadow: 0 0 8px rgba(220,220,225,.22) !important;
+    }
+    .reference-navbar .nav-status {
+      background: #303136 !important;
+      border-color: #5b5d62 !important;
+      color: #f4f4f5 !important;
+    }
+    .reference-navbar .nav-status[data-state="playing"] > div { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.55); }
+    .reference-navbar .nav-status[data-state="paused"] > div { background: #facc15; box-shadow: 0 0 8px rgba(250,204,21,.48); }
+    .reference-navbar .nav-status[data-state="stopped"] > div { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.48); }
+
+    /* Timeline: summary, clear lane hierarchy, and a legible event track. */
+    .extended-right { grid-template-rows: 400px 294px; }
+    .timeline-panel { min-height: 294px !important; }
+    .timeline-panel .chart-bg { min-height: 0; gap: 7px; padding: 10px 12px 14px !important; }
+    .timeline-summary {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      border-bottom: 1px solid #3f3f46;
+      background: #131417;
+    }
+    .timeline-summary > div {
+      min-width: 0;
+      padding: 7px 8px 8px;
+      border-right: 1px solid #303036;
+    }
+    .timeline-summary > div:last-child { border-right: 0; }
+    .timeline-summary span {
+      display: block;
+      color: #a1a1aa;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .timeline-summary strong {
+      display: block;
+      margin-top: 3px;
+      color: #f4f4f5;
+      font-size: 15px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .timeline-summary .metric-hit strong { color: #38d9a2; }
+    .timeline-summary .metric-miss strong { color: #ff7780; }
+    .timeline-summary .metric-false strong { color: #f9c767; }
+    .timeline-summary .metric-retune strong { color: #74adff; }
+    .timeline-plot-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-left: 138px;
+      margin-right: 12px;
+      color: #d4d4d8;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .1em;
+    }
+    .timeline-plot-title span:last-child { color: #a1a1aa; font-weight: 500; letter-spacing: .05em; }
+    .timeline-lanes { flex: 1; height: auto !important; min-height: 0; border-radius: 4px; overflow: visible !important; }
+    .timeline-plot::after { content: none; }
+    .timeline-labels span { background: #202125; border-radius: 0; border-right-color: #62646b; }
+    .timeline-labels { color: #e4e4e7 !important; bottom: 0 !important; }
+    .timeline-legend { gap: 10px; }
+    .timeline-legend > div { white-space: nowrap; }
+    .timeline-live { color: #d4d4d8; font-variant-numeric: tabular-nums; }
+    @media (max-width: 1180px) {
+      .extended-right { grid-template-rows: none; }
+      .extended-right > .timeline-panel { min-height: 294px !important; }
+    }
+    @media (max-width: 760px) {
+      .timeline-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .timeline-summary > div:nth-child(3) { border-right: 0; }
+      .timeline-summary > div:nth-child(-n + 3) { border-bottom: 1px solid #303036; }
+      .extended-right > .timeline-panel { min-height: 345px !important; }
+    }
+
+    /* Neutral text for the selected configuration and metric sections. */
+    .mission-config > .p-2\.5,
+    .mission-config > .p-2\.5 *,
+    .metrics-catalog .metrics-grid,
+    .metrics-catalog .metrics-grid * {
+      color: #fff !important;
+      text-shadow: none !important;
+    }
+
+    .metrics-catalog .metrics-grid.metric-tables {
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+      gap: 12px !important;
+      padding: 14px !important;
+      align-items: stretch !important;
+    }
+    .metrics-catalog .metrics-grid.metric-tables[data-mode="single"] {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+    .metric-group {
+      display: flex !important;
+      flex-direction: column !important;
+      width: 100% !important;
+      height: 100% !important;
+      margin: 0 !important;
+      border: 1px solid #303036 !important;
+      background: #0d0e11 !important;
+    }
+    .metric-group[hidden] { display: none !important; }
+    .metric-group h3 {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 8px !important;
+      height: 36px !important;
+      min-height: 36px !important;
+      max-height: 36px !important;
+      padding: 0 10px !important;
+      background: #27272a !important;
+      color: #fff !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      line-height: 36px !important;
+      margin: 0 !important;
+      border-bottom: 1px solid #303036 !important;
+      box-sizing: border-box !important;
+    }
+    .metric-group h3 span { font-size: 9px !important; font-weight: 500 !important; color: #a1a1aa !important; white-space: nowrap !important; }
+    .metric-group table {
+      width: 100% !important;
+      height: 100% !important;
+      table-layout: fixed !important;
+      font-size: 10px !important;
+      border-collapse: collapse !important;
+      margin: 0 !important;
+    }
+    .metric-group thead th {
+      height: 28px !important;
+      min-height: 28px !important;
+      max-height: 28px !important;
+      padding: 0 10px !important;
+      background: #1c1d22 !important;
+      color: #a1a1aa !important;
+      text-align: left !important;
+      font-weight: 600 !important;
+      border-bottom: 1px solid #303036 !important;
+      box-sizing: border-box !important;
+    }
+    .metric-group thead th:last-child { width: 88px !important; text-align: right !important; }
+    .metric-group tbody tr {
+      height: 33px !important;
+      min-height: 33px !important;
+      max-height: 33px !important;
+      box-sizing: border-box !important;
+    }
+    .metric-group tbody th,
+    .metric-group tbody td {
+      padding: 0 10px !important;
+      height: 33px !important;
+      line-height: 33px !important;
+      border-bottom: 1px solid #232429 !important;
+      vertical-align: middle !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+      box-sizing: border-box !important;
+    }
+    .metric-group tbody tr:last-child th,
+    .metric-group tbody tr:last-child td {
+      border-bottom: 0 !important;
+    }
+    .metric-group tbody tr:nth-child(even) { background: #101114 !important; }
+    .metric-group tbody tr:hover td,
+    .metric-group tbody tr:hover th { background: #1c1d22 !important; }
+    .metrics-catalog .metric-group tbody th {
+      background: transparent !important;
+      font-weight: 500 !important;
+      text-align: left !important;
+      color: #d4d4d8 !important;
+    }
+    .metric-group tbody td {
+      width: 88px !important;
+      text-align: right !important;
+      font-weight: 700 !important;
+      color: #fff !important;
+      font-variant-numeric: tabular-nums !important;
+    }
+    .metrics-note { padding: 4px 14px 14px; color: #a1a1aa; font-size: 10px; line-height: 1.5; }
+    @media (max-width: 1280px) {
+      .metrics-catalog .metrics-grid.metric-tables {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      }
+    }
+    @media (max-width: 760px) {
+      .metrics-catalog .metrics-grid.metric-tables {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+    }
+  </style>
+</head>
+<body class="h-screen flex flex-col antialiased">
+  
+  <!-- NAVBAR -->
+  <header class="reference-navbar flex items-center justify-between px-4 py-1.5 bg-[#020617] border-b border-[#1E2D4A] shrink-0 min-w-[1280px]">
+    <div class="flex items-center gap-4">
+      <!-- Logo -->
+      <div class="nav-logo flex items-center gap-2.5 text-cyan-400">
+        <img src="ultraHD-logo.png" alt="VYAPTI Logo" class="w-8 h-8 rounded-full object-cover border border-[#484a50] shadow-[0_0_10px_rgba(56,189,248,0.25)] bg-[#030712] shrink-0" />
+        <span class="text-xl font-bold tracking-widest text-white">VYAPTI</span>
+      </div>
+      <div class="w-px h-8 bg-slate-800"></div>
+      
+      <!-- Title -->
+      <div class="nav-title flex flex-col">
+        <span class="font-bold text-slate-100 tracking-wide text-[13px]">TSRD ENVIRONMENT</span>
+        <span class="text-cyan-500 text-[10px] uppercase font-semibold">Cognitive RF Scheduler</span>
+      </div>
+      
+      <!-- Stats Row -->
+      <div class="nav-stats flex items-center gap-4 ml-6 bg-[#0B1120] border border-[#1e3a8a]/50 rounded px-3 py-1 shadow-inner">
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="folder-code" class="w-4 h-4 text-cyan-400"></i>
+          <div class="flex flex-col leading-tight"><span class="text-cyan-400 font-bold text-[11px]">250</span><span class="text-[8px] text-slate-400 uppercase">Files</span></div>
+        </div>
+        <div class="w-px h-5 bg-slate-800"></div>
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="target" class="w-4 h-4 text-cyan-400"></i>
+          <div class="flex flex-col leading-tight"><span class="text-slate-100 font-bold text-[11px]">Test</span><span class="text-[8px] text-cyan-500 uppercase">Split</span></div>
+        </div>
+        <div class="w-px h-5 bg-slate-800"></div>
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="link" class="w-4 h-4 text-cyan-400"></i>
+          <div class="flex flex-col leading-tight"><span class="text-slate-100 font-bold text-[11px]">36 × 500 MHz</span><span class="text-[8px] text-cyan-500 uppercase">Bands</span></div>
+        </div>
+        <div class="w-px h-5 bg-slate-800"></div>
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="map-pin" class="w-4 h-4 text-cyan-400"></i>
+          <div class="flex flex-col leading-tight"><span class="text-slate-100 font-bold text-[11px]">0 – 18 GHz</span><span class="text-[8px] text-cyan-500 uppercase">Frequency Range</span></div>
+        </div>
+        <div class="w-px h-5 bg-slate-800"></div>
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="clock" class="w-4 h-4 text-cyan-400"></i>
+          <div class="flex flex-col leading-tight"><span class="text-slate-100 font-bold text-[11px]">30 s</span><span class="text-[8px] text-cyan-500 uppercase">Horizon</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <!-- Status Badge -->
+      <div id="simulation-status" class="nav-status flex items-center gap-1.5 bg-[#451a03] border border-[#92400e] text-[#f59e0b] px-2.5 py-1.5 rounded text-[10px] font-bold tracking-wide" role="status" aria-live="polite" data-state="stopped">
+        <div class="w-1.5 h-1.5 rounded-full bg-current"></div>
+        <span id="simulation-status-label">TSRD Idle</span>
+      </div>
+      
+      <!-- Progress Bar -->
+      <div class="nav-progress flex flex-col w-40 ml-2">
+        <div class="flex justify-between text-[9px] mb-0.5">
+          <span class="text-slate-400">Mission Time</span>
+          <span class="text-slate-400">Slot</span>
+        </div>
+        <div class="flex justify-between text-[11px] font-bold text-slate-100 mb-1">
+          <span id="mission-time">0.00 / 30.00 s</span>
+          <span id="mission-slot">0 / 600</span>
+        </div>
+        <div class="h-[3px] bg-slate-800 rounded-full overflow-hidden w-full relative">
+          <div id="mission-progress" class="absolute left-0 top-0 bottom-0 bg-cyan-400 w-[0%] shadow-[0_0_8px_#38bdf8]"></div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="nav-controls flex items-center gap-1.5 ml-4 shrink-0">
+        <button id="simulation-start" type="button" class="bg-[#078a49] hover:bg-[#0ca35a] text-white px-2.5 py-1.5 rounded flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer focus:ring-2 ring-green-400 outline-none">
+          <i data-lucide="play" class="w-3 h-3 fill-current"></i> Start
+        </button>
+        <button id="simulation-pause" type="button" class="bg-[#17469f] hover:bg-[#2059bb] border border-[#2a68c9] text-white px-2.5 py-1.5 rounded flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer focus:ring-2 ring-blue-400 outline-none">
+          <i data-lucide="pause" class="w-3 h-3 fill-current"></i> Pause
+        </button>
+        <button id="simulation-stop" type="button" class="bg-red-700 hover:bg-red-600 text-white px-2.5 py-1.5 rounded flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer focus:ring-2 ring-red-400 outline-none">
+          <i data-lucide="square" class="w-3 h-3 fill-current"></i> Stop
+        </button>
+        <button id="display-settings-button" type="button" aria-expanded="false" aria-controls="display-settings" aria-label="Display settings" class="bg-[#1e293b] hover:bg-slate-700 border border-slate-600 text-slate-200 p-1.5 rounded transition-colors ml-1 cursor-pointer focus:ring-2 ring-slate-400 outline-none">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+    <div id="display-settings" class="settings-popover" hidden>
+      <strong>Display preferences</strong>
+      <label for="setting-windows">Receiver windows <input id="setting-windows" type="checkbox" checked></label>
+      <label for="setting-grid">Plot grid <input id="setting-grid" type="checkbox" checked></label>
+    </div>
+  </header>
+
+  <!-- DASHBOARD GRID -->
+  <main class="reference-grid flex-1 p-2 grid gap-2 overflow-auto relative">
+    
+    <!-- Panel 1: Mission Configuration -->
+    <div class="mission-config dashboard-panel col-span-1 row-span-1 h-full">
+      <div class="panel-header"><i data-lucide="info" class="w-3.5 h-3.5"></i> Mission Configuration</div>
+      <div class="p-2.5 flex flex-col gap-1.5 text-[10px]">
+        <div class="flex justify-between"><span class="text-slate-400">Dataset</span><span class="text-slate-100 font-medium">TSRD (test_stare)</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Active World</span><span id="active-world-label" class="text-cyan-400 font-medium">test_world_000</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Frequency Range</span><span class="text-cyan-400 font-medium">0 – 18 GHz</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Total Bands</span><span class="text-slate-100 font-medium">36</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Band Width</span><span class="text-cyan-400 font-medium">500 MHz</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Mission Duration</span><span class="text-slate-100 font-medium">30 s</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Decision Slot</span><span class="text-cyan-400 font-medium">50.0 ms</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Detector Model</span><span class="text-cyan-400 font-medium">Energy Detector</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Scheduler</span><span id="current-scheduler-name" class="text-cyan-400 font-medium">Classical UCB1</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Environment</span><span class="text-cyan-400 font-medium">Real TSRD Corpus</span></div>
+      </div>
+      <div class="receiver-constraints-heading flex items-center gap-1.5 px-2.5 py-1 text-cyan-400 font-semibold text-[10px] bg-[var(--color-panel-header)] border-y border-[var(--color-panel-border)] uppercase">
+        <i data-lucide="info" class="w-3 h-3"></i> Receiver Constraints
+      </div>
+      <div class="p-2.5 flex flex-col gap-1.5 text-[10px]">
+        <div class="flex justify-between"><span class="text-slate-400">Instantaneous BW</span><span class="text-cyan-400 font-medium">500 MHz</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Dwell Time (default)</span><span class="text-cyan-400 font-medium">50.0 ms</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Retune Cost</span><span class="text-cyan-400 font-medium">0 ms</span></div>
+      </div>
+    </div>
+
+    <!-- Panel 2: Time-Frequency Waterfall -->
+    <div id="waterfall-panel" class="waterfall-panel dashboard-panel col-span-1 row-span-1 h-full flex-col">
+      <div class="waterfall-header shrink-0">
+        <div class="waterfall-heading">
+          <strong>RECEIVER SIGNAL</strong>
+          <small>Frequency × time · receiver windows and detected emitters</small>
+        </div>
+        <div class="waterfall-actions text-[9px]">
+          <span class="hidden 2xl:inline text-cyan-400 mr-1">REAL TSRD TELEMETRY</span>
+          <button id="waterfall-toggle" class="waterfall-playback flex items-center gap-1.5 px-2.5 py-0.5 font-semibold text-[10px]" style="background:#052e16;color:#22c55e;border:1px solid #047857;border-radius:9999px;" type="button" aria-pressed="true" aria-label="Toggle waterfall view"><span class="playback-dot w-1.5 h-1.5 rounded-full bg-current"></span><span id="waterfall-play-label">PLAYING</span></button>
+          <span id="waterfall-zoom-readout" class="text-slate-400 tabular-nums px-1">1×</span>
+          <button id="waterfall-zoom-out" class="w-6 text-center" type="button" aria-label="Zoom Out">−</button>
+          <button id="waterfall-zoom-in" class="w-6 text-center" type="button" aria-label="Zoom In">+</button>
+          <button id="waterfall-maximize" class="w-6 flex items-center justify-center" type="button" aria-label="Maximize waterfall"><i data-lucide="maximize-2" class="w-3 h-3"></i></button>
+        </div>
+      </div>
+      
+      <!-- Receiver Status Bar -->
+      <div class="wf-status-bar mx-2 mt-1.5 mb-1 shrink-0">
+        <div class="wf-status-cell">
+          <span class="wf-status-label">FREQUENCY</span>
+          <span class="wf-status-value active" id="wf-freq-val" style="color:#0ad8c8;font-weight:700">15.10 GHz</span>
+        </div>
+        <div class="wf-status-cell">
+          <span class="wf-status-label">INST. BW</span>
+          <span class="wf-status-value" id="wf-bw-val">1.0 GHz</span>
+        </div>
+        <div class="wf-status-cell">
+          <span class="wf-status-label">DWELL</span>
+          <span class="wf-status-value" id="wf-dwell-val">1.9 s rem</span>
+        </div>
+        <div class="wf-status-cell">
+          <span class="wf-status-label">SCHEDULER</span>
+          <span class="wf-status-value active" id="wf-scheduler-val" style="color:#e2e8f0;font-weight:600">ADAPTIVE</span>
+        </div>
+        <div class="wf-status-cell">
+          <span class="wf-status-label">DECISION</span>
+          <span class="wf-status-value" id="wf-decision-val" style="color:#e8c840;font-weight:700">DWELL</span>
+        </div>
+        <div class="wf-status-cell">
+          <span class="wf-status-label">LAST RESULT</span>
+          <span class="wf-status-value" id="wf-result-val" style="color:#22c55e;font-weight:700">HIT</span>
+        </div>
+      </div>
+
+      <!-- Main area: waterfall chart + AI panel -->
+      <div class="wf-main-area px-2 pb-1" style="min-height:0">
+        <!-- Y-axis + chart column -->
+        <div class="wf-chart-col" style="position:relative">
+          <!-- Y-axis labels -->
+          <div style="position:absolute;left:0;top:0;bottom:28px;width:28px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding:2px 4px 2px 0;font-size:9px;color:#5a8099;font-weight:500;">
+            <span>18</span><span>15</span><span>12</span><span>9</span><span>6</span><span>3</span><span>0</span>
+          </div>
+          <div style="position:absolute;left:-2px;top:50%;transform:translateY(-50%) rotate(-90deg);font-size:8.5px;color:#3d6476;letter-spacing:.08em;white-space:nowrap;">Frequency (GHz)</div>
+
+          <!-- Chart canvas area -->
+          <div class="waterfall-chart" id="waterfall-chart-wrapper"
+               style="position:relative;border:1px solid #1e4a62;background:#020a12;margin-left:28px;margin-bottom:28px;flex:1;overflow:hidden;cursor:crosshair;">
+
+            <!-- Color scale (right of chart) -->
+            <div style="position:absolute;right:-22px;top:0;bottom:0;width:10px;">
+              <div style="position:absolute;top:-14px;right:0;font-size:7.5px;color:#4e7a91;white-space:nowrap;">dB</div>
+              <div style="width:100%;height:100%;border-radius:1px;border:1px solid #1e3a4c;background:linear-gradient(to bottom,#f5f5e8,#e8c840,#0ad8c8,#0090d8,#0026b8,#030e1e);"></div>
+              <div style="position:absolute;right:-16px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;font-size:7.5px;color:#4e7a91;">
+                <span>-20</span><span>-60</span><span>-100</span>
+              </div>
+            </div>
+
+            <!-- Canvases -->
+            <div id="waterfall-plot" style="position:absolute;inset:0;overflow:hidden;"
+                 role="img"
+                 aria-label="RF waterfall: time (x-axis 0–30 s) vs frequency (y-axis 0–18 GHz). Classical UCB1 receiver bandwidth window moving across 36 sub-bands. Green markers = hit, amber = miss."
+                 aria-describedby="waterfall-summary">
+              <canvas id="waterfall-bg" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+              <canvas id="waterfall-overlay" style="position:absolute;inset:0;width:100%;height:100%;z-index:10;pointer-events:none;"></canvas>
+              <div id="waterfall-tooltip" class="waterfall-tooltip"></div>
+            </div>
+            <p id="waterfall-summary" class="sr-only">TSRD 5-field PDW telemetry stream. Classical UCB1 scheduler selects receiver sub-band dwell. Green dot = HIT, amber dot = MISS.</p>
+          </div>
+
+          <!-- X-axis -->
+          <div id="waterfall-x-axis"
+               style="position:absolute;bottom:10px;left:28px;right:22px;display:flex;justify-content:space-between;font-size:9px;color:#5a8099;font-weight:500;">
+            <span>0</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span>
+          </div>
+          <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:8.5px;color:#3d6476;letter-spacing:.07em;">Time (s)</div>
+        </div>
+
+        <!-- AI Decision Panel -->
+        <div class="wf-ai-panel" style="margin-right:22px;">
+          <div style="background:#071828;padding:5px 8px;border-bottom:1px solid #142535;font-size:8px;color:#2eb8d8;font-weight:700;letter-spacing:.09em;">AI DECISION</div>
+          <div class="wf-ai-section">
+            <div class="wf-ai-key">CURRENT ACTION</div>
+            <div class="wf-ai-val highlight" id="wf-ai-action" style="color:#0ad8c8;font-weight:700">→ Dwell 15.1 GHz</div>
+          </div>
+          <div class="wf-ai-section">
+            <div class="wf-ai-key">REASON</div>
+            <div class="wf-ai-val" id="wf-ai-reason" style="color:#e2e8f0;font-weight:600">Agile emitter – final hop</div>
+          </div>
+          <div class="wf-ai-section">
+            <div class="wf-ai-key">CONFIDENCE</div>
+            <div class="wf-ai-val" id="wf-ai-conf" style="color:#e2e8f0;font-weight:700">87%</div>
+            <div class="wf-conf-bar"><div class="wf-conf-fill" id="wf-conf-fill" style="width:87%;background:linear-gradient(90deg,#0ad8c8,#22c55e)"></div></div>
+          </div>
+          <div class="wf-ai-section">
+            <div class="wf-ai-key">NEXT SCAN</div>
+            <div class="wf-ai-val next" id="wf-ai-next" style="color:#7aa8bc">— (end)</div>
+          </div>
+          <div class="wf-ai-section" style="flex:1;">
+            <div class="wf-ai-key">EMITTERS</div>
+            <div style="margin-top:4px;display:flex;flex-direction:column;gap:4px;font-size:8.5px;">
+              <div style="display:flex;align-items:center;gap:6px;color:#7aa8bc;"><span style="display:inline-block;width:7px;height:7px;background:#0090d8;border-radius:1px;"></span> Persistent</div>
+              <div style="display:flex;align-items:center;gap:6px;color:#7aa8bc;"><span style="display:inline-block;width:7px;height:7px;background:#0ad8c8;border-radius:1px;"></span> Intermittent</div>
+              <div style="display:flex;align-items:center;gap:6px;color:#7aa8bc;"><span style="display:inline-block;width:7px;height:7px;background:#e8c840;border-radius:1px;"></span> Freq-Agile</div>
+              <div style="display:flex;align-items:center;gap:6px;color:#7aa8bc;"><span style="display:inline-block;width:7px;height:7px;background:#a855f7;border-radius:1px;"></span> Scanning</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legend row -->
+      <div class="waterfall-legend" style="margin-left:30px;margin-right:152px;">
+        <div><span style="display:inline-block;width:22px;height:6px;background:linear-gradient(90deg,#030e1e,#0026b8,#0090d8,#0ad8c8,#e8c840,#f5f5e8);border-radius:1px;"></span> RF Power</div>
+        <div><span style="display:inline-block;width:16px;height:6px;border:1px solid rgba(30,160,220,.6);background:rgba(30,150,220,.12);border-radius:1px;"></span> Receiver BW</div>
+        <div><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;"></span> Hit</div>
+        <div><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;"></span> Miss</div>
+        <div><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;"></span> FA</div>
+        <div><span style="display:inline-block;width:14px;height:4px;border-top:1px dashed rgba(120,200,240,.5);"></span> Predicted</div>
+      </div>
+
+      <!-- Event Timeline -->
+      <div class="wf-event-timeline mx-2 mb-1">
+        <canvas id="waterfall-timeline-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Right Stack (Col 3, Row 1): Scheduler State & Mission Metrics -->
+    <div class="right-stack col-span-1 row-span-1 flex flex-col gap-2 h-full">
+      <!-- Panel 3: Scheduler State -->
+      <div class="dashboard-panel shrink-0">
+        <div class="panel-header"><i data-lucide="info" class="w-3.5 h-3.5"></i> Current Scheduler State (Classical UCB1)</div>
+        <div class="p-3 flex items-stretch gap-3">
+          <div class="flex flex-col items-center justify-center border-r border-[#1E2D4A] pr-3 shrink-0">
+            <span class="text-slate-400 text-[9px] mb-0.5">Selected Band</span>
+            <span id="sched-selected-band-num" class="text-[32px] font-light text-cyan-400 leading-none tracking-tight">0</span>
+            <span id="sched-selected-band-range" class="text-cyan-500 text-[8px] mt-0.5 whitespace-nowrap">0.00 – 0.50 GHz</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <table class="metrics-table" aria-label="Current scheduler state metrics">
+              <tbody>
+                <tr><td>Mean Reward μ̂</td><td id="sched-mean-reward" class="metric-value value-cyan">0.000</td></tr>
+                <tr><td>Band Pull Count N</td><td id="sched-pull-count" class="metric-value">0 slots</td></tr>
+                <tr><td>Total Dwells t</td><td id="sched-total-pulls" class="metric-value">0 slots</td></tr>
+                <tr><td>Exploration Bonus</td><td id="sched-bonus" class="metric-value">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex flex-col items-center justify-center border-l border-[#1E2D4A] pl-3 shrink-0">
+            <span class="text-slate-400 text-[9px] mb-1">UCB Score</span>
+            <div class="w-12 h-12 rounded-full border-2 border-cyan-800 flex items-center justify-center bg-[#0d1f38] shadow-[0_0_8px_rgba(8,145,178,0.3)]">
+              <span id="sched-action-score" class="text-xs font-bold text-white">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 4: Mission Metrics -->
+      <div class="dashboard-panel flex-1">
+        <div class="panel-header"><i data-lucide="info" class="w-3.5 h-3.5"></i> PS2605S Mission Metrics <span class="ml-auto text-[9px] text-emerald-400 font-normal">LIVE TSRD TELEMETRY</span></div>
+        <div class="p-3 flex-1 overflow-auto">
+          <table class="metrics-table metric-grid-table" aria-label="Live mission metrics">
+            <thead><tr><th class="text-left">Metric</th><th>Value</th><th class="text-left">Metric</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>Hit Rate (OIR)</td><td id="metric-live-hit-rate" class="metric-value value-green">0.00%</td><td>Current Slot</td><td id="metric-live-slot" class="metric-value value-cyan">0 / 600</td></tr>
+              <tr><td>Total Hits</td><td id="metric-live-hits" class="metric-value value-green">0</td><td>Mission Time</td><td id="metric-live-time" class="metric-value value-cyan">0.00 s</td></tr>
+              <tr><td>Total Misses</td><td id="metric-live-misses" class="metric-value value-red">0</td><td>Cumulative Reward</td><td id="metric-live-cum-reward" class="metric-value value-violet">0.000</td></tr>
+              <tr><td>Total Dwells</td><td id="metric-live-dwells" class="metric-value">0</td><td>Step Reward</td><td id="metric-live-step-reward" class="metric-value">0.000</td></tr>
+              <tr><td>Intercepted Emitters</td><td id="metric-live-emitters" class="metric-value value-cyan">0</td><td>Tuned Band</td><td id="metric-live-band" class="metric-value">Band 0</td></tr>
+              <tr><td>Center Frequency</td><td id="metric-live-freq" class="metric-value">0.25 GHz</td><td class="text-slate-500">Live Status</td><td id="metric-live-status" class="metric-value value-green">IDLE</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel Tactical Receiver Feed (Col 1-2, Row 2) -->
+    <div class="tactical-panel dashboard-panel col-span-2 row-span-1 h-full flex flex-col">
+      <div class="panel-header flex justify-between items-center pr-2">
+        <span><i data-lucide="activity" class="w-3.5 h-3.5 inline-block mr-1"></i> Tactical Receiver Feed</span>
+        <select id="tactical-selector" class="bg-[#1E2D4A] border border-cyan-800/50 text-slate-200 rounded-[3px] text-[9px] px-2 py-0.5 outline-none cursor-pointer">
+          <option value="all">All Charts</option>
+          <option value="signal">RF Simulator</option>
+          <option value="iq">I/Q Constellation</option>
+          <option value="freq">Instantaneous Frequency</option>
+        </select>
+      </div>
+      <div class="tactical-shell flex p-2.5 gap-4 h-full items-stretch">
+        
+        <!-- Details Column -->
+        <div class="w-[220px] flex flex-col gap-2 shrink-0">
+          <span class="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Current Action</span>
+          <div id="tac-action-badge" class="text-green-500 font-bold text-[13px] flex items-center gap-2 bg-[#052e16]/50 p-1.5 rounded border border-[#047857]/40 shadow-inner">
+            <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_5px_#10b981]"></div>
+            <span id="tac-action-title">TUNED TO: BAND 0</span>
+          </div>
+          <div id="tac-freq-desc" class="text-[9px] text-slate-300">Center Frequency <span class="text-cyan-400 ml-1">0.25 GHz (0.00 - 0.50)</span></div>
+          
+          <div class="h-px bg-[#1E2D4A] my-0.5"></div>
+          
+          <div class="flex justify-between items-center text-[9px]">
+            <span class="text-slate-400">Dwell Type</span>
+            <span class="text-cyan-400 font-mono text-[9px]">50.0 ms (Locked)</span>
+          </div>
+          
+          <div class="flex flex-col gap-1 text-[9px]">
+            <div class="flex justify-between"><span class="text-slate-400">Dwell Progress</span><span id="tac-dwell-progress-text" class="text-slate-200">0.0 / 50.0 ms</span></div>
+            <div class="w-full h-[4px] bg-slate-800 rounded-full overflow-hidden"><div id="tac-dwell-bar" class="h-full bg-cyan-400 w-[0%]"></div></div>
+          </div>
+          
+          <div class="flex justify-between items-center text-[9px] mt-0.5">
+            <span class="text-slate-400">Retune Overhead</span>
+            <div class="flex items-center gap-1.5"><div class="w-2 h-2 bg-emerald-600 rounded-[1px]"></div><span class="text-slate-200">0 ms (Zero-Cost)</span></div>
+          </div>
+
+          <div class="h-px bg-[#1E2D4A] my-0.5"></div>
+
+          <div class="flex items-end justify-between">
+            <div class="flex flex-col gap-0.5">
+              <span class="text-[8px] text-slate-400">Detection Status</span>
+              <div id="tac-detection-status" class="text-slate-400 font-bold text-[11px] flex items-center gap-1"><i data-lucide="crosshair" class="w-3 h-3"></i> —</div>
+            </div>
+            <div class="flex flex-col gap-0.5 text-right">
+              <span class="text-[8px] text-slate-400">SNR (dB)</span>
+              <span id="tac-snr" class="text-cyan-400 font-bold text-[11px]">N/A</span>
+            </div>
+            <div class="flex flex-col gap-0.5 text-right">
+              <span class="text-[8px] text-slate-400">Pulse Count</span>
+              <span id="tac-pulse-count" class="text-cyan-400 font-bold text-[11px]">0</span>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[9px] mt-1 pt-1 border-t border-[#1E2D4A]/50">
+            <div class="flex flex-col"><span class="text-slate-500 text-[8px]">Max Amplitude</span><span id="tac-max-amp" class="text-slate-200">N/A</span></div>
+            <div class="flex flex-col"><span class="text-slate-500 text-[8px]">Waveform</span><span class="text-slate-400 text-[9px]">PDW Stream</span></div>
+            <div class="flex flex-col"><span class="text-slate-500 text-[8px]">Raw RF/IQ</span><span class="text-slate-400 text-[9px]">Not in corpus</span></div>
+          </div>
+        </div>
+
+        <!-- Charts Scroll Wrapper -->
+        <div class="tactical-charts flex-1 items-stretch" id="tactical-charts-container" data-view="all">
+          <!-- Signal Power Chart -->
+          <div id="chart-signal" class="tactical-chart flex flex-col p-3 relative">
+          <div class="tactical-chart-heading"><span>RF SIMULATOR <small>· time domain</small></span><button class="chart-expand" type="button" aria-label="Expand RF simulator chart" aria-pressed="false" title="Expand chart"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button></div>
+          <div class="tactical-key">
+              <div class="flex items-center gap-1"><div class="w-2.5 h-[2px] bg-cyan-400"></div> <span>Signal Power</span></div>
+              <div class="flex items-center gap-1"><div class="w-2.5 h-0 border-t-[1.5px] border-dashed border-red-500"></div> <span>Detection Threshold</span></div>
+          </div>
+          <div class="flex-1 relative ml-6 mb-4 mt-2">
+            <div class="absolute -left-6 top-0 bottom-0 flex flex-col justify-between text-[8px] text-slate-500 py-0.5">
+              <span>-20</span><span>-40</span><span>-60</span><span>-80</span><span>-100</span><span>-120</span>
+            </div>
+            <div class="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-[8px] text-slate-500 tracking-wider">Power (dBm)</div>
+            <div class="absolute -bottom-4 left-0 right-0 flex justify-between text-[8px] text-slate-500 px-1">
+              <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span>
+            </div>
+            <div class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[8px] text-slate-500 tracking-wider">Time (ms)</div>
+            
+            <div class="absolute inset-0 overflow-hidden"><canvas id="signal-canvas" class="w-full h-full absolute inset-0 z-10"></canvas></div>
+          </div>
+          <div class="tactical-chart-details"><span>SNR <strong id="chart-snr-val">N/A</strong></span><span>Threshold <strong id="chart-thresh-val">N/A</strong></span><span>Pulses <strong id="chart-pulse-val">0</strong></span></div>
+        </div>
+
+        <!-- I/Q Constellation -->
+        <div id="chart-iq" class="tactical-chart flex flex-col p-3">
+          <div class="tactical-chart-heading"><span>I/Q CONSTELLATION <small>· current window</small></span><button class="chart-expand" type="button" aria-label="Expand I/Q constellation chart" aria-pressed="false" title="Expand chart"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button></div>
+          <div class="flex-1 relative m-2 border border-[#1E2D4A]/60 chart-bg">
+            <div class="absolute inset-0 flex items-center justify-center"><div class="w-full h-px bg-[#1E2D4A]"></div></div>
+            <div class="absolute inset-0 flex items-center justify-center"><div class="h-full w-px bg-[#1E2D4A]"></div></div>
+            <div class="absolute -left-[14px] top-1/2 -translate-y-1/2 -rotate-90 text-[7px] text-slate-500">Quadrature</div>
+            <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[7px] text-slate-500">In-phase</div>
+            <div class="absolute top-0 bottom-0 flex flex-col justify-between -left-2 text-[7px] text-slate-500"><span>2</span><span>0</span><span>-2</span></div>
+            <div class="absolute left-0 right-0 flex justify-between -bottom-2 text-[7px] text-slate-500"><span>-2</span><span class="pl-2">-1</span><span>0</span><span class="pr-2">1</span><span>2</span></div>
+            <div class="absolute inset-0 overflow-hidden"><canvas id="iq-canvas" class="w-full h-full absolute inset-0 z-10"></canvas></div>
+          </div>
+          <div class="tactical-chart-details"><span>Telemetry <strong id="chart-iq-telemetry">PDW only</strong></span><span>I/Q Samples <strong id="chart-iq-samples">N/A</strong></span><span>Modulation <strong id="chart-iq-mod">N/A</strong></span></div>
+        </div>
+
+        <!-- Instantaneous Frequency -->
+        <div id="chart-freq" class="tactical-chart flex flex-col p-3">
+          <div class="tactical-chart-heading"><span>INSTANTANEOUS FREQUENCY <small>· pulse</small></span><button class="chart-expand" type="button" aria-label="Expand instantaneous frequency chart" aria-pressed="false" title="Expand chart"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button></div>
+          <div class="flex-1 relative m-2 ml-4 mb-4 chart-bg border border-[#1E2D4A]/40">
+            <div class="absolute -left-4 top-0 bottom-0 flex flex-col justify-between text-[7px] text-slate-500">
+              <span>7.4</span><span>7.2</span><span>7.0</span><span>6.8</span>
+            </div>
+            <div class="absolute -left-[18px] top-1/2 -translate-y-1/2 -rotate-90 text-[7px] text-slate-500 whitespace-nowrap">Frequency (GHz)</div>
+            <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[7px] text-slate-500 px-0.5">
+              <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[7px] text-slate-500 whitespace-nowrap">Time (ms)</div>
+            <div class="absolute inset-0 overflow-hidden"><canvas id="freq-canvas" class="w-full h-full absolute inset-0 z-10"></canvas></div>
+          </div>
+          <div class="tactical-chart-details"><span>Center <strong id="chart-freq-center">0.25 GHz</strong></span><span>Bandwidth <strong>500 MHz</strong></span><span>Dwell <strong id="chart-freq-dwell">50.0 ms</strong></span></div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- Panel 5: Band Visit Behaviour (Col 3, Row 2) -->
+    <div class="band-panel dashboard-panel col-span-1 row-span-1 h-full">
+      <div class="panel-header"><i data-lucide="info" class="w-3.5 h-3.5"></i> Band Visit & Revisit Behaviour</div>
+      <div class="flex-1 p-2 flex flex-col gap-4">
+        <!-- Bar Chart -->
+        <div class="flex-1 flex flex-col relative ml-5 mr-1 mb-2">
+          <span class="text-[9px] text-slate-400 text-center mb-1 font-medium">Band Visit Count (Last 30 s)</span>
+          <div class="absolute -left-5 top-[18px] bottom-0 flex flex-col justify-between text-[8px] text-slate-500 py-0.5">
+            <span>60</span><span>40</span><span>20</span><span>0</span>
+          </div>
+          <div class="absolute -left-7 top-[60%] -translate-y-1/2 -rotate-90 text-[7px] text-slate-500 text-center w-20">Band Visits</div>
+          <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[8px] text-slate-500">
+            <span>0</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span><span>35</span>
+          </div>
+          <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[7px] text-slate-500 whitespace-nowrap">Band Index</div>
+          <div class="flex-1 relative border-l border-b border-[#1E2D4A] mt-4 overflow-hidden"><canvas id="bar-canvas-1" class="w-full h-full absolute inset-0"></canvas></div>
+        </div>
+        
+        <!-- Histogram -->
+        <div class="flex-1 flex flex-col relative ml-5 mr-1 mb-4 mt-2">
+          <span class="text-[9px] text-slate-400 text-center mb-1 font-medium">Revisit Interval Distribution</span>
+          <div class="absolute -left-5 top-[18px] bottom-0 flex flex-col justify-between text-[8px] text-slate-500 py-0.5">
+            <span>40</span><span>20</span><span>0</span>
+          </div>
+          <div class="absolute -left-7 top-[60%] -translate-y-1/2 -rotate-90 text-[7px] text-slate-500 w-20 text-center">Frequency (Count)</div>
+          <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[8px] text-slate-500">
+            <span>10<sup>0</sup></span><span>10<sup>1</sup></span><span>10<sup>2</sup></span><span>10<sup>3</sup></span>
+          </div>
+          <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[7px] text-slate-500 whitespace-nowrap">Revisit Interval (slots)</div>
+          <div class="flex-1 relative border-l border-b border-[#1E2D4A] mt-4 overflow-hidden"><canvas id="bar-canvas-2" class="w-full h-full absolute inset-0"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-dashboard-row">
+    <!-- Panel Bottom Left: Mission Performance -->
+    <div class="reference-performance dashboard-panel flex flex-col">
+      <div class="panel-header flex justify-between items-center pr-2">
+        <span class="text-slate-400 font-semibold tracking-wide uppercase">MISSION PERFORMANCE &mdash; CUMULATIVE</span>
+        <select id="perf-selector" class="bg-[#1E2D4A] border border-cyan-800/50 text-slate-200 rounded-[3px] text-[10px] px-2 py-0.5 outline-none cursor-pointer">
+          <option value="oir">OIR</option>
+          <option value="pd">Pd</option>
+          <option value="coverage">Coverage</option>
+          <option value="reward">Reward</option>
+        </select>
+      </div>
+      <div class="flex-1 relative p-2 ml-4 mb-2">
+        <div id="perf-y-label" class="absolute left-2 top-2 text-[8px] text-slate-500 -rotate-90 origin-left translate-y-20 whitespace-nowrap">OIR</div>
+        <div class="absolute inset-0 ml-4 mb-2 border-l border-b border-[#1E2D4A] overflow-hidden">
+          <div class="absolute -bottom-3 left-0 text-[8px] text-slate-500 bg-[#0A1220] px-1 z-10">0 s</div>
+          <div class="absolute -bottom-3 right-0 text-[8px] text-slate-500 bg-[#0A1220] px-1 z-10">30 s</div>
+          <canvas id="perf-canvas" class="w-full h-full absolute inset-0" role="img" aria-label="Cumulative mission performance"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel Emitters (Target Ledger with Dropdown Filter & Scroll) -->
+    <div class="reference-ledger dashboard-panel flex flex-col">
+      <div class="panel-header flex justify-between items-center pr-2">
+        <div class="flex items-center gap-1.5"><i data-lucide="info" class="w-3.5 h-3.5"></i> <span>TARGET LEDGER</span></div>
+        <div class="flex items-center gap-1">
+          <label for="emitter-ledger-filter" class="text-[8px] text-slate-400 font-normal uppercase">Filter:</label>
+          <select id="emitter-ledger-filter" class="bg-[#1E2D4A] border border-cyan-800/60 text-slate-200 rounded-[3px] text-[9px] px-1.5 py-0.5 outline-none cursor-pointer">
+            <option value="ALL">All Emitters</option>
+          </select>
+        </div>
+      </div>
+      <div class="reference-ledger-scroll">
+        <table class="w-full text-left text-[9px] border-collapse">
+          <thead class="text-slate-400 border-b border-[#1E2D4A] bg-[#0D1829] sticky top-0 z-10">
+            <tr>
+              <th class="py-1 px-2 font-normal">Emitter ID</th>
+              <th class="py-1 px-2 font-normal text-right">Band</th>
+              <th class="py-1 px-2 font-normal text-right">ToA (s)</th>
+              <th class="py-1 px-2 font-normal text-right">Freq (MHz)</th>
+              <th class="py-1 px-2 font-normal text-right">Amp (dB)</th>
+              <th class="py-1 px-2 font-normal text-center">Interception Status</th>
+            </tr>
+          </thead>
+          <tbody id="emitter-table-body" class="text-slate-200">
+            <tr>
+              <td colspan="6" class="text-center text-slate-500 py-3 text-[10px]">Awaiting TSRD ground truth pulses...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Panel 6: Why this Band? (Col 3, Row 3) -->
+    <div class="reference-why dashboard-panel">
+      <div class="panel-header"><i data-lucide="info" class="w-3.5 h-3.5"></i> Scheduler Decision (Classical UCB1)</div>
+      <div class="p-3 flex flex-col gap-2.5 text-[10px]">
+        <div class="decision-metrics">
+          <div class="decision-metric"><span class="text-slate-400">Selected Band</span><span id="dec-selected-band" class="text-slate-100 font-medium">0</span></div>
+          <div class="decision-metric"><span class="text-slate-400">UCB Score</span><span id="dec-ucb-score" class="text-slate-100 font-medium">—</span></div>
+          <div class="decision-metric"><span class="text-slate-400">Mean Reward μ̂</span><span id="dec-mean-reward" class="text-slate-100 font-medium">—</span></div>
+          <div class="decision-metric"><span class="text-slate-400">Exploration Bonus</span><span id="dec-bonus" class="text-slate-100 font-medium">—</span></div>
+          <div class="decision-metric"><span class="text-slate-400">Band Pulls N</span><span id="dec-pulls" class="text-slate-100 font-medium">0 slots</span></div>
+          <div class="decision-metric"><span class="text-slate-400">Total Dwells t</span><span id="dec-total-dwells" class="text-slate-100 font-medium">0 slots</span></div>
+          <div class="decision-metric"><span class="text-slate-400">Cumulative Reward</span><span id="dec-cum-reward" class="text-slate-100 font-medium">0.000</span></div>
+        </div>
+        <div class="h-px bg-[#1E2D4A] my-0.5"></div>
+        <div class="flex flex-col gap-1">
+          <span class="text-cyan-500 font-medium text-[11px]">Decision Reason</span>
+          <span id="dec-reason-text" class="text-slate-300 leading-snug text-[10px]">Classical UCB1 policy ready.</span>
+          <span id="dec-selected-summary" class="text-slate-100 font-semibold mt-0.5">→ Band 0 (0.25 GHz) selected.</span>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- SCROLL DOWN SECTION -->
+    <div class="extended-analytics col-span-3 grid grid-cols-12 gap-2 mt-4 pt-4 border-t border-[#1E2D4A]">
+      
+      <!-- LEFT COLUMN -->
+      <div class="extended-left col-span-5 gap-2">
+        <!-- Panel: Algorithm Comparison -->
+        <div class="dashboard-panel flex-1">
+          <div class="panel-header"><i data-lucide="cpu" class="w-3.5 h-3.5"></i> ALGORITHM BENCHMARK (STATIC REFERENCE)</div>
+          <div class="flex-1 overflow-x-auto p-2">
+            <table class="algorithm-table w-full text-left text-[9px] border-collapse">
+              <thead class="text-slate-400 border-b border-[#1E2D4A]">
+                <tr>
+                  <th class="py-1 px-1.5 font-normal">Algorithm</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Pd ↑</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Pfa ↓</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Intercept Rate ↑</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Mean Latency (s) ↓</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Coverage ↑</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Switches ↓</th>
+                  <th class="py-1 px-1.5 font-normal text-right">Total Reward ↑</th>
+                </tr>
+              </thead>
+              <tbody class="text-slate-200">
+                <tr class="border-b border-[#1E2D4A]/50">
+                  <td class="py-1 px-1.5">PPO</td><td class="py-1 px-1.5 text-right">0.86</td><td class="py-1 px-1.5 text-right">0.04</td><td class="py-1 px-1.5 text-right">0.73</td><td class="py-1 px-1.5 text-right">2.3</td><td class="py-1 px-1.5 text-right">0.62</td><td class="py-1 px-1.5 text-right">215</td><td class="py-1 px-1.5 text-right">1.00</td>
+                </tr>
+                <tr class="border-b border-[#1E2D4A]/50">
+                  <td class="py-1 px-1.5">SAC</td><td class="py-1 px-1.5 text-right">0.82</td><td class="py-1 px-1.5 text-right">0.06</td><td class="py-1 px-1.5 text-right">0.69</td><td class="py-1 px-1.5 text-right">2.8</td><td class="py-1 px-1.5 text-right">0.59</td><td class="py-1 px-1.5 text-right">238</td><td class="py-1 px-1.5 text-right">0.93</td>
+                </tr>
+                <tr class="border-b border-[#1E2D4A]/50">
+                  <td class="py-1 px-1.5">DQN</td><td class="py-1 px-1.5 text-right">0.79</td><td class="py-1 px-1.5 text-right">0.08</td><td class="py-1 px-1.5 text-right">0.64</td><td class="py-1 px-1.5 text-right">3.1</td><td class="py-1 px-1.5 text-right">0.55</td><td class="py-1 px-1.5 text-right">252</td><td class="py-1 px-1.5 text-right">0.87</td>
+                </tr>
+                <tr class="bg-cyan-950/40 border-b border-cyan-900/50 text-cyan-400 font-medium">
+                  <td class="py-1 px-1.5">Classical UCB1 (Active)</td><td class="py-1 px-1.5 text-right">0.71</td><td class="py-1 px-1.5 text-right">0.11</td><td class="py-1 px-1.5 text-right">0.58</td><td class="py-1 px-1.5 text-right">4.2</td><td class="py-1 px-1.5 text-right">0.48</td><td class="py-1 px-1.5 text-right">296</td><td class="py-1 px-1.5 text-right">0.76</td>
+                </tr>
+                <tr class="border-b border-[#1E2D4A]/50">
+                  <td class="py-1 px-1.5">Round Robin</td><td class="py-1 px-1.5 text-right">0.65</td><td class="py-1 px-1.5 text-right">0.14</td><td class="py-1 px-1.5 text-right">0.51</td><td class="py-1 px-1.5 text-right">5.6</td><td class="py-1 px-1.5 text-right">0.43</td><td class="py-1 px-1.5 text-right">310</td><td class="py-1 px-1.5 text-right">0.62</td>
+                </tr>
+                <tr class="border-b border-[#1E2D4A]/50">
+                  <td class="py-1 px-1.5">Random</td><td class="py-1 px-1.5 text-right">0.58</td><td class="py-1 px-1.5 text-right">0.18</td><td class="py-1 px-1.5 text-right">0.44</td><td class="py-1 px-1.5 text-right">6.8</td><td class="py-1 px-1.5 text-right">0.37</td><td class="py-1 px-1.5 text-right">328</td><td class="py-1 px-1.5 text-right">0.55</td>
+                </tr>
+                <tr>
+                  <td class="py-1 px-1.5 text-slate-400">Stare (Baseline)</td><td class="py-1 px-1.5 text-right text-slate-400">0.49</td><td class="py-1 px-1.5 text-right text-slate-400">0.12</td><td class="py-1 px-1.5 text-right text-slate-400">0.41</td><td class="py-1 px-1.5 text-right text-slate-400">7.4</td><td class="py-1 px-1.5 text-right text-slate-400">0.21</td><td class="py-1 px-1.5 text-right text-slate-400">85</td><td class="py-1 px-1.5 text-right text-slate-400">0.48</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Panel: Scan vs Stare Heatmap -->
+        <div class="analytics-panel heatmap-panel dashboard-panel flex-1">
+          <div class="panel-header"><i data-lucide="layers" class="w-3.5 h-3.5"></i> Scan vs Stare Heatmap
+            <span class="ml-2 text-slate-400 normal-case text-[9px] font-normal">Same RF scene · different listening strategy</span>
+          </div>
+          <div class="heatmap-content flex-1 flex min-h-[160px]">
+            <div class="heatmap-mode flex-1 flex flex-col items-center">
+              <div class="heatmap-mode-title"><span>SCAN MODE</span><small>Wide search · 0–18 GHz</small></div>
+              <div class="heatmap-plot flex-1 w-full border chart-bg relative ml-4 mb-7">
+                 <div class="absolute -left-5 top-0 bottom-0 flex flex-col justify-between text-[7px] text-slate-500 py-0.5"><span>18</span><span>16</span><span>12</span><span>8</span><span>4</span><span>0</span></div>
+                 <div class="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-[7px] text-slate-500">Frequency (GHz)</div>
+                 <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[7px] text-slate-500"><span>0</span><span>4</span><span>8</span><span>12</span></div>
+                 <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[7px] text-slate-500">Time (s)</div>
+                 <canvas id="scan-heatmap" class="w-full h-full absolute inset-0"></canvas>
+                 <div class="chart-hover-tip"></div>
+              </div>
+            </div>
+            <div class="heatmap-mode flex-1 flex flex-col items-center">
+              <div class="heatmap-mode-title"><span>STARE MODE</span><small>Three fixed bands</small></div>
+              <div class="heatmap-plot flex-1 w-full border chart-bg relative ml-4 mb-7">
+                 <div class="absolute -left-5 top-0 bottom-0 flex flex-col justify-between text-[7px] text-slate-500 py-0.5"><span>18</span><span>16</span><span>12</span><span>8</span><span>4</span><span>0</span></div>
+                 <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[7px] text-slate-500"><span>0</span><span>4</span><span>8</span><span>12</span></div>
+                 <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[7px] text-slate-500">Time (s)</div>
+                 <canvas id="stare-heatmap" class="w-full h-full absolute inset-0"></canvas>
+                 <div class="chart-hover-tip"></div>
+              </div>
+            </div>
+            <!-- Heatmap Legend -->
+            <div class="heatmap-legend shrink-0 flex flex-col items-center justify-center mt-3 mb-7">
+              <span class="text-[7px] text-slate-400 mb-1 text-center leading-tight">SIGNAL<br>POWER</span>
+              <span class="text-[7px] text-slate-300">High</span>
+              <div class="w-2.5 flex-1 my-0.5 rounded-[1px]" style="background:linear-gradient(to bottom,#ec2f39,#ff7f24,#f5e14b,#15dad4,#0a9aed,#1239ba,#03071f)"></div>
+              <span class="text-[7px] text-slate-300">Low</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="extended-right col-span-7 gap-2">
+        <div class="extended-right-top grid grid-cols-12 gap-2">
+          <!-- Panel: Mission Health -->
+          <div class="dashboard-panel col-span-3 h-full">
+            <div class="panel-header"><i data-lucide="shield-check" class="w-3.5 h-3.5"></i> MISSION HEALTH</div>
+            <div class="health-body">
+              <div class="health-row"><span>Receiver</span><span class="flex items-center gap-1.5 text-green-400"><div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div> Nominal</span></div>
+              <div class="health-row"><span>Scheduler</span><span id="scheduler-health-label" class="flex items-center gap-1.5 text-green-400"><div id="scheduler-health-dot" class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div><span id="scheduler-health-text">Running</span></span></div>
+              <div class="health-row"><span>Data Stream</span><span class="flex items-center gap-1.5 text-green-400"><div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div> Live</span></div>
+              <div class="health-row"><span>PDW Pipeline</span><span class="flex items-center gap-1.5 text-green-400"><div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div> Active</span></div>
+              <div class="health-row"><span>Environment</span><span class="flex items-center gap-1.5 text-green-400"><div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div> Loaded</span></div>
+              <div class="health-row"><span>Evaluator</span><span class="flex items-center gap-1.5 text-green-400"><div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#10b981]"></div> Active</span></div>
+              <div class="health-summary"><strong>6 / 6</strong><span>SYSTEM CHECKS NOMINAL</span></div>
+            </div>
+          </div>
+          
+          <!-- Panel: Open Loop vs Closed Loop -->
+          <div class="analytics-panel loop-panel dashboard-panel col-span-9 h-full">
+            <div class="panel-header flex justify-between"><div class="flex items-center gap-1.5"><i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i> Open Loop vs Closed Loop</div><span class="text-[9px] text-slate-400 font-normal normal-case">REFERENCE / STATIC EVALUATION · 30 s horizon</span></div>
+            <div class="loop-panel-body flex-1 flex">
+              
+              <!-- Open Loop -->
+              <div class="comparison-chart flex-1 flex flex-col border border-[#1E2D4A] rounded overflow-hidden">
+                <div class="loop-chart-heading border-b border-[#1E2D4A] text-amber-400"><span>OPEN LOOP <small>Round Robin</small></span><span class="text-[9px] text-amber-400 font-normal">REFERENCE / STATIC EVALUATION</span></div>
+                <div class="comparison-plot flex-1 chart-bg relative ml-6 mb-3 mt-1 mr-1">
+                   <div class="absolute -left-5 top-0 bottom-0 flex flex-col justify-between text-[7px] text-slate-500 py-0.5"><span>35</span><span>25</span><span>15</span><span>5</span></div>
+                   <div class="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-[7px] text-slate-500">Frequency Band</div>
+                   <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[7px] text-slate-500"><span>0</span><span>10</span><span>20</span><span>30</span></div>
+                   <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[7px] text-slate-500">Time (seconds)</div>
+                   <canvas id="openloop-chart" class="w-full h-full absolute inset-0"></canvas><div class="chart-hover-tip"></div>
+                </div>
+                <div class="loop-stats grid grid-cols-3 text-center text-[8px]">
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">OIR</div><div class="text-orange-400 font-bold">3.81%</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">First Intercept</div><div class="text-slate-200 font-bold">1.42 s</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Coverage</div><div class="text-slate-200 font-bold">100%</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Pd</div><div class="text-slate-200 font-bold">82.14%</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Pfa</div><div class="text-slate-200 font-bold">5.21%</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Reward</div><div class="text-slate-200 font-bold">0.512</div></div>
+                </div>
+              </div>
+
+              <!-- Closed Loop -->
+              <div class="comparison-chart flex-1 flex flex-col border border-[#1E2D4A] rounded overflow-hidden">
+                <div class="loop-chart-heading border-b border-[#1E2D4A] text-cyan-400"><span>CLOSED LOOP <small>UCB1</small></span><span class="text-[9px] text-emerald-400 font-normal">Classical UCB1</span></div>
+                <div class="comparison-plot flex-1 chart-bg relative ml-6 mb-3 mt-1 mr-1">
+                   <div class="absolute -left-5 top-0 bottom-0 flex flex-col justify-between text-[7px] text-slate-500 py-0.5"><span>35</span><span>25</span><span>15</span><span>5</span></div>
+                   <div class="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-[7px] text-slate-500">Frequency Band</div>
+                   <div class="absolute -bottom-3 left-0 right-0 flex justify-between text-[7px] text-slate-500"><span>0</span><span>10</span><span>20</span><span>30</span></div>
+                   <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[7px] text-slate-500">Time (seconds)</div>
+                   <canvas id="closedloop-chart" class="w-full h-full absolute inset-0"></canvas><div class="chart-hover-tip"></div>
+                </div>
+                <div class="loop-stats grid grid-cols-3 text-center text-[8px]">
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">OIR</div><div id="closedloop-oir" class="text-green-400 font-bold">—</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">First Intercept</div><div id="closedloop-first-intercept" class="text-slate-200 font-bold">—</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Coverage</div><div id="closedloop-coverage" class="text-slate-200 font-bold">—</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Pd</div><div id="closedloop-pd" class="text-slate-200 font-bold">—</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Pfa</div><div id="closedloop-pfa" class="text-slate-200 font-bold">—</div></div>
+                  <div class="bg-[var(--color-panel-bg)] py-0.5"><div class="text-slate-400">Reward</div><div id="closedloop-reward" class="text-slate-200 font-bold">—</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 7: Interception Event Timeline -->
+        <div class="analytics-panel timeline-panel dashboard-panel flex-1 relative min-h-[140px]">
+          <div class="panel-header bg-[#0D1829] border-b border-[#1E2D4A] flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <i data-lucide="clock" class="w-3.5 h-3.5 text-cyan-400"></i>
+              <span class="text-cyan-400 font-semibold text-[11px] uppercase">INTERCEPTION EVENT TIMELINE (LAST 30 s)</span>
+            </div>
+            <div class="timeline-legend flex items-center gap-4 text-[10px] font-normal normal-case">
+              <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 bg-[#38bdf8] rounded-[1px]"></div><span>Dwell</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 bg-[#10b981] rounded-[1px]"></div><span class="text-slate-200">Hit</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 bg-[#ef4444] rounded-[1px]"></div><span class="text-slate-200">Miss</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 bg-[#eab308] rounded-[1px]"></div><span class="text-slate-200">False Alarm</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 bg-[#5aa9ff] rounded-[1px]"></div><span class="text-slate-200">Retune</span></div>
+            </div>
+          </div>
+          <div class="timeline-summary" aria-label="Interception event summary">
+            <div><span>Dwells</span><strong id="timeline-dwells">25</strong></div>
+            <div class="metric-hit"><span>Hits</span><strong id="timeline-hits">18</strong></div>
+            <div class="metric-miss"><span>Misses</span><strong id="timeline-misses">4</strong></div>
+            <div class="metric-false"><span>False alarms</span><strong id="timeline-false-alarms">3</strong></div>
+            <div><span>Hit rate</span><strong id="timeline-hit-rate">72%</strong></div>
+            <div class="metric-retune"><span>Retunes</span><strong id="timeline-retunes">12</strong></div>
+          </div>
+          <div class="flex-1 p-3 flex flex-col relative chart-bg">
+            <div class="timeline-plot-title"><span>EVENT CORRELATION</span><span class="timeline-live">LIVE <span id="timeline-live-time">0.0 s</span> · MISSION TIME (s)</span></div>
+            <div class="timeline-lanes flex h-full relative border-l border-b border-[#1E2D4A]">
+              <div class="timeline-labels absolute -left-32 top-0 bottom-6 flex flex-col justify-around text-[10px] w-28 text-right pr-4 font-medium">
+                <span>Receiver dwells</span>
+                <span>Detection outcome</span>
+                <span>Retune markers</span>
+              </div>
+              <div class="absolute -bottom-5 left-0 right-0 flex justify-between text-[9px] text-slate-400 px-1">
+                <span>0</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span>
+              </div>
+              <div class="absolute inset-0 flex justify-between pointer-events-none pb-6 z-0">
+                <div class="w-px h-full bg-[#1E2D4A]/30"></div><div class="w-px h-full bg-[#1E2D4A]/30"></div><div class="w-px h-full bg-[#1E2D4A]/30"></div>
+                <div class="w-px h-full bg-[#1E2D4A]/30"></div><div class="w-px h-full bg-[#1E2D4A]/30"></div><div class="w-px h-full bg-[#1E2D4A]/30"></div><div class="w-px h-full bg-[#1E2D4A]/30"></div>
+              </div>
+              <div class="timeline-plot absolute inset-0 pb-6 overflow-hidden">
+                <canvas id="timeline-canvas" class="w-full h-full absolute inset-0 z-10"></canvas>
+                <div class="chart-hover-tip"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTTOM FULL WIDTH -->
+    <div class="analytics-panel metrics-catalog col-span-12 dashboard-panel mt-2">
+      <div class="panel-header flex justify-between">
+        <div class="flex items-center gap-1.5"><i data-lucide="bar-chart" class="w-3.5 h-3.5"></i> 31 TSRD METRICS <span class="ml-2 text-[9px] font-normal normal-case">Detection, interception, timing, coverage and scheduler performance</span></div>
+        <select id="metrics-filter" aria-label="Filter metric groups" class="text-[10px] px-2 py-1 rounded outline-none">
+          <option value="all" selected>All metrics</option>
+          <option value="detection">Detection quality</option>
+          <option value="interception">Interception &amp; emitters</option>
+          <option value="timing">Intercept timing</option>
+          <option value="coverage">Coverage &amp; revisit</option>
+          <option value="scheduler">Scheduler efficiency</option>
+        </select>
+      </div>
+      <div class="metrics-grid metric-tables" data-mode="all">
+        <section class="metric-group" data-group="detection" aria-labelledby="metrics-detection-title">
+          <h3 id="metrics-detection-title">01 / Detection quality <span>5 metrics</span></h3>
+          <table aria-label="Detection quality metrics">
+            <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Probability of Detection (Pd)</th><td id="m31-pd">—</td></tr>
+              <tr><th scope="row">Probability of False Alarm (Pfa)</th><td id="m31-pfa">—</td></tr>
+              <tr><th scope="row">Sensitivity</th><td id="m31-sensitivity">—</td></tr>
+              <tr><th scope="row">Percentage of Correct Predictions</th><td id="m31-correct-pred">—</td></tr>
+              <tr><th scope="row">Brier Score</th><td id="m31-brier">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="metric-group" data-group="interception" aria-labelledby="metrics-interception-title">
+          <h3 id="metrics-interception-title">02 / Interception &amp; emitters <span>9 metrics</span></h3>
+          <table aria-label="Interception and emitter metrics">
+            <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Average Intercept Rate</th><td id="m31-avg-intercept-rate">—</td></tr>
+              <tr><th scope="row">Average Reward / Cost Function</th><td id="m31-avg-reward">—</td></tr>
+              <tr><th scope="row">Emitters Considered</th><td id="m31-emitters-considered">—</td></tr>
+              <tr><th scope="row">Emitters Intercepted</th><td id="m31-emitters-intercepted">—</td></tr>
+              <tr><th scope="row">Emitter Interception Ratio</th><td id="m31-emitter-intercept-ratio">—</td></tr>
+              <tr><th scope="row">Censored Emitter Count</th><td id="m31-censored-emitters">—</td></tr>
+              <tr><th scope="row">Post-Discovery Capture Efficiency</th><td id="m31-post-discovery-efficiency">—</td></tr>
+              <tr><th scope="row">Post-Discovery Interception Ratio</th><td id="m31-post-discovery-ratio">—</td></tr>
+              <tr><th scope="row">Fraction of Slots with Hits</th><td id="m31-fraction-slots-hits">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="metric-group" data-group="timing" aria-labelledby="metrics-timing-title">
+          <h3 id="metrics-timing-title">03 / Intercept timing <span>5 metrics</span></h3>
+          <table aria-label="Intercept timing metrics">
+            <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Average Intercept Time Error</th><td id="m31-avg-intercept-time-err">—</td></tr>
+              <tr><th scope="row">Mean First Intercept Time</th><td id="m31-mean-first-intercept">—</td></tr>
+              <tr><th scope="row">Median First Intercept Time</th><td id="m31-median-first-intercept">—</td></tr>
+              <tr><th scope="row">Mean Intercept Latency</th><td id="m31-mean-intercept-latency">—</td></tr>
+              <tr><th scope="row">P90 First Intercept Time</th><td id="m31-p90-first-intercept">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="metric-group" data-group="coverage" aria-labelledby="metrics-coverage-title">
+          <h3 id="metrics-coverage-title">04 / Coverage &amp; revisit <span>6 metrics</span></h3>
+          <table aria-label="Coverage and revisit metrics">
+            <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Mean Revisit Interval</th><td id="m31-mean-revisit">—</td></tr>
+              <tr><th scope="row">P95 Revisit Interval</th><td id="m31-p95-revisit">—</td></tr>
+              <tr><th scope="row">Average Coverage Fraction</th><td id="m31-avg-coverage">—</td></tr>
+              <tr><th scope="row">Mean Rolling Coverage</th><td id="m31-mean-rolling-cov">—</td></tr>
+              <tr><th scope="row">Worst-Case Band Staleness</th><td id="m31-worst-staleness">—</td></tr>
+              <tr><th scope="row">Mean Band Staleness</th><td id="m31-mean-staleness">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="metric-group" data-group="scheduler" aria-labelledby="metrics-scheduler-title">
+          <h3 id="metrics-scheduler-title">05 / Scheduler efficiency <span>6 metrics</span></h3>
+          <table aria-label="Scheduler efficiency metrics">
+            <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Band Switch Count</th><td id="m31-band-switch-count">—</td></tr>
+              <tr><th scope="row">Band Switch Rate</th><td id="m31-band-switch-rate">—</td></tr>
+              <tr><th scope="row">Retune Overhead</th><td id="m31-retune-overhead">—</td></tr>
+              <tr><th scope="row">Dead Time Fraction</th><td id="m31-dead-time-fraction">—</td></tr>
+              <tr><th scope="row">Exploration Rate</th><td id="m31-exploration-rate">—</td></tr>
+              <tr><th scope="row">Action Entropy</th><td id="m31-action-entropy">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+      <p class="metrics-note">Values use authoritative TSRD telemetry from database/test_stare. Scheduler: Classical UCB1. — indicates a metric not provided by telemetry.</p>
+    </div>
+    </div>
+  </main>
+
+  <script src="/lucide.min.js"></script>
+  <script src="/tsrd_dashboard.js?v=fast_local"></script>
+</body>
+</html>

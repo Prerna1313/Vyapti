@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{width:100vw;height:100vh;overflow:hidden;background:#0a0a0c;font-family:'Inter',sans-serif}
+
+    /* ── SWITCHER BAR ─────────────────────────────── */
+    .page-switcher-bar{position:fixed;top:0;left:0;z-index:10000;display:flex;align-items:center;height:46px;padding:0 14px;gap:10px;background:rgba(8,9,12,0.97);border-bottom:1px solid #1e2028;border-right:1px solid #1e2028;border-radius:0 0 12px 0;backdrop-filter:blur(14px);box-shadow:0 4px 28px rgba(0,0,0,.75),0 0 0 1px rgba(56,189,248,.07);pointer-events:all;user-select:none}
+
+    /* Logo */
+    .ps-brand{display:flex;align-items:center;gap:8px}
+    .ps-logo-img{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#fff;border:1.5px solid rgba(56,189,248,0.35);box-shadow:0 0 8px rgba(56,189,248,0.25),0 2px 8px rgba(0,0,0,0.5);flex-shrink:0;transition:box-shadow 0.2s}
+    .ps-logo-img:hover{box-shadow:0 0 14px rgba(56,189,248,0.55),0 2px 12px rgba(0,0,0,0.6)}
+    .ps-brand-name{font-family:'Chakra Petch',sans-serif;font-size:13px;font-weight:700;letter-spacing:.1em;color:#38bdf8;text-shadow:0 0 12px rgba(56,189,248,.45);white-space:nowrap}
+    .ps-divider{width:1px;height:26px;background:#22232c;flex-shrink:0}
+
+    /* ── CUSTOM DROPDOWN ──────────────────────────── */
+    .ps-dropdown{position:relative;flex-shrink:0}
+
+    .ps-dropdown-btn{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 9px;background:rgba(255,255,255,.04);border:1px solid #2a2b38;border-radius:8px;cursor:pointer;outline:none;transition:all .18s ease;min-width:170px}
+    .ps-dropdown-btn:hover{background:rgba(56,189,248,.06);border-color:rgba(56,189,248,.3)}
+    .ps-dropdown-btn.open{background:rgba(56,189,248,.08);border-color:rgba(56,189,248,.35);box-shadow:0 0 14px rgba(56,189,248,.1)}
+
+    .ps-dd-icon{width:14px;height:14px;color:#38bdf8;flex-shrink:0}
+    .ps-dd-labels{display:flex;flex-direction:column;align-items:flex-start;flex:1;min-width:0}
+    .ps-dd-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:#e2e8f0;line-height:1}
+    .ps-dd-sub{font-size:9px;font-weight:400;letter-spacing:.05em;color:#38bdf8;display:block;margin-top:2px;line-height:1}
+    .ps-dd-chevron{width:12px;height:12px;color:#52525b;flex-shrink:0;transition:transform .2s ease}
+    .ps-dropdown-btn.open .ps-dd-chevron{transform:rotate(180deg);color:#38bdf8}
+
+    /* Dropdown Menu */
+    .ps-dropdown-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:100%;background:rgba(12,13,16,0.98);border:1px solid #2a2b38;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.8),0 0 0 1px rgba(56,189,248,.06);overflow:hidden;opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity .18s ease,transform .18s ease,visibility .18s ease;z-index:100}
+    .ps-dropdown-menu.open{opacity:1;visibility:visible;transform:translateY(0)}
+
+    .ps-menu-item{display:flex;align-items:center;gap:9px;padding:8px 11px;cursor:pointer;transition:background .14s ease;border-bottom:1px solid #1a1b22}
+    .ps-menu-item:last-child{border-bottom:none}
+    .ps-menu-item:hover{background:rgba(56,189,248,.07)}
+    .ps-menu-item.active{background:rgba(56,189,248,.1)}
+
+    .ps-item-icon{width:14px;height:14px;color:#52525b;flex-shrink:0;transition:color .14s}
+    .ps-menu-item:hover .ps-item-icon,.ps-menu-item.active .ps-item-icon{color:#38bdf8}
+    .ps-item-labels{display:flex;flex-direction:column}
+    .ps-item-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:#a1a1aa;line-height:1;transition:color .14s}
+    .ps-item-sub{font-size:9px;font-weight:400;letter-spacing:.05em;color:#3f4050;display:block;margin-top:2px;line-height:1;transition:color .14s}
+    .ps-menu-item:hover .ps-item-label,.ps-menu-item.active .ps-item-label{color:#e2e8f0}
+    .ps-menu-item:hover .ps-item-sub,.ps-menu-item.active .ps-item-sub{color:#38bdf8}
+    .ps-item-check{width:13px;height:13px;color:#38bdf8;margin-left:auto;flex-shrink:0;opacity:0;transition:opacity .14s}
+    .ps-menu-item.active .ps-item-check{opacity:1}
+
+    /* ── IFRAMES ──────────────────────────────────── */
+    .page-iframe-wrap{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;transition:opacity .25s ease,visibility .25s ease}
+    .page-iframe-wrap--hidden{opacity:0;visibility:hidden;pointer-events:none}
+    .page-iframe{width:100%;height:100%;border:none;display:block}
+    @keyframes pageSlideIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .page-iframe-wrap:not(.page-iframe-wrap--hidden){animation:pageSlideIn .22s ease forwards}
+  
+
+

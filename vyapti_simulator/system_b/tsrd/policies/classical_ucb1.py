@@ -21,13 +21,16 @@ from ..algorithm_interface import PublicTransition
 class ClassicalUCB1:
     """UCB1 with deterministic first-visit and tie-breaking order."""
 
-    def __init__(self, bands: int, seed: int, *, reward_bounds=(-0.01, 1.0),
+    def __init__(self, bands: Optional[int] = None, seed: int = 42, *,
+                 actions: Optional[int] = None, reward_bounds=(-0.01, 1.0),
                  exploration_coefficient: float = math.sqrt(2.0)):
-        if type(bands) is not int or bands <= 0:
-            raise ValueError("bands must be a positive integer")
+        num_arms = actions if actions is not None else bands
+        if type(num_arms) is not int or num_arms <= 0:
+            raise ValueError("bands/actions must be a positive integer")
         if len(reward_bounds) != 2:
             raise ValueError("reward_bounds must contain [minimum, maximum]")
-        self.bands = bands
+        self.bands = num_arms
+        self.actions = num_arms
         self.reward_low, self.reward_high = map(float, reward_bounds)
         if (not math.isfinite(self.reward_low) or not math.isfinite(self.reward_high)
                 or self.reward_low >= self.reward_high):
@@ -71,6 +74,40 @@ class ClassicalUCB1:
         self.reward_sums[action] += scaled
         self.raw_reward_sums[action] += raw
         self.total_pulls += 1
+
+    def update(self, action: int, reward: float) -> None:
+        """Direct update method for action and scalar reward."""
+        transition = PublicTransition(
+            state=None,
+            action=action,
+            reward=reward,
+            next_state=None,
+            terminated=False,
+        )
+        self.observe(transition, training=False)
+
+    def visit_count(self, action: int) -> int:
+        """Return number of times action has been pulled."""
+        return int(self.counts[action])
+
+    def total_reward(self, action: int) -> float:
+        """Return cumulative raw reward for action."""
+        return float(self.raw_reward_sums[action])
+
+    def mean_reward(self, action: int) -> float:
+        """Return empirical mean raw reward for action."""
+        cnt = self.counts[action]
+        return float(self.raw_reward_sums[action] / cnt) if cnt > 0 else 0.0
+
+    def ucb_score(self, action: int) -> float:
+        """Return current UCB score (index) for action."""
+        cnt = self.counts[action]
+        if cnt == 0:
+            return float("inf")
+        t = self.total_pulls + 1
+        scaled_mean = float(self.reward_sums[action] / cnt)
+        bonus = float(self.c * math.sqrt(math.log(float(t)) / cnt))
+        return scaled_mean + bonus
 
     def end_episode(self, *, training: bool) -> dict:
         means = np.divide(self.reward_sums, self.counts,

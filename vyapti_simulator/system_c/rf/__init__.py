@@ -47,6 +47,7 @@ _EXPORTS = {
     'score_scheduler': ('.closed_loop', 'score_scheduler'),
     'run_comparison': ('.closed_loop', 'run_comparison'),
     'summarise_results': ('.closed_loop', 'summarise_results'),
+    'UCBPriorScheduler': ('.ucb_scheduler', 'UCBPriorScheduler'),
 }
 __all__ = list(_EXPORTS)
 

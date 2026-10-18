@@ -1,0 +1,11 @@
+{
+  "name": "rf-dashboard-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix rf-dashboard run dev",
+    "build": "npm --prefix rf-dashboard run build",
+    "start": "npm --prefix rf-dashboard run start",
+    "lint": "npm --prefix rf-dashboard run lint"
+  }
+}
