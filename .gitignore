@@ -67,11 +67,11 @@ build/
 *.log
 
 # --- Whitelist Frontend Configs & Assets ---
-!/rf-dashboard/**/package.json
-!/rf-dashboard/**/package-lock.json
-!/rf-dashboard/**/tsconfig.json
-!/rf-dashboard/**/postcss.config.js
-!/rf-dashboard/**/tailwind.config.ts
-!/rf-dashboard/**/*.png
-!/rf-dashboard/**/*.svg
-!/rf-dashboard/**/*.ico
+!/Frontend/**/package.json
+!/Frontend/**/package-lock.json
+!/Frontend/**/tsconfig.json
+!/Frontend/**/postcss.config.js
+!/Frontend/**/tailwind.config.ts
+!/Frontend/**/*.png
+!/Frontend/**/*.svg
+!/Frontend/**/*.ico
